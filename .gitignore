@@ -4,3 +4,5 @@
 .DS_Store
 *.py[cod]
 .claude/
+# Generated reports
+reports/*.pdf
