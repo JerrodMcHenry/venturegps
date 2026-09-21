@@ -86,10 +86,14 @@ def test_delete_with_a_predicate_is_also_blocked(evidence):
 
 # ---------------- TRUNCATE
 
-def test_direct_truncate_of_observation_is_blocked_by_the_append_only_trigger(evidence):
+def test_direct_truncate_of_observation_is_blocked_twice_over(evidence):
     db = evidence[0]
     before = snapshot(db)
-    _, message = refused(db, "TRUNCATE v2.observation", exc=IntegrityError)  # nothing references it: only the trigger stands in the way
+    # Since Increment 6, sightings reference observations: PostgreSQL's FK rule refuses a plain TRUNCATE first.
+    _, message = refused(db, "TRUNCATE v2.observation", exc=DBAPIError)
+    assert "referenced in a foreign key constraint" in message
+    # With CASCADE the FK rule steps aside and the append-only trigger is what stops it.
+    _, message = refused(db, "TRUNCATE v2.observation CASCADE", exc=IntegrityError)
     assert "is append-only: TRUNCATE is not permitted" in message
     assert snapshot(db) == before
 

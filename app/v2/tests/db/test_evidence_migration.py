@@ -10,8 +10,10 @@ from app.v2.domain.payload import MAX_INLINE_PAYLOAD_BYTES
 from app.v2.repositories import observations as obs_repo
 from app.v2.tests.db.evidence_helpers import make_observation, register_source, store_payload
 from app.v2.tests.db.harness import (
+    HEAD_REVISION,
     HEAD_V2_OBJECTS,
     REVISION_0002_V2_OBJECTS,
+    REVISION_0003_V2_OBJECTS,
     scalar,
     snapshot_non_v2,
     v2_objects,
@@ -36,7 +38,7 @@ def test_upgrade_0002_to_0003_creates_only_the_evidence_objects(clean_db, alembi
     command.upgrade(alembic_cfg(), "0003")
 
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0003"
-    assert v2_objects(clean_db) == HEAD_V2_OBJECTS  # no sighting, processing, candidate, company... tables
+    assert v2_objects(clean_db) == REVISION_0003_V2_OBJECTS  # no sighting, processing, candidate, company... tables
     assert functions(clean_db) == ["forbid_evidence_change", "observation_stamp", "source_guard"]
 
 
@@ -135,7 +137,7 @@ def test_downgrade_refuses_to_discard_evidence_and_rolls_back_completely(migrate
     digest = store_payload(migrated_db, b"evidence")
     with pytest.raises(Exception, match="contain evidence"):
         command.downgrade(alembic_cfg(), "0002")
-    assert scalar(migrated_db, "SELECT version_num FROM v2.alembic_version") == "0003"
+    assert scalar(migrated_db, "SELECT version_num FROM v2.alembic_version") == HEAD_REVISION
     assert scalar(migrated_db, "SELECT count(*) FROM v2.raw_payload WHERE content_hash = :h", h=digest) == 1  # a payload alone is evidence too
 
     obs_repo.store_observation(migrated_db, make_observation(digest))

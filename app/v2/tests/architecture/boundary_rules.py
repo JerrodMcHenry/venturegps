@@ -18,6 +18,10 @@ ZONES (derived from the module path, see boundary_scanner.zone_for_module):
   (excluded)     app.v2.tests -- tests legitimately import forbidden names
                  as sample data.
 
+NO-NETWORK PACKAGES: `no_network_packages` (ingestion, repositories) may not
+import any network client, socket, DNS or mail module. Ingestion receives bytes
+from a trusted collector boundary; fetching is a later, separate increment.
+
 PURE PACKAGES (a stricter layer inside the deterministic zone): every module
 under `pure_packages` (app.v2.domain, app.v2.observations) is pure
 computation: no database or SQL, no persistence/worker/config/migration
@@ -73,6 +77,15 @@ class BoundaryRules:
     layer_rules: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("app.v2.domain", ("app.v2.observations",)),
     )
+
+    # ---- no-network packages (see docstring)
+    no_network_packages: tuple[str, ...] = ("app.v2.ingestion", "app.v2.repositories")
+    network_forbidden_import_prefixes: tuple[str, ...] = (
+        "socket", "ssl", "http", "urllib.request", "urllib3", "requests", "httpx", "aiohttp",
+        "websockets", "ftplib", "smtplib", "telnetlib", "dns",
+    )
+    # The subset the RUNTIME probe checks (ubiquitous stdlib modules are loaded anyway).
+    network_forbidden_loaded_prefixes: tuple[str, ...] = ("requests", "httpx", "aiohttp", "urllib3", "websockets")
 
     # Model-provider SDKs (plus Tavily: a nondeterministic external search
     # service the deterministic core must not depend on either).

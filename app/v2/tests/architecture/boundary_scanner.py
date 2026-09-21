@@ -19,6 +19,7 @@ Rule names (Violation.rule):
                                     or persistence module
   pure-imports-disallowed-v2-package  a pure package imports a V2 package outside the pure ones
   pure-reads-environment            a pure package mentions environ/getenv/...
+  network-import-forbidden          ingestion/repositories import a network, socket or DNS module
   layer-violation                   a lower layer imports one built on it
   dynamic-import-unresolvable       importlib.import_module(x)/__import__(x)
                                     with a non-constant or relative argument
@@ -142,6 +143,15 @@ def is_pure_module(module: str, rules: BoundaryRules = DEFAULT_RULES) -> bool:
 
 def is_allowed_v2_for_pure(name: str, rules: BoundaryRules = DEFAULT_RULES) -> bool:
     return name == rules.v2_root or matches_prefix(name, rules.pure_allowed_v2_imports)
+
+
+def is_no_network_module(module: str, rules: BoundaryRules = DEFAULT_RULES) -> bool:
+    return matches_prefix(module, rules.no_network_packages)
+
+
+def is_forbidden_loaded_for_network(name: str, rules: BoundaryRules = DEFAULT_RULES) -> bool:
+    """Runtime probe on sys.modules after importing a no-network module."""
+    return matches_prefix(name, rules.network_forbidden_loaded_prefixes) or is_forbidden_loaded_for_deterministic(name, rules)
 
 
 def is_forbidden_loaded_for_pure(name: str, rules: BoundaryRules = DEFAULT_RULES) -> bool:
@@ -323,6 +333,8 @@ def _check_import(ref: ImportRef, zone: str, rel_path: str, rules: BoundaryRules
                 out.append(violation("pure-imports-forbidden", f"pure module imports {name}"))
             elif is_v2(name, rules) and not is_allowed_v2_for_pure(name, rules) and not matches_prefix(name, rules.pure_forbidden_import_prefixes):
                 out.append(violation("pure-imports-disallowed-v2-package", f"pure module imports {name}"))
+        if module and is_no_network_module(module, rules) and matches_prefix(name, rules.network_forbidden_import_prefixes):
+            out.append(violation("network-import-forbidden", f"{module} must not import {name}"))
         for package, forbidden in rules.layer_rules:
             if module and matches_prefix(module, [package]) and matches_prefix(name, forbidden):
                 out.append(violation("layer-violation", f"{package} must not import {name}"))

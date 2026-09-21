@@ -72,3 +72,17 @@ observation_table = Table(
     Index("uq_observation_dedup_without_record_id", "source_id", "content_hash",
           unique=True, postgresql_where=text("source_record_identifier IS NULL")),
 )
+
+# Revision 0004: acquisition history (append-only; enforced by triggers in the migration).
+observation_sighting_table = Table(
+    "observation_sighting",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("observation_id", BigInteger, ForeignKey("v2.observation.id", ondelete="RESTRICT"), nullable=False),
+    Column("observed_time", DateTime(timezone=True), nullable=False),
+    Column("recorded_time", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("collector_id", Text, nullable=False),
+    Column("collection_version", Text, nullable=False),
+    Column("acquisition_key", Text, nullable=False),
+    UniqueConstraint("observation_id", "acquisition_key", name="uq_observation_sighting_acquisition"),
+)

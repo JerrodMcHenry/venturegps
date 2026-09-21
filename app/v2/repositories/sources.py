@@ -91,8 +91,11 @@ def _to_stored(row) -> StoredSource:
         raise InvariantViolationError("stored_source_invalid", "a stored source does not satisfy the domain model") from None
 
 
-def _select_by(connection: Connection, column, value):
-    return connection.execute(select(t).where(column == value)).one_or_none()
+def _select_by(connection: Connection, column, value, *, lock_shared: bool = False):
+    query = select(t).where(column == value)
+    if lock_shared:
+        query = query.with_for_update(read=True)  # FOR SHARE: a concurrent (de)activation waits for this transaction
+    return connection.execute(query).one_or_none()
 
 
 # ---------------------------------------------------------------- operations
@@ -132,10 +135,12 @@ def get_source_by_id(db: Engine | Connection, source_id: int) -> StoredSource | 
     return None if row is None else _to_stored(row)
 
 
-def get_source_by_key(db: Engine | Connection, source_key: str) -> StoredSource | None:
+def get_source_by_key(db: Engine | Connection, source_key: str, *, lock_shared: bool = False) -> StoredSource | None:
+    """lock_shared=True takes a shared row lock for the rest of the transaction, so a workflow that
+    checks is_active (evidence ingestion) sees a state that cannot change underneath it."""
     validate_source_key(source_key)
     with _connection(db) as connection:
-        row = _select_by(connection, t.c.source_key, source_key)
+        row = _select_by(connection, t.c.source_key, source_key, lock_shared=lock_shared)
     return None if row is None else _to_stored(row)
 
 

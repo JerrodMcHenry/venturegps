@@ -10,6 +10,7 @@ from app.v2.tests.db.harness import (
     HEAD_V2_OBJECTS,
     REVISION_0001_V2_OBJECTS,
     REVISION_0002_V2_OBJECTS,
+    REVISION_0003_V2_OBJECTS,
     make_alembic_config,
     scalar,
     v2_objects,
@@ -65,6 +66,9 @@ def test_upgrade_again_after_downgrade(clean_db, alembic_cfg):
 
 def test_downgrading_one_revision_at_a_time_ends_at_base(clean_db, alembic_cfg):
     command.upgrade(alembic_cfg(), "head")
+    command.downgrade(alembic_cfg(), "-1")                       # 0004 -> 0003: sightings go
+    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0003"
+    assert v2_objects(clean_db) == REVISION_0003_V2_OBJECTS
     command.downgrade(alembic_cfg(), "-1")                       # 0003 -> 0002: evidence tables go
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0002"
     assert v2_objects(clean_db) == REVISION_0002_V2_OBJECTS

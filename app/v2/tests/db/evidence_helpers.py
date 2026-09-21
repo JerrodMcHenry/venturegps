@@ -56,9 +56,13 @@ def fetch_row(engine, table: str, where: str, params: dict):
         return conn.execute(text(f"SELECT * FROM v2.{table} WHERE {where}"), params).mappings().one_or_none()
 
 
-def count(engine, table: str) -> int:
-    with engine.connect() as conn:
-        return conn.execute(text(f"SELECT count(*) FROM v2.{table}")).scalar()
+def count(db, table: str) -> int:
+    """Row count through an Engine (own connection) or a Connection (the caller's transaction)."""
+    query = text(f"SELECT count(*) FROM v2.{table}")
+    if hasattr(db, "connect"):
+        with db.connect() as conn:
+            return conn.execute(query).scalar()
+    return db.execute(query).scalar()
 
 
 def refused(engine, sql, params=None, *, exc):
@@ -79,3 +83,16 @@ def tamper_payload(engine, content_hash: str, *, new_bytes=None, new_size=None):
         if new_size is not None:
             conn.execute(text("ALTER TABLE v2.raw_payload DROP CONSTRAINT ck_raw_payload_size_matches_bytes"))
             conn.execute(text("UPDATE v2.raw_payload SET size_bytes = :n WHERE content_hash = :h"), {"n": new_size, "h": content_hash})
+
+
+def make_command(**overrides):
+    from app.v2.ingestion.models import IngestionCommand
+    base = dict(source_key="sec_edgar", source_record_identifier="rec-1", observation_type="filing_document",
+                observed_time=OBSERVED, collection_version="manual_upload.v1", collector_id="admin:user_2abc",
+                payload_bytes=b"exact evidence bytes", acquisition_key="run_1")
+    base.update(overrides)
+    return IngestionCommand(**base)
+
+
+def table_counts(engine) -> dict:
+    return {t: count(engine, t) for t in ("raw_payload", "observation", "observation_sighting")}

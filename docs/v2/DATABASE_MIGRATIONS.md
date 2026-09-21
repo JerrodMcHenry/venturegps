@@ -14,7 +14,8 @@ Status: Phase 1, Increment 2. See ADR-0001 for the truth model.
 | Schema metadata | `app/v2/db/metadata.py` |
 | Table definitions (shape only; one per increment) | `app/v2/db/tables.py` |
 | Source persistence | `app/v2/repositories/sources.py` (+ `errors.py`) |
-| Evidence persistence | `app/v2/repositories/raw_payloads.py`, `observations.py` |
+| Evidence persistence | `app/v2/repositories/raw_payloads.py`, `observations.py`, `sightings.py` |
+| Evidence ingestion workflow | `app/v2/ingestion/` (`service.py`, `models.py`, `errors.py`) |
 | What Alembic may see | `app/v2/db/scope.py` |
 | Migration lock | `app/v2/db/locks.py` |
 
@@ -138,6 +139,61 @@ declared and sniffed (not stored). No ordering between `event_time` and `observe
 - **Downgrade** from 0003 removes only these objects and **refuses to run while either table holds
   rows**: back the evidence up and drop the tables by hand if you truly mean to discard it.
 
+### Revision 0004: `v2.observation_sighting` (acquisition history)
+
+An Observation says "this Source exposed this evidence record". A **Sighting** says "VentureGPS
+acquired (saw) it at this time". Only the second distinguishes "we checked and saw the same
+evidence again" from "we did not check", which later coverage measurement depends on.
+
+| Column | Notes |
+|---|---|
+| `id` | `BIGINT GENERATED ALWAYS AS IDENTITY` |
+| `observation_id` | `NOT NULL`, FK to `v2.observation(id)` `ON DELETE RESTRICT` |
+| `observed_time` | `NOT NULL`: when THIS acquisition happened (includes the first acquisition) |
+| `recorded_time` | `NOT NULL`, assigned by trigger, never by the caller |
+| `collector_id`, `collection_version` | shape-checked, same rules as `v2.observation` |
+| `acquisition_key` | `NOT NULL`, 1-128 chars from `A-Za-z0-9_.:@/=+-` |
+
+No payload bytes, Source fields, status, AI or interpretation columns.
+
+- **Idempotency: `UNIQUE (observation_id, acquisition_key)`.** The key identifies one acquisition
+  *event* and is chosen by the collector boundary (for example from its run and fetch identity). It
+  must not be generated randomly inside a retry, or replays would stop being idempotent. It is unique
+  *per Observation*, not globally, so one collection run may reuse a single key across many records.
+  The same Observation seen at 10:00 and 11:00 (two keys) yields two sightings; replaying the 10:00
+  command yields none. Neither `observation_id` nor `(observation_id, observed_time)` is unique.
+- **Append-only** reuses the 0003 functions `v2.forbid_evidence_change()` (row-level UPDATE/DELETE and
+  statement-level TRUNCATE) and `v2.observation_stamp()` (database-owned `recorded_time`); no new function.
+- **Downgrade** removes only this table and refuses to run while it holds rows.
+
+**Temporal semantics.** `Observation.observed_time` is the FIRST time VentureGPS observed this exact
+Observation identity and is never rewritten. `ObservationSighting.observed_time` is each acquisition,
+including the first. **Out-of-order sightings are recorded as-is** (policy A): a delayed collector's
+sighting may be earlier than the Observation's `observed_time`, and neither the Observation nor any
+earlier sighting is rewritten. Sightings are listed by `(observed_time, id)`.
+
+### Evidence ingestion (`ingest_evidence`)
+
+`ingest_evidence(db, IngestionCommand)` is the only workflow in this increment: bytes already supplied
+by a trusted collector boundary become RawPayload + Observation + Sighting, atomically. No network, no
+scheduling, no AI, no processing.
+
+1. resolve the Source (missing: `NotFoundError`); 2. require it active (`SourceInactiveError`; ingestion
+*policy*, not a table constraint, so deactivating a Source never touches existing evidence);
+3. validate size and hash the exact bytes (over 1 MiB: `UnsupportedInputError`, nothing truncated);
+4. sniff the media type from the bytes; 5. normalize the declared type (malformed: `InvalidInputError`);
+6. build the Observation (agreement is derived; a declared/sniffed **conflict is persisted, never a reason
+to reject**, and unknown media is valid evidence); 7. store or reuse the payload; 8. store or reuse the
+Observation (identity: source, record identifier including "none", content hash); 9. store or reuse the
+Sighting (identity: observation + `acquisition_key`).
+
+The command carries no `content_hash`, `sniffed_media_type`, `recorded_time`, status, AI output or company
+identity, and its model rejects them. Everything runs in one transaction (a SAVEPOINT when handed a
+Connection), so a failure leaves no partial payload, observation or sighting; PostgreSQL constraints are the
+final authority under concurrency. A repeat acquisition of identical evidence reuses the payload and the
+Observation and adds a Sighting; if the repeat's non-identity metadata differs, the existing Observation stays
+canonical and the difference is reported in `IngestionResult.differences`, never stored.
+
 ### Concurrency
 
 A PostgreSQL session-level advisory lock (`MIGRATION_LOCK_KEY`) is held for the whole
@@ -197,7 +253,7 @@ database that holds anything you care about; the tests drop schema `v2` in it.
 
 ### What the DB tests prove
 
-Upgrade base to head (and 0001 to 0002 to 0001 stepwise), downgrade head to base, upgrade again, idempotent upgrade;
+Upgrade base to head (and each revision stepwise), downgrade head to base, upgrade again, idempotent upgrade;
 the version table is `v2.alembic_version` and never `public`; a `public.alembic_version`
 decoy and representative legacy tables (data, indexes, constraints, sequences, a view)
 are byte-for-byte unchanged across upgrade, downgrade and re-upgrade; `alembic check`
