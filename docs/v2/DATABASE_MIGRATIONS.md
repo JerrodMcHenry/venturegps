@@ -11,7 +11,9 @@ Status: Phase 1, Increment 2. See ADR-0001 for the truth model.
 | Revisions | `app/v2/migrations/versions/` (numbered `0001_...`) |
 | V2 config (lazy env reads) | `app/v2/config.py` |
 | Engine factory (lazy, small pool) | `app/v2/db/engine.py` |
-| Schema metadata (empty until later increments add tables) | `app/v2/db/metadata.py` |
+| Schema metadata | `app/v2/db/metadata.py` |
+| Table definitions (shape only; one per increment) | `app/v2/db/tables.py` |
+| Source persistence | `app/v2/repositories/sources.py` (+ `errors.py`) |
 | What Alembic may see | `app/v2/db/scope.py` |
 | Migration lock | `app/v2/db/locks.py` |
 
@@ -42,6 +44,44 @@ plus a comment on the schema) and creates no tables. Its downgrade removes the
 comment. When a downgrade reverts everything to base, `env.py` then drops
 `v2.alembic_version` and schema `v2` in the same transaction; `DROP SCHEMA` has no
 `CASCADE`, so if anything else lives in `v2` the entire downgrade rolls back.
+
+### Revision 0002: `v2.source`
+
+The persisted form of the pure `Source` model (`app/v2/domain/source.py`). Identity is a
+generated `id` plus the unique `source_key`; name and URL are data, never identity.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `BIGINT GENERATED ALWAYS AS IDENTITY` | primary key `pk_source` |
+| `source_key` | `TEXT NOT NULL` | `uq_source_source_key`; shape check `^[a-z][a-z0-9_]{1,63}$` |
+| `source_name` | `TEXT NOT NULL` | no surrounding spaces, 1-200 chars, no control characters |
+| `source_type` | `TEXT NOT NULL` | `CHECK IN` the nine `SourceType` values |
+| `collection_method` | `TEXT NOT NULL` | `CHECK IN` the five `CollectionMethod` values |
+| `source_url` | `TEXT NULL` | null allowed; if set: <= 2048, printable ASCII, `http(s)://host`, no userinfo |
+| `is_active` | `BOOLEAN NOT NULL` | no default: it must be stated |
+| `created_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | database-assigned, immutable |
+| `updated_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | moves only when a mutable field changes |
+
+Also `CHECK (updated_at >= created_at)`.
+
+- **Enums are `TEXT` + named `CHECK`s, not PostgreSQL `ENUM` types.** Extending a vocabulary is
+  one constraint swap in an ordinary transactional migration; `ENUM` values cannot be removed
+  and `ADD VALUE` has transaction restrictions. The Python enums stay authoritative; the
+  CHECKs guard integrity and are deliberately a subset of the domain rules (for example the
+  database trims only spaces where the domain rejects any surrounding whitespace, so a row the
+  database accepts can still be refused by the domain on load and is reported, not returned).
+- **Immutable after insert: `id`, `source_key`, `source_type`, `collection_method`,
+  `created_at`. Mutable: `source_name`, `source_url`, `is_active`.** One
+  `BEFORE INSERT OR UPDATE` trigger (`v2.source_guard`) enforces this for every writer,
+  including direct SQL, and rejects an update that bundles a legal change with an illegal one
+  as a whole. It also owns the timestamps: `created_at` is always the database clock (a
+  caller-supplied value is overwritten), and `updated_at` moves only when a mutable field
+  actually changes (a no-op update, or a caller-supplied `updated_at`, does not).
+- **Repository semantics.** `register_source` is create-only with idempotent replay: a new key
+  is created; an existing key with the same `source_type` and `collection_method` returns the
+  existing Source unchanged (registration never rewrites name/url/is_active); a different
+  `source_type` or `collection_method` raises `ConflictError`. There is no delete operation:
+  a Source is deactivated (`is_active = false`), which keeps the row and changes nothing else.
 
 ### Concurrency
 
@@ -102,7 +142,7 @@ database that holds anything you care about; the tests drop schema `v2` in it.
 
 ### What the DB tests prove
 
-Upgrade base to head, downgrade head to base, upgrade again, idempotent upgrade;
+Upgrade base to head (and 0001 to 0002 to 0001 stepwise), downgrade head to base, upgrade again, idempotent upgrade;
 the version table is `v2.alembic_version` and never `public`; a `public.alembic_version`
 decoy and representative legacy tables (data, indexes, constraints, sequences, a view)
 are byte-for-byte unchanged across upgrade, downgrade and re-upgrade; `alembic check`

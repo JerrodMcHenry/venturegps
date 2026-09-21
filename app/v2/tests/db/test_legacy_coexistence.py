@@ -14,7 +14,7 @@ from alembic.runtime.migration import MigrationContext
 
 from app.v2.db.metadata import metadata
 from app.v2.db.scope import include_name, include_object
-from app.v2.tests.db.harness import scalar, snapshot_non_v2, v2_objects
+from app.v2.tests.db.harness import HEAD_REVISION, HEAD_V2_OBJECTS, scalar, snapshot_non_v2, v2_objects
 
 pytestmark = pytest.mark.db
 
@@ -57,14 +57,14 @@ def test_upgrade_downgrade_upgrade_leave_legacy_untouched(legacy_probe, alembic_
 def test_public_alembic_version_decoy_is_untouched_and_separate_from_v2s(legacy_probe, alembic_cfg):
     command.upgrade(alembic_cfg(), "head")
     assert scalar(legacy_probe, "SELECT version_num FROM public.alembic_version") == "legacy-decoy-not-v2"
-    assert scalar(legacy_probe, "SELECT version_num FROM v2.alembic_version") == "0001"
+    assert scalar(legacy_probe, "SELECT version_num FROM v2.alembic_version") == HEAD_REVISION
     command.downgrade(alembic_cfg(), "base")
     assert scalar(legacy_probe, "SELECT version_num FROM public.alembic_version") == "legacy-decoy-not-v2"
 
 
 def test_v2_objects_exist_only_in_schema_v2(legacy_probe, alembic_cfg):
     command.upgrade(alembic_cfg(), "head")
-    assert v2_objects(legacy_probe) == [("alembic_version", "r")]
+    assert v2_objects(legacy_probe) == HEAD_V2_OBJECTS
     # nothing new anywhere else: covered by the full non-v2 snapshot equality above
 
 

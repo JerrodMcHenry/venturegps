@@ -60,3 +60,19 @@ def alembic_cfg(db_target):
 def legacy_probe(clean_db):
     harness.create_legacy_probe_objects(clean_db)
     return clean_db
+
+
+@pytest.fixture
+def migrated_db(clean_db, alembic_cfg):
+    """A clean disposable database upgraded to head (v2 schema + every V2 table)."""
+    from alembic import command
+    command.upgrade(alembic_cfg(), "head")
+    return clean_db
+
+
+@pytest.fixture
+def migrated_db(clean_db, alembic_cfg):
+    """A clean disposable database upgraded to head (v2 schema + every V2 table)."""
+    from alembic import command
+    command.upgrade(alembic_cfg(), "head")
+    return clean_db

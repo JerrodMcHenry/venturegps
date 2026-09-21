@@ -10,10 +10,11 @@ from enum import Enum
 from typing import Annotated
 from urllib.parse import urlsplit
 
-from pydantic import AfterValidator
+from pydantic import AfterValidator, Field, model_validator
 
 from app.v2.domain.base import DomainModel
-from app.v2.domain.errors import InvalidInputError, UnsupportedInputError
+from app.v2.domain.errors import InvalidInputError, InvariantViolationError, UnsupportedInputError
+from app.v2.domain.time import UtcDatetime
 
 
 class SourceType(str, Enum):
@@ -111,3 +112,25 @@ class Source(DomainModel):
     collection_method: CollectionMethod
     url: SourceUrl | None = None  # None: this source has no URL (unknown/not applicable)
     is_active: bool
+
+
+class StoredSource(DomainModel):
+    """A Source as persisted: the unchanged Source plus what only persistence knows.
+
+    id            opaque persistence identifier (internal; identity is source.source_key)
+    recorded_time when VentureGPS first persisted it (assigned by the database, never by the caller)
+    updated_time  when its mutable state (name, url, is_active) last changed; equals
+                  recorded_time until it does. Source is legitimately mutable, so it is one of
+                  the few objects with an updated_time.
+    """
+
+    id: int = Field(gt=0)
+    source: Source
+    recorded_time: UtcDatetime
+    updated_time: UtcDatetime
+
+    @model_validator(mode="after")
+    def _updated_time_is_not_before_recorded_time(self) -> "StoredSource":
+        if self.updated_time < self.recorded_time:
+            raise InvariantViolationError("updated_before_recorded", "updated_time precedes recorded_time")
+        return self

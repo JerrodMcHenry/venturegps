@@ -54,13 +54,20 @@ def test_alembic_ini_has_no_database_url_and_points_at_the_v2_migrations():
 
 def test_migration_history_is_linear_and_starts_with_the_namespace_revision():
     script = ScriptDirectory.from_config(make_alembic_config())
-    assert script.get_heads() == ["0001"]
+    assert script.get_heads() == ["0002"]
     assert script.get_revision("0001").down_revision is None
+    assert script.get_revision("0002").down_revision == "0001"
 
 
 def test_revision_0001_creates_no_tables():
     source = (REPO_ROOT / "app/v2/migrations/versions/0001_establish_v2_namespace.py").read_text().lower()
     assert "create table" not in source and "create_table" not in source
+
+
+def test_revision_0002_creates_only_v2_source():
+    source = (REPO_ROOT / "app/v2/migrations/versions/0002_create_source.py").read_text()
+    assert source.count("CREATE TABLE") == 1 and "CREATE TABLE v2.source" in source
+    assert "public." not in source and "op.create_table" not in source
 
 
 def test_only_numbered_revision_files_exist():

@@ -41,6 +41,7 @@ from sqlalchemy import text
 from app.v2.config import get_database_url, get_migration_lock_timeout, redact_database_url
 from app.v2.db.engine import make_engine
 from app.v2.db.locks import migration_lock
+from app.v2.db import tables  # noqa: F401 -- registers V2 tables on the metadata
 from app.v2.db.metadata import V2_SCHEMA, metadata
 from app.v2.db.scope import (
     VERSION_TABLE,

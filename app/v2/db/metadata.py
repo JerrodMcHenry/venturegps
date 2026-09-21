@@ -1,7 +1,6 @@
 """
-Schema-qualified SQLAlchemy metadata for every V2-owned table. It is empty in
-Increment 2 (revision 0001 only establishes the namespace); later increments
-add their tables here alongside their migrations.
+Schema-qualified SQLAlchemy metadata for every V2-owned table. The tables
+themselves are declared in app.v2.db.tables (one per increment/revision).
 
 Alembic autogenerate compares the database against THIS metadata, and only
 within schema `v2` (see app/v2/db/scope.py).

@@ -21,7 +21,9 @@ def test_upgrade_sql_is_confined_to_schema_v2():
     assert "INSERT INTO v2.alembic_version" in sql
     assert "COMMENT ON SCHEMA v2 IS" in sql
     assert "public" not in sql.replace("Legacy tables live in public and are never managed here", "")
-    assert sql.count("CREATE TABLE") == 1  # only the version table
+    assert sql.count("CREATE TABLE") == 2  # the version table and v2.source, nothing else
+    assert "CREATE TABLE v2.source" in sql and "CREATE FUNCTION v2.source_guard" in sql
+    assert "CREATE TRIGGER trg_source_guard" in sql
 
 
 def test_downgrade_sql_reverts_only_the_comment_and_version_row():
@@ -29,3 +31,21 @@ def test_downgrade_sql_reverts_only_the_comment_and_version_row():
     assert "COMMENT ON SCHEMA v2 IS NULL" in sql
     assert "DELETE FROM v2.alembic_version" in sql
     assert "DROP TABLE" not in sql.replace("DROP TABLE v2.alembic_version", "")
+
+
+def test_revision_0002_offline_upgrade_and_downgrade_render_only_source_objects():
+    up = render("upgrade", "0001:0002")
+    assert "CREATE TABLE v2.source" in up and "UPDATE v2.alembic_version SET version_num='0002'" in up
+    assert "public" not in up
+    down = render("downgrade", "0002:0001")
+    assert "DROP TABLE v2.source" in down and "DROP FUNCTION v2.source_guard()" in down
+    assert "DROP SCHEMA" not in down and "public" not in down
+
+
+def test_revision_0002_offline_upgrade_and_downgrade_render_only_source_objects():
+    up = render("upgrade", "0001:0002")
+    assert "CREATE TABLE v2.source" in up and "UPDATE v2.alembic_version SET version_num='0002'" in up
+    assert "public" not in up
+    down = render("downgrade", "0002:0001")
+    assert "DROP TABLE v2.source" in down and "DROP FUNCTION v2.source_guard()" in down
+    assert "DROP SCHEMA" not in down and "public" not in down

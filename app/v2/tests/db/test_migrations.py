@@ -5,11 +5,18 @@ from alembic import command
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
-from app.v2.tests.db.harness import make_alembic_config, scalar, v2_objects
+from app.v2.tests.db.harness import (
+    HEAD_REVISION,
+    HEAD_V2_OBJECTS,
+    REVISION_0001_V2_OBJECTS,
+    make_alembic_config,
+    scalar,
+    v2_objects,
+)
 
 pytestmark = pytest.mark.db
 
-HEAD = "0001"
+HEAD = HEAD_REVISION
 
 
 def schema_exists(engine) -> bool:
@@ -24,7 +31,7 @@ def test_upgrade_base_to_head_creates_schema_and_v2_version_table(clean_db, alem
     assert schema_exists(clean_db)
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == HEAD
     assert HEAD == ScriptDirectory.from_config(make_alembic_config()).get_current_head()
-    assert v2_objects(clean_db) == [("alembic_version", "r")]  # no domain tables
+    assert v2_objects(clean_db) == HEAD_V2_OBJECTS  # exactly what the revisions so far created
     assert "VentureGPS V2" in scalar(clean_db, "SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace WHERE nspname = 'v2'")
 
 
@@ -52,12 +59,15 @@ def test_upgrade_again_after_downgrade(clean_db, alembic_cfg):
     command.downgrade(alembic_cfg(), "base")
     command.upgrade(alembic_cfg(), "head")
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == HEAD
-    assert v2_objects(clean_db) == [("alembic_version", "r")]
+    assert v2_objects(clean_db) == HEAD_V2_OBJECTS
 
 
-def test_downgrade_minus_one_and_base_are_equivalent_for_a_single_revision(clean_db, alembic_cfg):
+def test_downgrading_one_revision_at_a_time_ends_at_base(clean_db, alembic_cfg):
     command.upgrade(alembic_cfg(), "head")
-    command.downgrade(alembic_cfg(), "-1")
+    command.downgrade(alembic_cfg(), "-1")                       # 0002 -> 0001: namespace stays, source goes
+    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0001"
+    assert v2_objects(clean_db) == REVISION_0001_V2_OBJECTS
+    command.downgrade(alembic_cfg(), "-1")                       # 0001 -> base: schema removed
     assert not schema_exists(clean_db)
 
 

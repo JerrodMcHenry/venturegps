@@ -19,6 +19,9 @@ MODULES = [
     "app.v2.db.metadata",
     "app.v2.db.scope",
     "app.v2.db.locks",
+    "app.v2.db.tables",
+    "app.v2.repositories.sources",
+    "app.v2.migrations.versions.0002_create_source",
     "app.v2.migrations.versions.0001_establish_v2_namespace",
 ]
 

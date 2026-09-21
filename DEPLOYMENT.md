@@ -168,14 +168,15 @@ pre-deploy command. Nothing in `render.yaml` or the start command changed.
 export V2_DATABASE_URL='postgresql://...'   # the intended database (Render: the External Database URL)
 alembic current                              # prints "V2 migration target: host:port/database" first - check it
 alembic upgrade head
-alembic current                              # expect: 0001 (head)
+alembic current                              # expect: 0002 (head)
 ```
 
 - Target resolution: `V2_DATABASE_URL`, else `DATABASE_URL`. **No `.env` file is
   loaded.** The command logs `V2 migration target: <host>:<port>/<database>`
   (never the password) before doing anything - read it before proceeding.
 - `alembic current`, `heads` and `history` create nothing. `alembic upgrade head`
-  creates schema `v2` (if missing) and its version table `v2.alembic_version`.
+  creates schema `v2` (if missing), its version table `v2.alembic_version`, and
+  (revision 0002) the `v2.source` table with its guard trigger.
 - A second `upgrade` running at the same time waits on a PostgreSQL advisory lock
   (default 30s, `V2_MIGRATION_LOCK_TIMEOUT_SECONDS`) and then finds nothing to do.
 - Preview without a database: `alembic upgrade head --sql`.

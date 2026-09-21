@@ -9,7 +9,7 @@ from alembic import command
 from sqlalchemy import text
 
 from app.v2.db.locks import MIGRATION_LOCK_KEY, MigrationLockError
-from app.v2.tests.db.harness import REPO_ROOT, scalar
+from app.v2.tests.db.harness import HEAD_REVISION, REPO_ROOT, scalar
 
 pytestmark = pytest.mark.db
 
@@ -35,7 +35,7 @@ def test_migration_fails_fast_when_another_process_holds_the_lock(clean_db, alem
         holder.close()
 
     command.upgrade(alembic_cfg(lock_timeout=5), "head")  # lock free again
-    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0001"
+    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == HEAD_REVISION
 
 
 def _cli_env(db_target) -> dict[str, str]:
@@ -57,10 +57,10 @@ def test_concurrent_cli_upgrades_serialize_and_all_succeed(clean_db, db_target):
 
     assert [code for code, _, _ in results] == [0, 0, 0, 0], results
     assert scalar(clean_db, "SELECT count(*) FROM v2.alembic_version") == 1
-    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0001"
-    # exactly one process actually ran the revision; the rest found it already applied
-    ran = sum("Running upgrade  -> 0001" in err for _, _, err in results)
-    assert ran == 1, results
+    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == HEAD_REVISION
+    # exactly one process actually ran the revisions; the rest found them already applied
+    assert sum("Running upgrade  -> 0001" in err for _, _, err in results) == 1, results
+    assert sum("Running upgrade 0001 -> 0002" in err for _, _, err in results) == 1, results
 
 
 def test_cli_reports_the_redacted_target_and_uses_v2_database_url(clean_db, db_target):
