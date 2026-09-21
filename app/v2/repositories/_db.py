@@ -38,3 +38,15 @@ def translating_integrity_errors():
         yield
     except IntegrityError as exc:
         raise integrity_error_to_domain(exc) from None
+
+
+@contextmanager
+def atomic(db: Engine | Connection):
+    """All-or-nothing: an Engine runs the block in one transaction; a Connection runs it in a SAVEPOINT,
+    so a failure undoes only this block and not the caller's earlier work."""
+    if isinstance(db, Engine):
+        with db.begin() as conn:
+            yield conn
+    else:
+        with db.begin_nested():
+            yield db

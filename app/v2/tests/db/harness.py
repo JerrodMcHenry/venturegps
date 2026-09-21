@@ -12,8 +12,16 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # What schema v2 contains at the current head (update with each revision that adds objects).
 # Tables/sequences only (relkind r/S); indexes are excluded by v2_objects().
-HEAD_REVISION = "0005"
+HEAD_REVISION = "0006"
 HEAD_V2_OBJECTS = [
+    ("alembic_version", "r"), ("company_candidate", "r"), ("company_candidate_id_seq", "S"),
+    ("company_candidate_identifier", "r"), ("company_candidate_identifier_id_seq", "S"),
+    ("observation", "r"), ("observation_id_seq", "S"),
+    ("observation_sighting", "r"), ("observation_sighting_id_seq", "S"),
+    ("processing_attempt", "r"), ("processing_attempt_id_seq", "S"),
+    ("raw_payload", "r"), ("source", "r"), ("source_id_seq", "S"),
+]
+REVISION_0005_V2_OBJECTS = [
     ("alembic_version", "r"), ("observation", "r"), ("observation_id_seq", "S"),
     ("observation_sighting", "r"), ("observation_sighting_id_seq", "S"),
     ("processing_attempt", "r"), ("processing_attempt_id_seq", "S"),

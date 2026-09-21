@@ -12,6 +12,7 @@ from app.v2.tests.db.harness import (
     HEAD_REVISION,
     HEAD_V2_OBJECTS,
     REVISION_0004_V2_OBJECTS,
+    REVISION_0005_V2_OBJECTS,
     scalar,
     snapshot_non_v2,
     v2_objects,
@@ -29,8 +30,8 @@ def functions(engine):
     return [r[0] for r in rows(engine, "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'v2' ORDER BY 1")]
 
 
-def test_head_is_0005():
-    assert HEAD_REVISION == "0005"
+def test_head_moved_past_0005():
+    assert HEAD_REVISION >= "0005"
 
 
 def test_upgrade_0004_to_0005_creates_only_the_processing_objects(clean_db, alembic_cfg):
@@ -38,7 +39,7 @@ def test_upgrade_0004_to_0005_creates_only_the_processing_objects(clean_db, alem
     assert v2_objects(clean_db) == REVISION_0004_V2_OBJECTS
     command.upgrade(alembic_cfg(), "0005")
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0005"
-    assert v2_objects(clean_db) == HEAD_V2_OBJECTS
+    assert v2_objects(clean_db) == REVISION_0005_V2_OBJECTS
     assert functions(clean_db) == ["forbid_evidence_change", "observation_stamp", "processing_attempt_guard", "source_guard"]
 
 

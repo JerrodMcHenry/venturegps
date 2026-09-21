@@ -15,6 +15,7 @@ Status: Phase 1, Increment 2. See ADR-0001 for the truth model.
 | Table definitions (shape only; one per increment) | `app/v2/db/tables.py` |
 | Source persistence | `app/v2/repositories/sources.py` (+ `errors.py`) |
 | Evidence persistence | `app/v2/repositories/raw_payloads.py`, `observations.py`, `sightings.py` |
+| Candidate layer | `app/v2/candidates/` (`proposer.py`, `evidence.py`, `service.py`), `app/v2/repositories/company_candidates.py`, `app/v2/domain/candidate.py` |
 | Processing history | `app/v2/repositories/processing_attempts.py`, `app/v2/domain/processing_attempt.py` |
 | Evidence ingestion workflow | `app/v2/ingestion/` (`service.py`, `models.py`, `errors.py`) |
 | What Alembic may see | `app/v2/db/scope.py` |
@@ -237,6 +238,45 @@ processed" is the absence of any attempt** (`list_unprocessed_observation_ids`),
   `processing`.
 - **Failure metadata never carries payload excerpts, exception text, stack traces, prompts or AI output.**
 - **Downgrade** removes only this table and function and refuses to run while any attempt exists.
+
+### Revision 0006: `v2.company_candidate` and `v2.company_candidate_identifier` (untrusted proposals)
+
+```
+Source -> RawPayload -> Observation -> ProcessingAttempt -> Candidate -> [future validation / resolution / promotion] -> canonical truth
+```
+
+A **Candidate is a proposal**: "processor attempt X proposed that this evidence may describe company Y,
+here are the exact immutable bytes supporting that". It is **not** canonical truth, a Company, a claim, a
+classification or an accepted AI answer, and **nothing in this increment can promote one**: no canonical,
+resolution or claim table exists, and the candidate layer may not import a resolution/promotion package
+(architecture-tested; the packages are deliberately not created). The tables carry table comments saying UNTRUSTED.
+
+- **Shape.** A candidate belongs to exactly one ProcessingAttempt (which already identifies the Observation,
+  processor, version and attempt number, so none of that is duplicated). Identity is
+  `(processing_attempt_id, candidate_ordinal)`: the ordinal is the proposal's position in the proposer's
+  output, so replays are idempotent and a **name is never identity**. One Observation may yield zero, one or
+  many candidates, and later attempts/versions add history without touching earlier candidates. Identifiers
+  (`domain`, `website_url` only) live in `company_candidate_identifier`. `created_at` is the database's; there is
+  no `updated_at`; there are no confidence, model, provider, prompt or canonical columns.
+- **Evidence locator** (on every proposed value, so a value cannot exist without one): `byte_start`, `byte_end`
+  (half-open, at most 4096 bytes) and `evidence_hash` = sha256 of exactly those bytes of the immutable payload.
+  Byte offsets only: character offsets are never used. Evidence is restricted to **text-like** payloads
+  (`text/plain`, `text/html`, `application/json`); binary/PDF evidence is refused (no OCR, no PDF parsing).
+- **Verification** (`app.v2.candidates.evidence`, pure, before anything is stored): media type is text-like;
+  the span lies inside the payload; the exact bytes hash to `evidence_hash`; and the proposed value literally
+  appears in those bytes (a domain is compared ASCII-case-insensitively). Nothing is repaired or fuzzy-matched.
+  "Validated" means the proposal is well-formed and its cited evidence exists and contains the value, **not** that
+  the proposed company is real.
+- **Database backstop** (`BEFORE INSERT` triggers): the attempt must be `processing` (row-locked `FOR SHARE`, so it
+  cannot finish underneath the write), and the evidence span must lie inside the observation's stored payload and hash
+  to the stored `evidence_hash` (via `substring`/`sha256` over the exact bytes). `UPDATE`/`DELETE`/`TRUNCATE` are
+  rejected on both tables (reusing `v2.forbid_evidence_change()`); FKs are `RESTRICT`.
+- **Workflow** (`persist_verified_candidates`): require a PROCESSING attempt, load the verified immutable evidence,
+  call the `CandidateProposer` with only the `Observation` and `RawPayload` (never a database handle), validate the
+  schema, verify every proposal's evidence, persist all atomically (one bad proposal rejects the whole batch), return
+  them. It does **not** mark the attempt processed: completion stays explicit. A proposer exception leaves no rows and
+  surfaces as `ProposerFailedError` with a static message (the exception text may contain evidence and is never copied).
+- **Downgrade** removes only these objects and refuses to run while any candidate exists.
 
 ### Concurrency
 

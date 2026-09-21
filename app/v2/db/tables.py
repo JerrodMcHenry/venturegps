@@ -108,3 +108,36 @@ processing_attempt_table = Table(
     Index("uq_processing_attempt_one_active", "observation_id", "processor_id",
           unique=True, postgresql_where=text("status = 'processing'")),
 )
+
+# Revision 0006: UNTRUSTED candidate proposals (append-only; evidence and attempt-state enforced by triggers).
+company_candidate_table = Table(
+    "company_candidate",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("processing_attempt_id", BigInteger, ForeignKey("v2.processing_attempt.id", ondelete="RESTRICT"), nullable=False),
+    Column("candidate_ordinal", Integer, nullable=False),
+    Column("proposed_name", Text, nullable=False),
+    Column("name_evidence_start", Integer, nullable=False),
+    Column("name_evidence_end", Integer, nullable=False),
+    Column("name_evidence_hash", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("processing_attempt_id", "candidate_ordinal", name="uq_company_candidate_ordinal"),
+    comment=("UNTRUSTED PROPOSALS that evidence may describe a company. Not canonical truth: "
+             "nothing here is a Company, claim or accepted identity."),
+)
+
+company_candidate_identifier_table = Table(
+    "company_candidate_identifier",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("candidate_id", BigInteger, ForeignKey("v2.company_candidate.id", ondelete="RESTRICT"), nullable=False),
+    Column("identifier_ordinal", Integer, nullable=False),
+    Column("identifier_type", Text, nullable=False),
+    Column("identifier_value", Text, nullable=False),
+    Column("evidence_start", Integer, nullable=False),
+    Column("evidence_end", Integer, nullable=False),
+    Column("evidence_hash", Text, nullable=False),
+    UniqueConstraint("candidate_id", "identifier_ordinal", name="uq_company_candidate_identifier_ordinal"),
+    UniqueConstraint("candidate_id", "identifier_type", "identifier_value", name="uq_company_candidate_identifier_value"),
+    comment="UNTRUSTED proposed identifiers of a company candidate. Not canonical identifiers.",
+)

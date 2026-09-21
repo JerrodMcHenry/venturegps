@@ -53,8 +53,12 @@ class BoundaryRules:
     runtime_probe_skip_modules: tuple[str, ...] = ("app.v2.migrations.env",)
 
     # ---- pure packages (see docstring)
-    pure_packages: tuple[str, ...] = ("app.v2.domain", "app.v2.observations")
-    pure_allowed_v2_imports: tuple[str, ...] = ("app.v2.domain", "app.v2.observations")
+    pure_packages: tuple[str, ...] = (
+        "app.v2.domain", "app.v2.observations", "app.v2.candidates.proposer", "app.v2.candidates.evidence",
+    )
+    pure_allowed_v2_imports: tuple[str, ...] = (
+        "app.v2.domain", "app.v2.observations", "app.v2.candidates.proposer", "app.v2.candidates.evidence",
+    )
     pure_forbidden_import_prefixes: tuple[str, ...] = (
         # database / SQL
         "sqlalchemy", "alembic", "psycopg2", "psycopg", "asyncpg", "sqlite3",
@@ -75,7 +79,17 @@ class BoundaryRules:
     )
     # (package, prefixes it may not import): one-way layering inside the pure layer.
     layer_rules: tuple[tuple[str, tuple[str, ...]], ...] = (
-        ("app.v2.domain", ("app.v2.observations",)),
+        ("app.v2.domain", ("app.v2.observations", "app.v2.candidates")),
+        ("app.v2.observations", ("app.v2.candidates",)),
+    )
+
+    # ---- candidate layer: it can never promote anything
+    # The candidate layer may not import any (future) resolution/promotion/canonical package. Those packages
+    # do not exist yet and must not be created just for the rule; the rule is structural.
+    candidate_layer_packages: tuple[str, ...] = ("app.v2.candidates", "app.v2.repositories.company_candidates")
+    canonical_forbidden_import_prefixes: tuple[str, ...] = (
+        "app.v2.resolution", "app.v2.promotion", "app.v2.canonical", "app.v2.companies", "app.v2.claims",
+        "app.v2.evidence_links", "app.v2.resolution_decisions",
     )
 
     # Worker, queue and scheduler frameworks: no deterministic V2 module may depend on one until
@@ -86,7 +100,7 @@ class BoundaryRules:
     )
 
     # ---- no-network packages (see docstring)
-    no_network_packages: tuple[str, ...] = ("app.v2.ingestion", "app.v2.repositories")
+    no_network_packages: tuple[str, ...] = ("app.v2.ingestion", "app.v2.repositories", "app.v2.candidates")
     network_forbidden_import_prefixes: tuple[str, ...] = (
         "socket", "ssl", "http", "urllib.request", "urllib3", "requests", "httpx", "aiohttp",
         "websockets", "ftplib", "smtplib", "telnetlib", "dns",
@@ -142,6 +156,7 @@ class BoundaryRules:
         "app.v2.ai",
         "app.v2.domain",
         "app.v2.resolution.ports",
+        "app.v2.candidates.proposer",
     )
     # Named persistence/write surfaces app.v2.ai must never reach. Redundant
     # with default-deny on purpose: it yields a specific rule name, and it

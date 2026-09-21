@@ -19,7 +19,8 @@ Rule names (Violation.rule):
                                     or persistence module
   pure-imports-disallowed-v2-package  a pure package imports a V2 package outside the pure ones
   pure-reads-environment            a pure package mentions environ/getenv/...
-  network-import-forbidden          ingestion/repositories import a network, socket or DNS module
+  network-import-forbidden          ingestion/repositories/candidates import a network, socket or DNS module
+  candidate-layer-imports-canonical the candidate layer imports a (future) resolution/promotion/canonical package
   deterministic-imports-worker-framework  deterministic code imports a worker/queue/scheduler framework
   layer-violation                   a lower layer imports one built on it
   dynamic-import-unresolvable       importlib.import_module(x)/__import__(x)
@@ -336,6 +337,8 @@ def _check_import(ref: ImportRef, zone: str, rel_path: str, rules: BoundaryRules
                 out.append(violation("pure-imports-forbidden", f"pure module imports {name}"))
             elif is_v2(name, rules) and not is_allowed_v2_for_pure(name, rules) and not matches_prefix(name, rules.pure_forbidden_import_prefixes):
                 out.append(violation("pure-imports-disallowed-v2-package", f"pure module imports {name}"))
+        if module and matches_prefix(module, rules.candidate_layer_packages) and matches_prefix(name, rules.canonical_forbidden_import_prefixes):
+            out.append(violation("candidate-layer-imports-canonical", f"{module} must not import {name}"))
         if module and is_no_network_module(module, rules) and matches_prefix(name, rules.network_forbidden_import_prefixes):
             out.append(violation("network-import-forbidden", f"{module} must not import {name}"))
         for package, forbidden in rules.layer_rules:

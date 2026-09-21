@@ -290,9 +290,12 @@ def test_delete_and_truncate_are_blocked(world):
     _, message = rejected(db, "DELETE FROM v2.processing_attempt")
     assert "is append-only: DELETE is not permitted" in message
     rejected(db, f"DELETE FROM v2.processing_attempt WHERE id = {attempt_id}")
-    _, message = rejected(db, "TRUNCATE v2.processing_attempt")
+    # Since Increment 8 candidates reference attempts: PostgreSQL's FK rule refuses a plain TRUNCATE first,
+    # and with CASCADE the append-only trigger is what stops it.
+    _, message = rejected(db, "TRUNCATE v2.processing_attempt", exc=DBAPIError)
+    assert "referenced in a foreign key constraint" in message
+    _, message = rejected(db, "TRUNCATE v2.processing_attempt CASCADE")
     assert "is append-only: TRUNCATE is not permitted" in message
-    rejected(db, "TRUNCATE v2.processing_attempt RESTART IDENTITY")
     assert row(db, attempt_id) == before
 
 
