@@ -21,7 +21,8 @@ def test_upgrade_sql_is_confined_to_schema_v2():
     assert "INSERT INTO v2.alembic_version" in sql
     assert "COMMENT ON SCHEMA v2 IS" in sql
     assert "public" not in sql.replace("Legacy tables live in public and are never managed here", "")
-    assert sql.count("CREATE TABLE") == 5  # the version table, source, raw_payload, observation, sighting: nothing else
+    assert sql.count("CREATE TABLE") == 6  # version table, source, raw_payload, observation, sighting, processing_attempt: nothing else
+    assert "CREATE TABLE v2.processing_attempt" in sql
     assert "CREATE TABLE v2.observation_sighting" in sql
     assert "CREATE TABLE v2.raw_payload" in sql and "CREATE TABLE v2.observation" in sql
     assert "CREATE TABLE v2.source" in sql and "CREATE FUNCTION v2.source_guard" in sql

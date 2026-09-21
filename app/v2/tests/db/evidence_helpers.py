@@ -96,3 +96,21 @@ def make_command(**overrides):
 
 def table_counts(engine) -> dict:
     return {t: count(engine, t) for t in ("raw_payload", "observation", "observation_sighting")}
+
+
+def ingest_one(engine, record_id="rec-1", payload=b"exact evidence bytes", key="run_1"):
+    """Register the source if needed and ingest one piece of evidence; returns the IngestionResult."""
+    from app.v2.ingestion.service import ingest_evidence
+    from app.v2.repositories import sources
+    if sources.get_source_by_key(engine, "sec_edgar") is None:
+        register_source(engine)
+    return ingest_evidence(engine, make_command(source_record_identifier=record_id, payload_bytes=payload, acquisition_key=key))
+
+
+def evidence_snapshot(engine) -> dict:
+    """Every row of every evidence table (source, raw_payload, observation, observation_sighting)."""
+    out = {}
+    with engine.connect() as conn:
+        for table, order in (("source", "id"), ("raw_payload", "content_hash"), ("observation", "id"), ("observation_sighting", "id")):
+            out[table] = [tuple(r) for r in conn.execute(text(f"SELECT * FROM v2.{table} ORDER BY {order}"))]
+    return out

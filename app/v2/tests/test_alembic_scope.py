@@ -54,11 +54,12 @@ def test_alembic_ini_has_no_database_url_and_points_at_the_v2_migrations():
 
 def test_migration_history_is_linear_and_starts_with_the_namespace_revision():
     script = ScriptDirectory.from_config(make_alembic_config())
-    assert script.get_heads() == ["0004"]
+    assert script.get_heads() == ["0005"]
     assert script.get_revision("0001").down_revision is None
     assert script.get_revision("0002").down_revision == "0001"
     assert script.get_revision("0003").down_revision == "0002"
     assert script.get_revision("0004").down_revision == "0003"
+    assert script.get_revision("0005").down_revision == "0004"
 
 
 def test_revision_0001_creates_no_tables():

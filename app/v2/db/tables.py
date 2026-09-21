@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
     LargeBinary,
     Table,
     Text,
@@ -85,4 +86,25 @@ observation_sighting_table = Table(
     Column("collection_version", Text, nullable=False),
     Column("acquisition_key", Text, nullable=False),
     UniqueConstraint("observation_id", "acquisition_key", name="uq_observation_sighting_acquisition"),
+)
+
+# Revision 0005: processing history (mutable only through its lifecycle; enforced by a trigger in the migration).
+processing_attempt_table = Table(
+    "processing_attempt",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("observation_id", BigInteger, ForeignKey("v2.observation.id", ondelete="RESTRICT"), nullable=False),
+    Column("processor_id", Text, nullable=False),
+    Column("processor_version", Text, nullable=False),
+    Column("attempt_number", Integer, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("started_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    Column("lease_expires_at", DateTime(timezone=True), nullable=True),
+    Column("reason_code", Text, nullable=True),
+    Column("detail_code", Text, nullable=True),
+    UniqueConstraint("observation_id", "processor_id", "attempt_number", name="uq_processing_attempt_number"),
+    # At most one active attempt per observation + processor.
+    Index("uq_processing_attempt_one_active", "observation_id", "processor_id",
+          unique=True, postgresql_where=text("status = 'processing'")),
 )

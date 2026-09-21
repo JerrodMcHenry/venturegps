@@ -17,6 +17,7 @@ version is likewise a new attempt series.
 from enum import Enum
 
 from app.v2.domain.errors import InvariantViolationError
+from app.v2.domain.versions import version_number
 
 
 class ProcessingStatus(str, Enum):
@@ -64,3 +65,40 @@ def next_attempt_number(previous_attempt_number: int, previous_status: Processin
             "retry_not_allowed", f"a {previous_status.value} attempt is not retried automatically"
         )
     return previous_attempt_number + 1
+
+
+def check_may_start_attempt(
+    latest_status: ProcessingStatus | None, latest_version: str | None, requested_version: str
+) -> None:
+    """May a NEW attempt be started for an observation + processor, given the latest one?
+
+        no attempt yet        -> yes (attempt 1)
+        PROCESSING            -> no: one active attempt at a time
+        FAILED                -> yes: a retry (same or another version)
+        PROCESSED/QUARANTINED -> only for a LATER processor_version (an explicit
+                                 reprocessing request); the same or an older version is not
+                                 retried automatically, and a quarantine is not auto-retried.
+
+    Attempt numbering is separate: it is linear per observation + processor_id
+    regardless of version (see next_attempt_number_for).
+    """
+    if latest_status is None:
+        return
+    if latest_status is ProcessingStatus.PROCESSING:
+        raise InvariantViolationError("attempt_already_active", "an attempt is already processing")
+    if latest_status is ProcessingStatus.FAILED:
+        return
+    if latest_version is None or version_number(requested_version) <= version_number(latest_version):
+        raise InvariantViolationError(
+            "retry_not_allowed",
+            f"a {latest_status.value} attempt is not retried automatically; only a later processor version may reprocess",
+        )
+
+
+def next_attempt_number_for(latest_attempt_number: int | None) -> int:
+    """Linear per (observation, processor_id): 1 for the first, else the latest + 1."""
+    if latest_attempt_number is None:
+        return 1
+    if type(latest_attempt_number) is not int or latest_attempt_number < 1:
+        raise InvariantViolationError("invalid_attempt_number", "attempt numbers start at 1")
+    return latest_attempt_number + 1

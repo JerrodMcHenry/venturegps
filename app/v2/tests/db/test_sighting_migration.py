@@ -12,6 +12,7 @@ from app.v2.tests.db.harness import (
     HEAD_REVISION,
     HEAD_V2_OBJECTS,
     REVISION_0003_V2_OBJECTS,
+    REVISION_0004_V2_OBJECTS,
     scalar,
     snapshot_non_v2,
     v2_objects,
@@ -29,8 +30,8 @@ def functions(engine):
     return [r[0] for r in rows(engine, "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'v2' ORDER BY 1")]
 
 
-def test_head_is_0004():
-    assert HEAD_REVISION == "0004"
+def test_head_moved_past_0004():
+    assert HEAD_REVISION >= "0004"
 
 
 def test_upgrade_0003_to_0004_creates_only_the_sighting_objects(clean_db, alembic_cfg):
@@ -41,7 +42,7 @@ def test_upgrade_0003_to_0004_creates_only_the_sighting_objects(clean_db, alembi
     command.upgrade(alembic_cfg(), "0004")
 
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0004"
-    assert v2_objects(clean_db) == HEAD_V2_OBJECTS
+    assert v2_objects(clean_db) == REVISION_0004_V2_OBJECTS
     assert functions(clean_db) == functions_before == ["forbid_evidence_change", "observation_stamp", "source_guard"]  # reused, none added
 
 
@@ -65,7 +66,7 @@ def test_downgrade_refuses_to_discard_sightings_and_rolls_back_completely(migrat
     ingest_evidence(migrated_db, make_command())
     with pytest.raises(Exception, match="observation_sighting contains evidence"):
         command.downgrade(alembic_cfg(), "0003")
-    assert scalar(migrated_db, "SELECT version_num FROM v2.alembic_version") == "0004"
+    assert scalar(migrated_db, "SELECT version_num FROM v2.alembic_version") == HEAD_REVISION
     assert scalar(migrated_db, "SELECT count(*) FROM v2.observation_sighting") == 1
     assert v2_objects(migrated_db) == HEAD_V2_OBJECTS
 

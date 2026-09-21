@@ -168,7 +168,7 @@ pre-deploy command. Nothing in `render.yaml` or the start command changed.
 export V2_DATABASE_URL='postgresql://...'   # the intended database (Render: the External Database URL)
 alembic current                              # prints "V2 migration target: host:port/database" first - check it
 alembic upgrade head
-alembic current                              # expect: 0004 (head)
+alembic current                              # expect: 0005 (head)
 ```
 
 - Target resolution: `V2_DATABASE_URL`, else `DATABASE_URL`. **No `.env` file is
@@ -177,8 +177,9 @@ alembic current                              # expect: 0004 (head)
 - `alembic current`, `heads` and `history` create nothing. `alembic upgrade head`
   creates schema `v2` (if missing), its version table `v2.alembic_version`, and
   (revision 0002) the `v2.source` table with its guard trigger, (revision 0003) the append-only
-  evidence tables `v2.raw_payload` and `v2.observation`, and (revision 0004) the append-only
-  `v2.observation_sighting` acquisition-history table.
+  evidence tables `v2.raw_payload` and `v2.observation`, (revision 0004) the append-only
+  `v2.observation_sighting` acquisition-history table, and (revision 0005) `v2.processing_attempt`
+  (processing history, mutable only through its lifecycle).
 - A second `upgrade` running at the same time waits on a PostgreSQL advisory lock
   (default 30s, `V2_MIGRATION_LOCK_TIMEOUT_SECONDS`) and then finds nothing to do.
 - Preview without a database: `alembic upgrade head --sql`.
@@ -190,8 +191,8 @@ and is tested there. Once V2 holds real evidence, a destructive downgrade is
 **not** the recovery strategy: take a backup/snapshot first, then fix forward
 with a new migration (expand/contract). `downgrade base` also refuses to drop
 schema `v2` if it still contains anything other than Alembic's own bookkeeping, and
-**`downgrade` past 0004 refuses to run while `v2.observation_sighting` holds rows, and past 0003
-while `v2.raw_payload` or `v2.observation` do**: evidence is never discarded by a migration.
+**`downgrade` past 0005 refuses to run while `v2.processing_attempt` holds rows, past 0004 while
+`v2.observation_sighting` does, and past 0003 while `v2.raw_payload` or `v2.observation` do**: evidence is never discarded by a migration.
 
 Whether to automate this (for example a Render pre-deploy command, which I
 believe requires a paid plan - verify) is a separate, later decision.

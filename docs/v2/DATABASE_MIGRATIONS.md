@@ -15,6 +15,7 @@ Status: Phase 1, Increment 2. See ADR-0001 for the truth model.
 | Table definitions (shape only; one per increment) | `app/v2/db/tables.py` |
 | Source persistence | `app/v2/repositories/sources.py` (+ `errors.py`) |
 | Evidence persistence | `app/v2/repositories/raw_payloads.py`, `observations.py`, `sightings.py` |
+| Processing history | `app/v2/repositories/processing_attempts.py`, `app/v2/domain/processing_attempt.py` |
 | Evidence ingestion workflow | `app/v2/ingestion/` (`service.py`, `models.py`, `errors.py`) |
 | What Alembic may see | `app/v2/db/scope.py` |
 | Migration lock | `app/v2/db/locks.py` |
@@ -193,6 +194,49 @@ Connection), so a failure leaves no partial payload, observation or sighting; Po
 final authority under concurrency. A repeat acquisition of identical evidence reuses the payload and the
 Observation and adds a Sighting; if the repeat's non-identity metadata differs, the existing Observation stays
 canonical and the difference is reported in `IngestionResult.differences`, never stored.
+
+### Revision 0005: `v2.processing_attempt` (processing history)
+
+A ProcessingAttempt records "VentureGPS attempted to process this immutable Observation using this
+versioned processor". It is operational history: not evidence, canonical truth, an Observation status, an
+AI result or a candidate. **Observations never change and hold no processing status; "collected but not
+processed" is the absence of any attempt** (`list_unprocessed_observation_ids`), never a stored state.
+
+| Column | Notes |
+|---|---|
+| `id` | `BIGINT GENERATED ALWAYS AS IDENTITY` |
+| `observation_id` | `NOT NULL`, FK `ON DELETE RESTRICT` |
+| `processor_id` | slug, 2-64 chars; identifies the processing implementation (no registry) |
+| `processor_version` | `VersionId` whose name must equal `processor_id` (`fin_extractor.v2` for `fin_extractor`) |
+| `attempt_number` | `INTEGER >= 1`, linear per `(observation_id, processor_id)` **regardless of version** |
+| `status` | `processing / processed / failed / quarantined` (`TEXT` + `CHECK`; no stored "collected") |
+| `started_at` | database clock, set by trigger on insert |
+| `finished_at` | NULL while processing; database clock, set by trigger on the transition |
+| `lease_expires_at` | NOT NULL while processing, NULL once terminal |
+| `reason_code`, `detail_code` | bounded machine codes (`^[a-z][a-z0-9_]{1,63}$`); reason required for failed/quarantined, absent otherwise |
+
+- **Legal state combinations** are one CHECK: processing = no finish, a lease, no failure metadata;
+  processed = finished, no lease, no failure metadata; failed/quarantined = finished, no lease, reason required.
+- **Attempt numbers and concurrency.** `UNIQUE (observation_id, processor_id, attempt_number)` and a partial
+  unique index `(observation_id, processor_id) WHERE status = 'processing'` are the final authority. The
+  repository also serialises starts by locking the Observation row `FOR NO KEY UPDATE` (a lock, never a
+  write), so a losing concurrent start gets a clean `ConflictError(attempt_already_active)`, not an error.
+- **Lifecycle trigger** (`v2.processing_attempt_guard`, specific to this table): inserts must be `processing`
+  with a database `started_at`; `id`, `observation_id`, `processor_id`, `processor_version`, `attempt_number`
+  and `started_at` never change; a terminal row is immutable; a processing row may renew its lease (forward
+  only) or make one transition to a terminal state, when `finished_at` becomes the database clock. `DELETE` and
+  `TRUNCATE` are rejected (history is never removed) by reusing `v2.forbid_evidence_change()`.
+- **Leases.** A lease is a duration chosen by the caller (1 s to 24 h, default 300 s); all timestamps are the
+  database's. An expired lease is **not** a state change: the attempt stays `processing` until
+  `fail_expired_attempt` marks it `failed` with reason `lease_expired`. It is refused if the lease is still live
+  or the attempt is already terminal. A lease can be renewed while `processing` (expired or not) and is never
+  shortened. `as_of` lets tests supply the clock; workers should use the default database clock.
+- **Retry and reprocessing policy** (`check_may_start_attempt`): none yet -> attempt 1; `processing` -> conflict;
+  `failed` -> retry under any version; `processed` or `quarantined` -> only a **later** processor version
+  (never automatically for the same or an older one). A retry is always a NEW attempt; nothing goes back to
+  `processing`.
+- **Failure metadata never carries payload excerpts, exception text, stack traces, prompts or AI output.**
+- **Downgrade** removes only this table and function and refuses to run while any attempt exists.
 
 ### Concurrency
 

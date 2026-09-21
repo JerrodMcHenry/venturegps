@@ -20,6 +20,7 @@ Rule names (Violation.rule):
   pure-imports-disallowed-v2-package  a pure package imports a V2 package outside the pure ones
   pure-reads-environment            a pure package mentions environ/getenv/...
   network-import-forbidden          ingestion/repositories import a network, socket or DNS module
+  deterministic-imports-worker-framework  deterministic code imports a worker/queue/scheduler framework
   layer-violation                   a lower layer imports one built on it
   dynamic-import-unresolvable       importlib.import_module(x)/__import__(x)
                                     with a non-constant or relative argument
@@ -321,6 +322,8 @@ def _check_import(ref: ImportRef, zone: str, rel_path: str, rules: BoundaryRules
     out: list[Violation] = []
 
     if zone in (ZONE_DETERMINISTIC, ZONE_WIRING):
+        if matches_prefix(name, rules.worker_framework_prefixes):
+            out.append(violation("deterministic-imports-worker-framework", f"imports {name}"))
         if zone == ZONE_DETERMINISTIC and matches_prefix(name, [rules.ai_package]):
             out.append(violation("deterministic-imports-ai", f"imports {name}"))
         if is_provider_sdk(name, rules):

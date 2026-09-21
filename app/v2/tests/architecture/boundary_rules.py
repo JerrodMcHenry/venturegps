@@ -78,6 +78,13 @@ class BoundaryRules:
         ("app.v2.domain", ("app.v2.observations",)),
     )
 
+    # Worker, queue and scheduler frameworks: no deterministic V2 module may depend on one until
+    # a worker architecture is chosen and authorised. (Matched as top-level packages.)
+    worker_framework_prefixes: tuple[str, ...] = (
+        "celery", "rq", "arq", "dramatiq", "huey", "kombu", "redis", "apscheduler", "schedule", "sched",
+        "taskiq", "faust", "prefect", "airflow", "dask", "ray",
+    )
+
     # ---- no-network packages (see docstring)
     no_network_packages: tuple[str, ...] = ("app.v2.ingestion", "app.v2.repositories")
     network_forbidden_import_prefixes: tuple[str, ...] = (
