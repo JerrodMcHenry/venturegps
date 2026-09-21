@@ -127,3 +127,31 @@ for its full rules. Key points: benchmark inputs live in `app/calibration/data/<
 filename stem must match a key in `EXPECTED_SCORES` (`expected_scores.py`), expected values are *ranges*
 not exact scores, and the harness must never be used to justify changing the production scoring formula
 based on a single benchmark result — look for patterns across multiple benchmarks first.
+
+## VentureGPS V2 (`app/v2/`) — read before touching it
+
+VentureGPS is being rebuilt as a public startup-market intelligence platform. The V2 truth model and AI
+boundary are recorded in `docs/v2/ADR-0001-truth-model.md`; the rules below are enforced by tests, not just
+convention.
+
+- **Strangler migration.** V2 is built beside legacy in `app/v2/` (and, from Increment 2, its own Postgres schema
+  `v2`). V2 code imports **no** legacy modules (`app.ai`, `app.database`, `app.api`, `app.models`, `app.auth`, ...).
+  Do not rework legacy to serve V2, and do not migrate old analyses into V2 truth — legacy AI output is not evidence.
+- **Legacy DDL freeze.** Do not add new `create_*`/`add_*` migration functions to `app/database/db.py` or the
+  import-time migration block in `app/api.py`. New schema comes through versioned migrations (Alembic, introduced in
+  Increment 2).
+- **AI candidate / canonical boundary.** AI may *propose* typed candidates. AI is never the authority that promotes a
+  candidate to canonical truth; in Phase 1 an AI-derived candidate needs a human decision. Later, a deterministic,
+  versioned rule may accept an AI-produced candidate after independent evidence validation — the rule, not the model,
+  is then the authority. Never let AI confidence become canonical truth. Prompts are not a security or integrity
+  control.
+- **Deterministic core.** Everything in `app/v2` except `app/v2/ai` must work with no AI SDK, no AI credentials and no
+  model network access, and may not import `app.v2.ai`, provider SDKs, or reference `OPENAI_API_KEY` /
+  `ANTHROPIC_API_KEY` / `TAVILY_API_KEY`. `app/v2/ai` may not import V2 repositories/db/workers, SQL drivers, or legacy
+  code. New `app/v2/*` packages are deterministic by default. Rules live in
+  `app/v2/tests/architecture/boundary_rules.py`.
+- **Tests.** Pytest is scoped to V2 only: `python -m pytest` (from this directory). It refuses any path outside
+  `app/v2` (root `conftest.py`), because legacy tests are scripts that hit the real `DATABASE_URL`; run those as
+  `python -m app.tests.<name>`, unchanged.
+- **No commit / push.** Claude Code must not commit or push in this repo. The user runs all git write operations;
+  hand over status, diff, test results, a suggested commit message and the commands.
