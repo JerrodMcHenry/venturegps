@@ -80,12 +80,12 @@ def test_the_candidate_layer_cannot_import_any_resolution_promotion_or_canonical
 
 
 def test_the_canonical_rule_is_structural_no_such_packages_were_created():
-    for name in ("resolution", "promotion", "canonical", "companies", "claims", "evidence_links", "resolution_decisions", "workers"):
+    for name in ("promotion", "canonical", "companies", "claims", "evidence_links", "resolution_decisions", "workers"):
         assert not (REPO_ROOT / "app/v2" / name).exists(), name
     assert set(DEFAULT_RULES.canonical_forbidden_import_prefixes) >= {"app.v2.resolution", "app.v2.promotion", "app.v2.canonical"}
 
 
-def test_the_repository_writes_only_candidate_tables_and_nothing_canonical_exists_to_write_to():
+def test_the_candidate_repository_writes_only_candidate_tables():
     source = (REPO_ROOT / REPO_FILE).read_text()
     inserted = set(re.findall(r"(?:pg_)?insert\((\w+)\)", source))
     assert inserted == {"cc", "ci"}                                            # company_candidate and its identifiers only
@@ -93,8 +93,10 @@ def test_the_repository_writes_only_candidate_tables_and_nothing_canonical_exist
     assert imported_tables == {"company_candidate_identifier_table", "company_candidate_table", "observation_table", "processing_attempt_table"}
     from app.v2.db import tables  # noqa: F401 - registers every V2 table on the metadata
     from app.v2.db.metadata import metadata
-    assert sorted(metadata.tables) == ["v2.company_candidate", "v2.company_candidate_identifier", "v2.observation",
-                                       "v2.observation_sighting", "v2.processing_attempt", "v2.raw_payload", "v2.source"]
+    assert sorted(metadata.tables) == ["v2.company", "v2.company_candidate", "v2.company_candidate_identifier",
+                                       "v2.company_identifier", "v2.company_name", "v2.observation",
+                                       "v2.observation_sighting", "v2.processing_attempt", "v2.raw_payload",
+                                       "v2.resolution_decision", "v2.source"]
 
 
 def test_the_service_never_completes_or_promotes_anything():

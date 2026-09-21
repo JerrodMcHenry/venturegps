@@ -48,6 +48,16 @@ class BoundaryRules:
     ai_package: str = "app.v2.ai"
     excluded_packages: tuple[str, ...] = ("app.v2.tests",)
     wiring_modules: tuple[str, ...] = ("app.v2.wiring",)
+    # The ONLY modules that may write the canonical tables (see canonical_write_tables). Everything else,
+    # including every other repository, is scanned by test_resolution_boundaries.py.
+    canonical_writer_modules: tuple[str, ...] = ("app.v2.resolution._writes",)
+    canonical_table_variables: tuple[str, ...] = (
+        "company_table", "resolution_decision_table", "company_name_table", "company_identifier_table",
+    )
+    canonical_table_names: tuple[str, ...] = ("company", "resolution_decision", "company_name", "company_identifier")
+    # Modules that may import the private writer.
+    canonical_writer_importers: tuple[str, ...] = ("app.v2.resolution.promotion",)
+
     # Modules the static scan covers but the runtime probe cannot import
     # standalone (they only execute under Alembic).
     runtime_probe_skip_modules: tuple[str, ...] = ("app.v2.migrations.env",)
@@ -89,7 +99,7 @@ class BoundaryRules:
     candidate_layer_packages: tuple[str, ...] = ("app.v2.candidates", "app.v2.repositories.company_candidates")
     canonical_forbidden_import_prefixes: tuple[str, ...] = (
         "app.v2.resolution", "app.v2.promotion", "app.v2.canonical", "app.v2.companies", "app.v2.claims",
-        "app.v2.evidence_links", "app.v2.resolution_decisions",
+        "app.v2.evidence_links", "app.v2.resolution_decisions", "app.v2.repositories.companies",
     )
 
     # Worker, queue and scheduler frameworks: no deterministic V2 module may depend on one until
@@ -100,7 +110,7 @@ class BoundaryRules:
     )
 
     # ---- no-network packages (see docstring)
-    no_network_packages: tuple[str, ...] = ("app.v2.ingestion", "app.v2.repositories", "app.v2.candidates")
+    no_network_packages: tuple[str, ...] = ("app.v2.ingestion", "app.v2.repositories", "app.v2.candidates", "app.v2.resolution")
     network_forbidden_import_prefixes: tuple[str, ...] = (
         "socket", "ssl", "http", "urllib.request", "urllib3", "requests", "httpx", "aiohttp",
         "websockets", "ftplib", "smtplib", "telnetlib", "dns",
@@ -149,13 +159,11 @@ class BoundaryRules:
     legacy_import_allowlist: tuple[str, ...] = ()
 
     # What app.v2.ai may import from inside V2 (default-deny for the rest).
-    # Ancestor packages of an entry are implicitly allowed, so
-    # `from app.v2.resolution import ports` works while
-    # `from app.v2.resolution import promote` does not.
+    # Ancestor packages of an entry are implicitly allowed. app.v2.resolution is NOT listed:
+    # the whole resolution/promotion boundary is closed to AI (AI may propose, never decide).
     ai_allowed_v2_imports: tuple[str, ...] = (
         "app.v2.ai",
         "app.v2.domain",
-        "app.v2.resolution.ports",
         "app.v2.candidates.proposer",
     )
     # Named persistence/write surfaces app.v2.ai must never reach. Redundant

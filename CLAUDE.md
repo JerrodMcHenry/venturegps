@@ -152,6 +152,10 @@ convention.
   `ANTHROPIC_API_KEY` / `TAVILY_API_KEY`. `app/v2/ai` may not import V2 repositories/db/workers, SQL drivers, or legacy
   code. New `app/v2/*` packages are deterministic by default. Rules live in
   `app/v2/tests/architecture/boundary_rules.py`.
+- **Resolution boundary.** AI may propose candidates; only a deterministic rule or a human may resolve one into a
+  canonical `Company` (`app/v2/resolution`, revision 0007). Canonical tables are written only by the private
+  `app.v2.resolution._writes` via `promotion.py`; `app.v2.ai` and the candidate layer cannot import the package, and
+  `decided_by_kind` is `rule | human` in the domain and the database. Name-only matches never resolve; there is no merge.
 - **Tests.** Pytest is scoped to V2 only: `python -m pytest` (from this directory). It refuses any path outside
   `app/v2` (root `conftest.py`), because legacy tests are scripts that hit the real `DATABASE_URL`; run those as
   `python -m app.tests.<name>`, unchanged.

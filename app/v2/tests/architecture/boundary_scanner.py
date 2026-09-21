@@ -135,7 +135,7 @@ def is_allowed_v2_for_ai(name: str, rules: BoundaryRules = DEFAULT_RULES) -> boo
         return True
     if matches_prefix(name, rules.ai_allowed_v2_imports):
         return True
-    # ancestor of an allowed entry (e.g. app.v2.resolution for ...resolution.ports)
+    # ancestor of an allowed entry (e.g. app.v2.candidates for app.v2.candidates.proposer)
     return any(entry.startswith(name + ".") for entry in rules.ai_allowed_v2_imports)
 
 

@@ -267,11 +267,10 @@ def test_direct_delete_is_blocked_and_the_rows_survive(stored, table):
 def test_truncate_is_blocked_on_both_tables(stored):
     db = stored[0]
     before = snapshot(db)
-    _, message = rejected(db, "TRUNCATE v2.company_candidate_identifier")                    # nothing references it: only the trigger
-    assert "is append-only: TRUNCATE is not permitted" in message
-    _, message = rejected(db, "TRUNCATE v2.company_candidate", exc=DBAPIError)               # the identifier FK refuses first
-    assert "referenced in a foreign key constraint" in message
-    for sql in ("TRUNCATE v2.company_candidate CASCADE", "TRUNCATE v2.processing_attempt CASCADE", "TRUNCATE v2.company_candidate RESTART IDENTITY CASCADE"):
+    for plain in ("TRUNCATE v2.company_candidate_identifier", "TRUNCATE v2.company_candidate"):
+        _, message = rejected(db, plain, exc=DBAPIError)                                     # referencing tables: the FK rule refuses first
+        assert "referenced in a foreign key constraint" in message
+    for sql in ("TRUNCATE v2.company_candidate_identifier CASCADE", "TRUNCATE v2.company_candidate CASCADE", "TRUNCATE v2.processing_attempt CASCADE", "TRUNCATE v2.company_candidate RESTART IDENTITY CASCADE"):
         _, message = rejected(db, sql)
         assert "is append-only: TRUNCATE is not permitted" in message
     assert snapshot(db) == before

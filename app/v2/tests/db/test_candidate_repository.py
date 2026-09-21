@@ -61,7 +61,10 @@ def test_identifier_proposals_stay_in_the_candidate_tables_and_noncanonical(worl
         (IdentifierType.DOMAIN, "acmerobotics.com"), (IdentifierType.WEBSITE_URL, "https://www.acmerobotics.com")]
     with db.connect() as conn:
         tables = {r[0] for r in conn.execute(text("SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='v2' AND relkind='r'"))}
-    assert not any("claim" in t or "company" == t or "resolution" in t for t in tables)   # nothing canonical exists to receive them
+    assert not any("claim" in t for t in tables)                                        # no claim framework exists
+    with db.connect() as conn:                                                         # and proposing never creates canonical rows
+        for table in ("company", "company_name", "company_identifier", "resolution_decision"):
+            assert conn.execute(text(f"SELECT count(*) FROM v2.{table}")).scalar() == 0
 
 
 def test_created_at_is_assigned_by_the_database(world):

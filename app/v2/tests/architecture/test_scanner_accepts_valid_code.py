@@ -40,8 +40,6 @@ def test_valid_deterministic_code_passes(source):
         "import tiktoken",
         'import os\nkey = os.environ["OPENAI_API_KEY"]',                # ai zone owns its provider config
         "from app.v2.domain.candidate import CompanyCandidate",
-        "from app.v2.resolution.ports import CandidateProposer",
-        "from app.v2.resolution import ports",                         # ancestor of an allowed entry
         "import app.v2",
         "from app.v2 import domain",
         "from . import sibling\nfrom .. import domain",                # relative, within ai's allowance

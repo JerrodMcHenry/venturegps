@@ -20,6 +20,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    Uuid,
     text,
 )
 
@@ -140,4 +141,65 @@ company_candidate_identifier_table = Table(
     UniqueConstraint("candidate_id", "identifier_ordinal", name="uq_company_candidate_identifier_ordinal"),
     UniqueConstraint("candidate_id", "identifier_type", "identifier_value", name="uq_company_candidate_identifier_value"),
     comment="UNTRUSTED proposed identifiers of a company candidate. Not canonical identifiers.",
+)
+
+
+# Revision 0007: the resolution boundary and canonical company identity (append-only; guarded by triggers
+# in the migration). Company rows may only be written by app.v2.resolution._writes.
+company_table = Table(
+    "company",
+    metadata,
+    Column("id", Uuid, primary_key=True, server_default=text("gen_random_uuid()")),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    comment=("TRUSTED canonical company identity anchor: an opaque id and a creation time. "
+             "Created only through a create_company ResolutionDecision."),
+)
+
+resolution_decision_table = Table(
+    "resolution_decision",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("candidate_id", BigInteger, ForeignKey("v2.company_candidate.id", ondelete="RESTRICT"), nullable=False),
+    Column("decision_kind", Text, nullable=False),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT"), nullable=True),
+    Column("decided_by_kind", Text, nullable=False),
+    Column("decided_by_id", Text, nullable=False),
+    Column("reason_code", Text, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    Index("uq_resolution_decision_one_final", "candidate_id", unique=True,
+          postgresql_where=text("decision_kind IN ('create_company', 'attach_to_company', 'reject_candidate')")),
+    Index("uq_resolution_decision_one_create_per_company", "company_id", unique=True,
+          postgresql_where=text("decision_kind = 'create_company'")),
+    comment="Append-only decisions by a RULE or a HUMAN (never AI) that resolve an untrusted company candidate.",
+)
+
+company_name_table = Table(
+    "company_name",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("name_role", Text, nullable=False),
+    Column("resolution_decision_id", BigInteger, ForeignKey("v2.resolution_decision.id", ondelete="RESTRICT"), nullable=False),
+    Column("candidate_id", BigInteger, ForeignKey("v2.company_candidate.id", ondelete="RESTRICT"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("company_id", "name", name="uq_company_name_company_name"),
+    Index("uq_company_name_one_canonical", "company_id", unique=True, postgresql_where=text("name_role = 'canonical'")),
+    comment="Canonical/alias company names accepted by a human resolution decision, with candidate provenance.",
+)
+
+company_identifier_table = Table(
+    "company_identifier",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT"), nullable=False),
+    Column("identifier_type", Text, nullable=False),
+    Column("identifier_value", Text, nullable=False),
+    Column("resolution_decision_id", BigInteger, ForeignKey("v2.resolution_decision.id", ondelete="RESTRICT"), nullable=False),
+    Column("candidate_identifier_id", BigInteger,
+           ForeignKey("v2.company_candidate_identifier.id", ondelete="RESTRICT"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("identifier_type", "identifier_value", name="uq_company_identifier_value"),
+    UniqueConstraint("candidate_identifier_id", name="uq_company_identifier_candidate_identifier"),
+    comment="Canonical normalized company identifiers accepted by a human resolution decision, with candidate provenance.",
 )

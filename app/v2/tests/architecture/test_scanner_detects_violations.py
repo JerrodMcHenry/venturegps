@@ -170,8 +170,13 @@ def test_ai_package_cannot_import_repositories_db_or_sql_drivers(source):
     "source",
     [
         "from app.v2.signals import engine",
-        "from app.v2.resolution import promote",           # only resolution.ports is allowed
-        "from app.v2.resolution.promote import promote_candidate",
+        "from app.v2.resolution import promotion",         # the whole resolution boundary is closed to AI
+        "from app.v2.resolution.promotion import create_company_from_candidate",
+        "from app.v2.resolution.rules import resolve_by_exact_identifier",
+        "from app.v2.resolution._writes import insert_company",
+        "import app.v2.resolution",
+        "from app.v2 import resolution",
+
         "import app.v2.observations.ingest",
     ],
 )

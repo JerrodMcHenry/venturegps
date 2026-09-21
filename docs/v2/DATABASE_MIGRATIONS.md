@@ -248,8 +248,9 @@ Source -> RawPayload -> Observation -> ProcessingAttempt -> Candidate -> [future
 A **Candidate is a proposal**: "processor attempt X proposed that this evidence may describe company Y,
 here are the exact immutable bytes supporting that". It is **not** canonical truth, a Company, a claim, a
 classification or an accepted AI answer, and **nothing in this increment can promote one**: no canonical,
-resolution or claim table exists, and the candidate layer may not import a resolution/promotion package
-(architecture-tested; the packages are deliberately not created). The tables carry table comments saying UNTRUSTED.
+resolution or claim table exists at this revision (revision 0007 adds the explicit resolution boundary), and the
+candidate layer may not import a resolution/promotion package (architecture-tested). The tables carry table comments
+saying UNTRUSTED.
 
 - **Shape.** A candidate belongs to exactly one ProcessingAttempt (which already identifies the Observation,
   processor, version and attempt number, so none of that is duplicated). Identity is
@@ -277,6 +278,49 @@ resolution or claim table exists, and the candidate layer may not import a resol
   them. It does **not** mark the attempt processed: completion stays explicit. A proposer exception leaves no rows and
   surfaces as `ProposerFailedError` with a static message (the exception text may contain evidence and is never copied).
 - **Downgrade** removes only these objects and refuses to run while any candidate exists.
+
+### Revision 0007: `v2.resolution_decision`, `v2.company`, `v2.company_name`, `v2.company_identifier` (the resolution boundary)
+
+```
+Observation -> ProcessingAttempt -> CompanyCandidate [UNTRUSTED] -> ResolutionDecision [rule or human] -> Company [TRUSTED IDENTITY]
+```
+
+Four distinct concepts. **AI may propose. AI may not decide. AI may not promote.** A candidate becomes canonical
+identity only through a `ResolutionDecision` made by a deterministic **rule** or a **human**; validation, a high
+confidence or agreement between models is never a reason. There is no AI authority to misuse: `decided_by_kind` is
+CHECKed to `rule | human` (no enum, no third value, no AI table), actor ids are bounded shapes (`admin:jerrod`,
+`exact_identifier_match.v1`), and ids that name an AI system are refused in Python and in the database.
+
+- **`resolution_decision`** (append-only): `candidate_id`, `decision_kind` (`create_company` | `attach_to_company` |
+  `reject_candidate` | `defer_candidate`), `company_id` (required for create/attach, forbidden otherwise), `decided_by_kind`,
+  `decided_by_id`, `reason_code` (required for reject/defer), database-owned `created_at`. A **rule may only attach**
+  (CHECK), and the insert trigger re-verifies that the candidate's identifiers exactly match ONE company. At most one
+  **final** decision (create/attach/reject) exists per candidate (partial unique index), and nothing may follow a final
+  decision (the trigger row-locks the candidate, then looks). `defer` is recorded but not final. A Company has at most
+  one `create_company` decision.
+- **`company`**: a bare anchor, `id UUID` (database-generated; a writer-supplied id is overwritten) and `created_at`.
+  Identity is not a name, domain, URL, candidate id or model id, so it survives renames and domain changes, and names are
+  not unique. A **deferred constraint trigger** refuses to commit a Company without a `create_company` decision and a
+  canonical name, so even direct SQL cannot mint a Company with no provenance.
+- **`company_name`** (`canonical` | `alias`) and **`company_identifier`** (`domain` | `website_url`): accepted facts, each
+  naming the decision that accepted it and the candidate (identifier) it came from. Only a **human** decision can accept
+  facts (a rule accepts nothing new). One canonical name per company. `(identifier_type, identifier_value)` is unique
+  across all companies: a canonical identifier can never belong to two Companies, and there is no merge.
+- **Normalization** (policy in `app.v2.domain.company`; identical SQL twin `v2.normalize_company_identifier`, parity-tested;
+  identifiers are stored only in normalized form): domains are lowercased, lose one trailing dot and ONE leading `www.`
+  (only while two labels remain); URLs lowercase scheme and host, drop the default port and the fragment, and an empty path
+  becomes `/`. http vs https, www in URLs, query strings and path case are NOT collapsed. No DNS, network or AI. Names are
+  never normalized into identity (`normalize_name_for_blocking` is a search aid only).
+- **Write surface.** Canonical tables are written only by the private `app.v2.resolution._writes`, imported only by
+  `app.v2.resolution.promotion` (`create_company_from_candidate`, `attach_candidate_to_company`, `reject_candidate`,
+  `defer_candidate`), which the single rule `app.v2.resolution.rules.resolve_by_exact_identifier` also uses. There is no
+  generic `create_company`. Reads (`app.v2.repositories.companies`) are unrestricted. Architecture tests fail if any other
+  module writes those tables or if `app.v2.ai` / the candidate layer imports the boundary.
+- **Atomicity.** create = decision + Company + canonical name + identifiers in one transaction (a SAVEPOINT when the
+  caller passes a Connection); attach = decision + newly accepted facts. A conflicting identifier raises
+  `IdentifierConflictError` and rolls everything back. Candidates, attempts and evidence are never modified: resolution
+  state is derived from decision history.
+- **Downgrade** removes only these objects and **refuses** to run while any company, decision, name or identifier exists.
 
 ### Concurrency
 

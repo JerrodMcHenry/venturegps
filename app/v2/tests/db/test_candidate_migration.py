@@ -14,6 +14,7 @@ from app.v2.tests.db.harness import (
     HEAD_REVISION,
     HEAD_V2_OBJECTS,
     REVISION_0005_V2_OBJECTS,
+    REVISION_0006_V2_OBJECTS,
     scalar,
     snapshot_non_v2,
     v2_objects,
@@ -31,8 +32,8 @@ def functions(engine):
     return [r[0] for r in rows(engine, "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'v2' ORDER BY 1")]
 
 
-def test_head_is_0006():
-    assert HEAD_REVISION == "0006"
+def test_head_is_at_least_0006():
+    assert HEAD_REVISION >= "0006"
 
 
 def test_upgrade_0005_to_0006_creates_only_the_candidate_objects(clean_db, alembic_cfg):
@@ -40,13 +41,13 @@ def test_upgrade_0005_to_0006_creates_only_the_candidate_objects(clean_db, alemb
     assert v2_objects(clean_db) == REVISION_0005_V2_OBJECTS
     command.upgrade(alembic_cfg(), "0006")
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0006"
-    assert v2_objects(clean_db) == HEAD_V2_OBJECTS
+    assert v2_objects(clean_db) == REVISION_0006_V2_OBJECTS
     assert functions(clean_db) == ["company_candidate_guard", "company_candidate_identifier_guard", "forbid_evidence_change",
                                    "observation_stamp", "processing_attempt_guard", "source_guard"]
 
 
 def test_downgrade_0006_to_0005_removes_only_increment_8_objects(clean_db, alembic_cfg):
-    command.upgrade(alembic_cfg(), "head")
+    command.upgrade(alembic_cfg(), "0006")
     command.downgrade(alembic_cfg(), "0005")
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0005"
     assert v2_objects(clean_db) == REVISION_0005_V2_OBJECTS
@@ -138,10 +139,12 @@ def test_candidate_tables_are_labelled_untrusted_and_no_canonical_tables_exist(m
     for table in ("company_candidate", "company_candidate_identifier"):
         assert "UNTRUSTED" in scalar(migrated_db, "SELECT obj_description(to_regclass(:t)::oid, 'pg_class')", t=f"v2.{table}")
     names = {r[0] for r in rows(migrated_db, "SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'v2' AND c.relkind = 'r'")}
+    # Increment 9 legitimately added the resolution boundary and canonical identity; nothing beyond it exists.
     assert names == {"alembic_version", "source", "raw_payload", "observation", "observation_sighting", "processing_attempt",
-                     "company_candidate", "company_candidate_identifier"}
-    for forbidden in ("company", "claim", "resolution", "decision", "evidence_link", "identifier_claim", "merge", "market", "financing"):
-        assert not any(forbidden == n or n.startswith(forbidden + "_") or n.endswith("_" + forbidden) for n in names - {"company_candidate", "company_candidate_identifier"}), forbidden
+                     "company_candidate", "company_candidate_identifier",
+                     "company", "company_name", "company_identifier", "resolution_decision"}
+    for forbidden in ("claim", "evidence_link", "identifier_claim", "merge", "market", "financing"):
+        assert not any(forbidden == n or n.startswith(forbidden + "_") or n.endswith("_" + forbidden) for n in names), forbidden
 
 
 def test_the_candidate_tables_carry_no_ai_or_canonical_columns(migrated_db):
