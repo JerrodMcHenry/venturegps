@@ -1,0 +1,90 @@
+"""V2 migrations against the disposable test database (guarded: see guard.py)."""
+
+import pytest
+from alembic import command
+from alembic.script import ScriptDirectory
+from sqlalchemy import text
+
+from app.v2.tests.db.harness import make_alembic_config, scalar, v2_objects
+
+pytestmark = pytest.mark.db
+
+HEAD = "0001"
+
+
+def schema_exists(engine) -> bool:
+    return scalar(engine, "SELECT count(*) FROM pg_namespace WHERE nspname = 'v2'") == 1
+
+
+def test_upgrade_base_to_head_creates_schema_and_v2_version_table(clean_db, alembic_cfg):
+    assert not schema_exists(clean_db)
+
+    command.upgrade(alembic_cfg(), "head")
+
+    assert schema_exists(clean_db)
+    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == HEAD
+    assert HEAD == ScriptDirectory.from_config(make_alembic_config()).get_current_head()
+    assert v2_objects(clean_db) == [("alembic_version", "r")]  # no domain tables
+    assert "VentureGPS V2" in scalar(clean_db, "SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace WHERE nspname = 'v2'")
+
+
+def test_version_table_is_in_v2_and_not_in_public(clean_db, alembic_cfg):
+    command.upgrade(alembic_cfg(), "head")
+    assert scalar(clean_db, "SELECT to_regclass('v2.alembic_version')") is not None
+    assert scalar(clean_db, "SELECT to_regclass('public.alembic_version')") is None
+
+
+def test_upgrade_is_idempotent(clean_db, alembic_cfg):
+    command.upgrade(alembic_cfg(), "head")
+    command.upgrade(alembic_cfg(), "head")
+    assert scalar(clean_db, "SELECT count(*) FROM v2.alembic_version") == 1
+
+
+def test_downgrade_head_to_base_leaves_no_v2_objects(clean_db, alembic_cfg):
+    command.upgrade(alembic_cfg(), "head")
+    command.downgrade(alembic_cfg(), "base")
+    assert not schema_exists(clean_db)
+    assert scalar(clean_db, "SELECT to_regclass('v2.alembic_version')") is None
+
+
+def test_upgrade_again_after_downgrade(clean_db, alembic_cfg):
+    command.upgrade(alembic_cfg(), "head")
+    command.downgrade(alembic_cfg(), "base")
+    command.upgrade(alembic_cfg(), "head")
+    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == HEAD
+    assert v2_objects(clean_db) == [("alembic_version", "r")]
+
+
+def test_downgrade_minus_one_and_base_are_equivalent_for_a_single_revision(clean_db, alembic_cfg):
+    command.upgrade(alembic_cfg(), "head")
+    command.downgrade(alembic_cfg(), "-1")
+    assert not schema_exists(clean_db)
+
+
+def test_upgrade_works_when_the_schema_already_exists(clean_db, alembic_cfg):
+    with clean_db.begin() as conn:
+        conn.execute(text("CREATE SCHEMA v2"))
+    command.upgrade(alembic_cfg(), "head")
+    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == HEAD
+
+
+def test_read_only_commands_do_not_create_anything(clean_db, alembic_cfg):
+    cfg = alembic_cfg()
+    command.current(cfg)
+    command.heads(cfg)
+    command.history(cfg)
+    assert not schema_exists(clean_db)
+
+
+def test_downgrade_to_base_refuses_to_drop_a_schema_holding_foreign_objects(clean_db, alembic_cfg):
+    command.upgrade(alembic_cfg(), "head")
+    with clean_db.begin() as conn:
+        conn.execute(text("CREATE TABLE v2.stray_table (id int)"))
+
+    with pytest.raises(Exception, match="stray_table|depend"):
+        command.downgrade(alembic_cfg(), "base")
+
+    # The whole downgrade rolled back: still at head, schema, comment and stray table intact.
+    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == HEAD
+    assert scalar(clean_db, "SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace WHERE nspname = 'v2'") is not None
+    assert scalar(clean_db, "SELECT to_regclass('v2.stray_table')") is not None

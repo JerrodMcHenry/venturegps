@@ -152,3 +152,41 @@ the deploy sequence.
   if it ever needs to be reset, delete and recreate the Render Postgres
   resource rather than attempting to hand-edit it. Do not do this to the
   production database once one exists.
+
+## VentureGPS V2 database migrations (manual)
+
+V2 owns its own PostgreSQL schema, `v2`, managed by Alembic. It does **not**
+touch the legacy `public` tables, and the legacy startup migrations described
+above are unchanged. Full design: `docs/v2/DATABASE_MIGRATIONS.md`.
+
+**V2 migrations are run by hand, on purpose.** They do not run at application
+import, when FastAPI starts, in the Render build/start commands, or in a
+pre-deploy command. Nothing in `render.yaml` or the start command changed.
+
+```bash
+# from the repo root, with the venv active
+export V2_DATABASE_URL='postgresql://...'   # the intended database (Render: the External Database URL)
+alembic current                              # prints "V2 migration target: host:port/database" first - check it
+alembic upgrade head
+alembic current                              # expect: 0001 (head)
+```
+
+- Target resolution: `V2_DATABASE_URL`, else `DATABASE_URL`. **No `.env` file is
+  loaded.** The command logs `V2 migration target: <host>:<port>/<database>`
+  (never the password) before doing anything - read it before proceeding.
+- `alembic current`, `heads` and `history` create nothing. `alembic upgrade head`
+  creates schema `v2` (if missing) and its version table `v2.alembic_version`.
+- A second `upgrade` running at the same time waits on a PostgreSQL advisory lock
+  (default 30s, `V2_MIGRATION_LOCK_TIMEOUT_SECONDS`) and then finds nothing to do.
+- Preview without a database: `alembic upgrade head --sql`.
+- Run `upgrade` **before** deploying code that needs a newer V2 schema.
+  (Nothing deployed uses V2 tables yet.)
+
+**Rollback.** `alembic downgrade` exists for disposable, dev and test databases
+and is tested there. Once V2 holds real evidence, a destructive downgrade is
+**not** the recovery strategy: take a backup/snapshot first, then fix forward
+with a new migration (expand/contract). `downgrade base` also refuses to drop
+schema `v2` if it still contains anything other than Alembic's own bookkeeping.
+
+Whether to automate this (for example a Render pre-deploy command, which I
+believe requires a paid plan - verify) is a separate, later decision.

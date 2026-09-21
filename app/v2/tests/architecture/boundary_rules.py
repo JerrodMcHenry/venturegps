@@ -37,6 +37,9 @@ class BoundaryRules:
     ai_package: str = "app.v2.ai"
     excluded_packages: tuple[str, ...] = ("app.v2.tests",)
     wiring_modules: tuple[str, ...] = ("app.v2.wiring",)
+    # Modules the static scan covers but the runtime probe cannot import
+    # standalone (they only execute under Alembic).
+    runtime_probe_skip_modules: tuple[str, ...] = ("app.v2.migrations.env",)
 
     # Model-provider SDKs (plus Tavily: a nondeterministic external search
     # service the deterministic core must not depend on either).

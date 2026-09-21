@@ -138,8 +138,10 @@ convention.
   `v2`). V2 code imports **no** legacy modules (`app.ai`, `app.database`, `app.api`, `app.models`, `app.auth`, ...).
   Do not rework legacy to serve V2, and do not migrate old analyses into V2 truth — legacy AI output is not evidence.
 - **Legacy DDL freeze.** Do not add new `create_*`/`add_*` migration functions to `app/database/db.py` or the
-  import-time migration block in `app/api.py`. New schema comes through versioned migrations (Alembic, introduced in
-  Increment 2).
+  import-time migration block in `app/api.py`. New V2 schema comes through Alembic (`alembic.ini`,
+  `app/v2/migrations/`), scoped to Postgres schema `v2` with its own `v2.alembic_version`; it never manages legacy
+  `public` tables. V2 migrations are run manually (`alembic upgrade head`) — never at import, never at FastAPI
+  startup. See `docs/v2/DATABASE_MIGRATIONS.md` and the manual-migration section of `DEPLOYMENT.md`.
 - **AI candidate / canonical boundary.** AI may *propose* typed candidates. AI is never the authority that promotes a
   candidate to canonical truth; in Phase 1 an AI-derived candidate needs a human decision. Later, a deterministic,
   versioned rule may accept an AI-produced candidate after independent evidence validation — the rule, not the model,
@@ -153,5 +155,8 @@ convention.
 - **Tests.** Pytest is scoped to V2 only: `python -m pytest` (from this directory). It refuses any path outside
   `app/v2` (root `conftest.py`), because legacy tests are scripts that hit the real `DATABASE_URL`; run those as
   `python -m app.tests.<name>`, unchanged.
+  V2 DB tests (`-m db`) need a disposable database via `V2_TEST_DATABASE_URL` and **never** fall back to
+  `DATABASE_URL`; the fail-closed safety rule is in `docs/v2/DATABASE_MIGRATIONS.md`. Do not point them at a real
+  database.
 - **No commit / push.** Claude Code must not commit or push in this repo. The user runs all git write operations;
   hand over status, diff, test results, a suggested commit message and the commands.

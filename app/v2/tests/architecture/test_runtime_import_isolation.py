@@ -4,6 +4,7 @@ providers, app.v2.ai, or legacy modules -- transitively, which the static
 scan cannot see. Also proves the probe itself can detect a leak.
 """
 
+from app.v2.tests.architecture.boundary_rules import DEFAULT_RULES
 from app.v2.tests.architecture.boundary_scanner import (
     REPO_ROOT,
     ZONE_AI,
@@ -24,7 +25,10 @@ def _summarize(names, limit=12):
 
 def test_deterministic_v2_modules_import_cleanly_without_ai_or_legacy():
     zones = scan_tree(REPO_ROOT).modules_by_zone
-    modules = zones.get(ZONE_DETERMINISTIC, []) + zones.get(ZONE_WIRING, [])
+    modules = [
+        m for m in zones.get(ZONE_DETERMINISTIC, []) + zones.get(ZONE_WIRING, [])
+        if m not in DEFAULT_RULES.runtime_probe_skip_modules
+    ]
     assert "app.v2" in modules
 
     probe = run_import_probe(modules, cwd=REPO_ROOT)
