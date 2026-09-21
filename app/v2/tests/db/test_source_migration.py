@@ -6,6 +6,7 @@ from alembic import command
 from app.v2.tests.db.harness import (
     HEAD_V2_OBJECTS,
     REVISION_0001_V2_OBJECTS,
+    REVISION_0002_V2_OBJECTS,
     scalar,
     snapshot_non_v2,
     v2_objects,
@@ -28,7 +29,7 @@ def test_upgrade_0001_to_0002_creates_only_the_source_objects(clean_db, alembic_
     command.upgrade(alembic_cfg(), "0002")
 
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0002"
-    assert v2_objects(clean_db) == HEAD_V2_OBJECTS
+    assert v2_objects(clean_db) == REVISION_0002_V2_OBJECTS
     assert rows(clean_db, "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'v2'") == [("source_guard",)]
 
 

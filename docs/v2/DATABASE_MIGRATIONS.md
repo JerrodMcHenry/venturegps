@@ -14,6 +14,7 @@ Status: Phase 1, Increment 2. See ADR-0001 for the truth model.
 | Schema metadata | `app/v2/db/metadata.py` |
 | Table definitions (shape only; one per increment) | `app/v2/db/tables.py` |
 | Source persistence | `app/v2/repositories/sources.py` (+ `errors.py`) |
+| Evidence persistence | `app/v2/repositories/raw_payloads.py`, `observations.py` |
 | What Alembic may see | `app/v2/db/scope.py` |
 | Migration lock | `app/v2/db/locks.py` |
 
@@ -82,6 +83,60 @@ Also `CHECK (updated_at >= created_at)`.
   existing Source unchanged (registration never rewrites name/url/is_active); a different
   `source_type` or `collection_method` raises `ConflictError`. There is no delete operation:
   a Source is deactivated (`is_active = false`), which keeps the row and changes nothing else.
+
+### Revision 0003: `v2.raw_payload` and `v2.observation` (immutable evidence)
+
+Storage and integrity only. Ingestion, sightings and processing state come in later increments.
+
+**`v2.raw_payload`**: the exact received bytes, content-addressed.
+
+| Column | Type | Notes |
+|---|---|---|
+| `content_hash` | `TEXT` | primary key: `sha256(bytes)`, lowercase hex |
+| `storage_kind` | `TEXT NOT NULL` | `CHECK IN ('inline')`; leaves room for external storage later |
+| `size_bytes` | `BIGINT NOT NULL` | `0 <= size <= 1048576` (1 MiB, `MAX_INLINE_PAYLOAD_BYTES`) |
+| `payload_bytes` | `BYTEA` | present iff `storage_kind = 'inline'`; length must equal `size_bytes` |
+
+A CHECK recomputes `sha256(payload_bytes)` and compares it to the key, so the database itself
+refuses bytes that do not match their hash. The repository computes the hash; a caller never
+supplies one. Identical bytes are stored once. Reads verify the hash and size and raise
+`InvariantViolationError` on a mismatch (corrupted evidence fails loudly and is never repaired).
+The 1 MiB limit is defined once in `app/v2/domain/payload.py`; the migration carries the literal
+(migrations are frozen snapshots) and a test asserts they agree. Oversize is rejected, never truncated.
+
+**`v2.observation`**: "this Source exposed these bytes at this observed time". Evidence only.
+
+| Column | Notes |
+|---|---|
+| `id` | `BIGINT GENERATED ALWAYS AS IDENTITY` |
+| `source_id` | FK to `v2.source(id)`, `ON DELETE RESTRICT` |
+| `source_record_identifier` | nullable; 1-512 chars, no control characters |
+| `observation_type` | slug shape |
+| `event_time`, `event_time_precision` | both NULL (unknown) or both set; precision in `instant/day/month/year`; a CHECK forbids a start with finer detail than its precision |
+| `observed_time` | `NOT NULL`, caller-supplied |
+| `recorded_time` | `NOT NULL`, **assigned by a trigger** (`clock_timestamp()`), never by the caller |
+| `collection_version`, `collector_id` | shape-checked |
+| `content_hash` | FK to `v2.raw_payload`, `ON DELETE RESTRICT` |
+| `declared_media_type` | nullable; normalized `type/subtype` shape |
+| `sniffed_media_type` | one of the five stored values (`unknown` included) |
+
+There is no status, AI, company or interpretation column, and media agreement is **derived** from
+declared and sniffed (not stored). No ordering between `event_time` and `observed_time` is enforced.
+
+- **Dedup identity** is `(source_id, source_record_identifier, content_hash)`, where "no record
+  identifier" is a value. Ordinary `UNIQUE` treats NULLs as distinct, and `UNIQUE NULLS NOT
+  DISTINCT` needs PostgreSQL 15, so identity is two partial unique indexes:
+  `uq_observation_dedup_with_record_id` (identifier present) and
+  `uq_observation_dedup_without_record_id` (`(source_id, content_hash)` where it is absent).
+  Storing an existing identity returns the existing, unmodified Observation (a later increment
+  records a re-acquisition as a sighting).
+- **Append-only, for every writer:** `UPDATE`, `DELETE` and `TRUNCATE` on both tables are rejected
+  by trigger (`restrict_violation`), including no-op updates and `INSERT ... ON CONFLICT DO UPDATE`.
+  Both foreign keys are `RESTRICT`, so a Source or payload that evidence references cannot be
+  removed. (A superuser who disables triggers or drops constraints can still defeat this; that is an
+  operator action, not a normal path.)
+- **Downgrade** from 0003 removes only these objects and **refuses to run while either table holds
+  rows**: back the evidence up and drop the tables by hand if you truly mean to discard it.
 
 ### Concurrency
 

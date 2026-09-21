@@ -33,13 +33,11 @@ database constraint failures surface as InvariantViolationError (constraint
 names are our own; no data values are included).
 """
 
-from contextlib import contextmanager
 from dataclasses import dataclass
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.exc import IntegrityError
 
 from app.v2.db.tables import source_table as t
 from app.v2.domain.errors import DomainError, InvalidInputError, InvariantViolationError
@@ -52,6 +50,8 @@ from app.v2.domain.source import (
     validate_source_name,
     validate_source_url,
 )
+from app.v2.repositories._db import connection as _connection
+from app.v2.repositories._db import translating_integrity_errors as _translating_integrity_errors
 from app.v2.repositories.errors import ConflictError, NotFoundError
 
 
@@ -70,26 +70,6 @@ class RegistrationResult:
 
 
 # ---------------------------------------------------------------- plumbing
-
-@contextmanager
-def _connection(db: Engine | Connection):
-    if isinstance(db, Engine):
-        with db.begin() as connection:
-            yield connection
-    else:
-        yield db
-
-
-@contextmanager
-def _translating_integrity_errors():
-    try:
-        yield
-    except IntegrityError as exc:
-        diag = getattr(exc.orig, "diag", None)
-        detail = (getattr(diag, "constraint_name", None) or getattr(diag, "message_primary", None)
-                  or "constraint violated")
-        raise InvariantViolationError("persistence_constraint_violation", f"database rejected the change: {detail}") from None
-
 
 def _to_stored(row) -> StoredSource:
     m = row._mapping

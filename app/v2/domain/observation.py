@@ -13,7 +13,7 @@ enforced, and event_time may be None (unknown).
 import re
 from typing import Annotated
 
-from pydantic import AfterValidator, field_validator
+from pydantic import AfterValidator, Field, field_validator
 
 from app.v2.domain.base import DomainModel
 from app.v2.domain.content import (
@@ -97,3 +97,19 @@ class Observation(DomainModel):
     def dedup_key(self) -> tuple[str, str | None, str]:
         """Two observations are the same evidence state iff this is equal."""
         return (self.source_key, self.source_record_identifier, self.content_hash)
+
+
+class StoredObservation(DomainModel):
+    """An Observation as persisted: the unchanged Observation plus what only
+    persistence knows. Evidence is immutable, so there is no updated_time.
+
+    id             opaque persistence identifier
+    source_id      opaque identifier of the persisted Source (observation.source_key names it)
+    recorded_time  when VentureGPS persisted it: assigned by the database, never by the caller,
+                   and independent of event_time and observed_time
+    """
+
+    id: int = Field(gt=0)
+    source_id: int = Field(gt=0)
+    observation: Observation
+    recorded_time: UtcDatetime

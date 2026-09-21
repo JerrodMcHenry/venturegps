@@ -21,6 +21,10 @@ MODULES = [
     "app.v2.db.locks",
     "app.v2.db.tables",
     "app.v2.repositories.sources",
+    "app.v2.repositories.raw_payloads",
+    "app.v2.repositories.observations",
+    "app.v2.domain.payload",
+    "app.v2.migrations.versions.0003_create_raw_payload_and_observation",
     "app.v2.migrations.versions.0002_create_source",
     "app.v2.migrations.versions.0001_establish_v2_namespace",
 ]
