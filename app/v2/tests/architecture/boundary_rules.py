@@ -18,6 +18,13 @@ ZONES (derived from the module path, see boundary_scanner.zone_for_module):
   (excluded)     app.v2.tests -- tests legitimately import forbidden names
                  as sample data.
 
+PURE PACKAGES (a stricter layer inside the deterministic zone): every module
+under `pure_packages` (app.v2.domain, app.v2.observations) is pure
+computation: no database or SQL, no persistence/worker/config/migration
+packages, no network, no subprocess, no environment access, and no imports
+from other V2 packages beyond the pure ones. `layer_rules` adds one-way
+layering (the domain never imports the packages built on it).
+
 LIMITS: this is a static tripwire. It cannot see string-built module names
 or obfuscated env names; runtime_probe.py complements it by importing the
 modules in a clean subprocess and inspecting sys.modules.
@@ -40,6 +47,32 @@ class BoundaryRules:
     # Modules the static scan covers but the runtime probe cannot import
     # standalone (they only execute under Alembic).
     runtime_probe_skip_modules: tuple[str, ...] = ("app.v2.migrations.env",)
+
+    # ---- pure packages (see docstring)
+    pure_packages: tuple[str, ...] = ("app.v2.domain", "app.v2.observations")
+    pure_allowed_v2_imports: tuple[str, ...] = ("app.v2.domain", "app.v2.observations")
+    pure_forbidden_import_prefixes: tuple[str, ...] = (
+        # database / SQL
+        "sqlalchemy", "alembic", "psycopg2", "psycopg", "asyncpg", "sqlite3",
+        # V2 persistence, workers, configuration (reads the environment), migrations
+        "app.v2.db", "app.v2.repositories", "app.v2.workers", "app.v2.config", "app.v2.migrations",
+        # environment, processes, network
+        "os", "subprocess", "socket", "ssl", "http", "urllib.request", "urllib3",
+        "requests", "httpx", "aiohttp", "websockets", "ftplib", "smtplib", "dotenv",
+    )
+    # Identifiers pure code may not even mention (environment access).
+    pure_forbidden_names: tuple[str, ...] = ("environ", "environb", "getenv", "getenvb", "putenv")
+    # Modules that ubiquitous stdlib/third-party code loads anyway, so the
+    # RUNTIME probe checks only this subset of pure_forbidden_import_prefixes.
+    pure_forbidden_loaded_prefixes: tuple[str, ...] = (
+        "sqlalchemy", "alembic", "psycopg2", "psycopg", "asyncpg",
+        "app.v2.db", "app.v2.repositories", "app.v2.workers", "app.v2.config", "app.v2.migrations",
+        "requests", "httpx", "aiohttp", "urllib3", "websockets", "dotenv",
+    )
+    # (package, prefixes it may not import): one-way layering inside the pure layer.
+    layer_rules: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("app.v2.domain", ("app.v2.observations",)),
+    )
 
     # Model-provider SDKs (plus Tavily: a nondeterministic external search
     # service the deterministic core must not depend on either).

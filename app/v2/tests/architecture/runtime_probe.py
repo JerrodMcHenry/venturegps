@@ -2,7 +2,7 @@
 Runtime complement to the static scanner.
 
 Imports modules in a FRESH subprocess (clean interpreter, AI credentials
-stripped from the environment) and reports which modules ended up in
+and database URLs stripped from the environment) and reports which modules ended up in
 sys.modules. Unlike the AST scan this sees transitive imports, but it only
 proves what the imported code did on import.
 """
@@ -39,7 +39,8 @@ class ProbeResult:
 
 
 def run_import_probe(modules: list[str], cwd: Path, pythonpath: Path | None = None) -> ProbeResult:
-    env = {k: v for k, v in os.environ.items() if k not in DEFAULT_RULES.forbidden_env_names}
+    stripped = set(DEFAULT_RULES.forbidden_env_names) | {"DATABASE_URL", "V2_DATABASE_URL", "V2_TEST_DATABASE_URL"}
+    env = {k: v for k, v in os.environ.items() if k not in stripped}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     if pythonpath is not None:
         env["PYTHONPATH"] = str(pythonpath)

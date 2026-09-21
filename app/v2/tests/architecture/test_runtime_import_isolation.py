@@ -11,6 +11,8 @@ from app.v2.tests.architecture.boundary_scanner import (
     ZONE_DETERMINISTIC,
     ZONE_WIRING,
     is_forbidden_loaded_for_ai,
+    is_forbidden_loaded_for_pure,
+    is_pure_module,
     is_forbidden_loaded_for_deterministic,
     scan_tree,
 )
@@ -36,6 +38,19 @@ def test_deterministic_v2_modules_import_cleanly_without_ai_or_legacy():
     assert probe.failed == {}, f"deterministic modules failed to import: {probe.failed}"
     leaked = [name for name in probe.loaded if is_forbidden_loaded_for_deterministic(name)]
     assert leaked == [], f"deterministic import loaded forbidden modules: {_summarize(leaked)}"
+
+
+def test_pure_v2_modules_import_without_database_env_or_forbidden_loads():
+    zones = scan_tree(REPO_ROOT).modules_by_zone
+    pure = [m for m in zones[ZONE_DETERMINISTIC] if is_pure_module(m)]
+    assert {"app.v2.domain.time", "app.v2.domain.observation", "app.v2.observations.hashing",
+            "app.v2.observations.media"} <= set(pure)
+
+    probe = run_import_probe(pure, cwd=REPO_ROOT)  # no DATABASE_URL, V2_DATABASE_URL or AI keys in its environment
+
+    assert probe.failed == {}, f"pure modules failed to import: {probe.failed}"
+    leaked = [name for name in probe.loaded if is_forbidden_loaded_for_pure(name)]
+    assert leaked == [], f"pure import loaded forbidden modules: {_summarize(leaked)}"
 
 
 def test_ai_package_imports_without_persistence_or_legacy():

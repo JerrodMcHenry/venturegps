@@ -7,7 +7,7 @@ import pytest
 
 from app.v2.tests.architecture.boundary_scanner import scan_source
 
-DET = "app/v2/domain/sample.py"   # deterministic zone (also a sub-package file)
+DET = "app/v2/core/sample.py"   # deterministic zone, NOT pure (pure rules: test_pure_zone_rules.py)
 AI = "app/v2/ai/sample.py"        # ai zone
 WIRING = "app/v2/wiring.py"
 
@@ -64,7 +64,7 @@ def test_deterministic_code_cannot_import_provider_sdks(source):
         "from app.v2 import ai",
         "from app.v2.ai import proposer",
         "from app.v2.ai.proposer import Proposer",
-        "from . import x\nfrom .. import ai",           # relative, from app/v2/domain/sample.py
+        "from . import x\nfrom .. import ai",           # relative, from app/v2/core/sample.py
         "from ..ai import proposer",
         "from ..ai.proposer import Proposer",
         'import importlib\nimportlib.import_module("app.v2.ai.proposer")',
@@ -78,7 +78,7 @@ def test_deterministic_code_cannot_import_app_v2_ai(source):
 def test_relative_import_of_ai_from_package_init_and_top_level():
     assert IMPORTS_AI in rules_of("from . import ai", "app/v2/__init__.py")
     assert IMPORTS_AI in rules_of("from .ai import x", "app/v2/somemodule.py")
-    assert IMPORTS_AI in rules_of("from ... import ai", "app/v2/domain/deep/sample.py")
+    assert IMPORTS_AI in rules_of("from ... import ai", "app/v2/core/deep/sample.py")
 
 
 @pytest.mark.parametrize(

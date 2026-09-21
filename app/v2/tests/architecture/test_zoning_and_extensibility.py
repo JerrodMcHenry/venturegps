@@ -53,7 +53,7 @@ def test_rules_are_extensible_without_touching_the_scanner():
         forbidden_env_names=DEFAULT_RULES.forbidden_env_names + ("BRANDNEW_API_KEY",),
         ai_forbidden_import_prefixes=DEFAULT_RULES.ai_forbidden_import_prefixes + ("app.v2.exports",),
     )
-    det = "app/v2/domain/x.py"
+    det = "app/v2/core/x.py"
     assert scan_source("import brandnewllm", det) == []
     assert scan_source("import brandnewllm", det, stricter) != []
     assert scan_source('k = "BRANDNEW_API_KEY"', det) == []
@@ -65,9 +65,9 @@ def test_legacy_allowlist_is_empty_by_default_and_opt_in():
     assert DEFAULT_RULES.legacy_import_allowlist == ()
     allowed = replace(DEFAULT_RULES, legacy_import_allowlist=("app.observability",))
     src = "from app.observability import capture_exception"
-    assert scan_source(src, "app/v2/domain/x.py") != []
-    assert scan_source(src, "app/v2/domain/x.py", allowed) == []
-    assert scan_source("import app.database.db", "app/v2/domain/x.py", allowed) != []
+    assert scan_source(src, "app/v2/core/x.py") != []
+    assert scan_source(src, "app/v2/core/x.py", allowed) == []
+    assert scan_source("import app.database.db", "app/v2/core/x.py", allowed) != []
 
 
 def _write(root, rel, text):
@@ -78,16 +78,16 @@ def _write(root, rel, text):
 
 def test_scan_tree_finds_planted_violations_and_respects_zones(tmp_path):
     _write(tmp_path, "app/v2/__init__.py", "")
-    _write(tmp_path, "app/v2/domain/__init__.py", "")
-    _write(tmp_path, "app/v2/domain/bad_provider.py", "import openai\n")
-    _write(tmp_path, "app/v2/domain/bad_ai.py", "from app.v2 import ai\n")
-    _write(tmp_path, "app/v2/domain/bad_env.py", 'import os\nos.getenv("OPENAI_API_KEY")\n')
+    _write(tmp_path, "app/v2/core/__init__.py", "")
+    _write(tmp_path, "app/v2/core/bad_provider.py", "import openai\n")
+    _write(tmp_path, "app/v2/core/bad_ai.py", "from app.v2 import ai\n")
+    _write(tmp_path, "app/v2/core/bad_env.py", 'import os\nos.getenv("OPENAI_API_KEY")\n')
     _write(tmp_path, "app/v2/signals/x.py", "import anthropic\n")            # never-registered package
     _write(tmp_path, "app/v2/ai/__init__.py", "")
     _write(tmp_path, "app/v2/ai/ok_provider.py", "import openai\n")           # allowed in ai
     _write(tmp_path, "app/v2/ai/bad_persistence.py", "from app.v2.repositories import x\n")
     _write(tmp_path, "app/v2/tests/test_excluded.py", "import openai\nfrom app.v2 import ai\n")
-    _write(tmp_path, "app/v2/domain/broken.py", "def broken(:\n")
+    _write(tmp_path, "app/v2/core/broken.py", "def broken(:\n")
 
     result = scan_tree(tmp_path)
     by_file = {}
@@ -95,12 +95,12 @@ def test_scan_tree_finds_planted_violations_and_respects_zones(tmp_path):
         by_file.setdefault(v.path, set()).add(v.rule)
 
     assert by_file == {
-        "app/v2/domain/bad_provider.py": {"deterministic-imports-provider-sdk"},
-        "app/v2/domain/bad_ai.py": {"deterministic-imports-ai"},
-        "app/v2/domain/bad_env.py": {"deterministic-references-ai-env"},
+        "app/v2/core/bad_provider.py": {"deterministic-imports-provider-sdk"},
+        "app/v2/core/bad_ai.py": {"deterministic-imports-ai"},
+        "app/v2/core/bad_env.py": {"deterministic-references-ai-env"},
         "app/v2/signals/x.py": {"deterministic-imports-provider-sdk"},
         "app/v2/ai/bad_persistence.py": {"ai-imports-persistence"},
-        "app/v2/domain/broken.py": {"unparseable-source"},
+        "app/v2/core/broken.py": {"unparseable-source"},
     }
     assert "app/v2/tests/test_excluded.py" not in result.files_scanned
     assert "app/v2/ai/ok_provider.py" in result.files_scanned

@@ -14,6 +14,12 @@ Rule names (Violation.rule):
                                     V2 repository/db/worker package
   ai-imports-disallowed-v2-package  app.v2.ai imports a V2 package outside its allowlist
   ai-imports-legacy                 app.v2.ai imports a legacy app.* module
+  pure-imports-forbidden            a pure package (app.v2.domain / app.v2.observations)
+                                    imports a database, SQL, network, process, config
+                                    or persistence module
+  pure-imports-disallowed-v2-package  a pure package imports a V2 package outside the pure ones
+  pure-reads-environment            a pure package mentions environ/getenv/...
+  layer-violation                   a lower layer imports one built on it
   dynamic-import-unresolvable       importlib.import_module(x)/__import__(x)
                                     with a non-constant or relative argument
   unparseable-source                file cannot be parsed (fail closed)
@@ -128,6 +134,19 @@ def is_allowed_v2_for_ai(name: str, rules: BoundaryRules = DEFAULT_RULES) -> boo
         return True
     # ancestor of an allowed entry (e.g. app.v2.resolution for ...resolution.ports)
     return any(entry.startswith(name + ".") for entry in rules.ai_allowed_v2_imports)
+
+
+def is_pure_module(module: str, rules: BoundaryRules = DEFAULT_RULES) -> bool:
+    return matches_prefix(module, rules.pure_packages)
+
+
+def is_allowed_v2_for_pure(name: str, rules: BoundaryRules = DEFAULT_RULES) -> bool:
+    return name == rules.v2_root or matches_prefix(name, rules.pure_allowed_v2_imports)
+
+
+def is_forbidden_loaded_for_pure(name: str, rules: BoundaryRules = DEFAULT_RULES) -> bool:
+    """Runtime probe on sys.modules after importing pure modules."""
+    return matches_prefix(name, rules.pure_forbidden_loaded_prefixes) or is_forbidden_loaded_for_deterministic(name, rules)
 
 
 def is_forbidden_loaded_for_deterministic(name: str, rules: BoundaryRules = DEFAULT_RULES) -> bool:
@@ -258,10 +277,30 @@ def _env_violations(tree: ast.AST, rel_path: str, rules: BoundaryRules) -> list[
     return list(found.values())
 
 
+def _pure_name_violations(tree: ast.AST, rel_path: str, rules: BoundaryRules) -> list[Violation]:
+    found: dict[tuple[int, str], Violation] = {}
+    for node in ast.walk(tree):
+        names = []
+        if isinstance(node, ast.Name):
+            names.append(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.append(node.attr)
+        elif isinstance(node, ast.alias):
+            names.append(node.name.rsplit(".", 1)[-1])
+        for name in names:
+            if name in rules.pure_forbidden_names:
+                lineno = getattr(node, "lineno", 0)
+                found.setdefault(
+                    (lineno, name),
+                    Violation("pure-reads-environment", rel_path, lineno, f"pure module mentions {name}"),
+                )
+    return list(found.values())
+
+
 # ----------------------------------------------------------- rule checks
 
 
-def _check_import(ref: ImportRef, zone: str, rel_path: str, rules: BoundaryRules) -> list[Violation]:
+def _check_import(ref: ImportRef, zone: str, rel_path: str, rules: BoundaryRules, module: str = "") -> list[Violation]:
     def violation(rule: str, detail: str) -> Violation:
         return Violation(rule, rel_path, ref.lineno, detail)
 
@@ -278,6 +317,15 @@ def _check_import(ref: ImportRef, zone: str, rel_path: str, rules: BoundaryRules
             out.append(violation("deterministic-imports-provider-sdk", f"imports {name}"))
         if is_legacy(name, rules):
             out.append(violation("deterministic-imports-legacy", f"imports legacy module {name}"))
+
+        if module and is_pure_module(module, rules):
+            if matches_prefix(name, rules.pure_forbidden_import_prefixes):
+                out.append(violation("pure-imports-forbidden", f"pure module imports {name}"))
+            elif is_v2(name, rules) and not is_allowed_v2_for_pure(name, rules) and not matches_prefix(name, rules.pure_forbidden_import_prefixes):
+                out.append(violation("pure-imports-disallowed-v2-package", f"pure module imports {name}"))
+        for package, forbidden in rules.layer_rules:
+            if module and matches_prefix(module, [package]) and matches_prefix(name, forbidden):
+                out.append(violation("layer-violation", f"{package} must not import {name}"))
 
     elif zone == ZONE_AI:
         if matches_prefix(name, rules.ai_forbidden_import_prefixes):
@@ -310,9 +358,11 @@ def scan_source(source: str, rel_path: str, rules: BoundaryRules = DEFAULT_RULES
 
     violations: list[Violation] = []
     for ref in extract_imports(tree, module, is_package):
-        violations.extend(_check_import(ref, zone, rel_path, rules))
+        violations.extend(_check_import(ref, zone, rel_path, rules, module))
     if zone != ZONE_AI:
         violations.extend(_env_violations(tree, rel_path, rules))
+    if is_pure_module(module, rules):
+        violations.extend(_pure_name_violations(tree, rel_path, rules))
     return violations
 
 

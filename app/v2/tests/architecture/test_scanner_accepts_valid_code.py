@@ -29,7 +29,7 @@ def violations(source: str, path: str):
     ],
 )
 def test_valid_deterministic_code_passes(source):
-    assert violations(source, "app/v2/domain/sample.py") == []
+    assert violations(source, "app/v2/core/sample.py") == []
 
 
 @pytest.mark.parametrize(
