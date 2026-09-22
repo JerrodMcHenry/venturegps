@@ -168,7 +168,7 @@ pre-deploy command. Nothing in `render.yaml` or the start command changed.
 export V2_DATABASE_URL='postgresql://...'   # the intended database (Render: the External Database URL)
 alembic current                              # prints "V2 migration target: host:port/database" first - check it
 alembic upgrade head
-alembic current                              # expect: 0008 (head)
+alembic current                              # expect: 0009 (head)
 ```
 
 - Target resolution: `V2_DATABASE_URL`, else `DATABASE_URL`. **No `.env` file is
@@ -182,7 +182,7 @@ alembic current                              # expect: 0008 (head)
   (processing history, mutable only through its lifecycle), and (revision 0006) the append-only, UNTRUSTED
   candidate tables `v2.company_candidate` and `v2.company_candidate_identifier`, and (revision 0007) the resolution
   boundary: append-only `v2.resolution_decision` plus canonical identity `v2.company`, `v2.company_name` and
-  `v2.company_identifier`, and (revision 0008) the append-only, UNTRUSTED `v2.financing_event_candidate` (+ `_amount`, `_date`) tables.
+  `v2.company_identifier`, and (revision 0008) the append-only, UNTRUSTED `v2.financing_event_candidate` (+ `_amount`, `_date`) tables, and (revision 0009) the financing resolution boundary: append-only `v2.financing_resolution_decision` plus canonical `v2.financing_event` (+ `_stage`, `_type`, `_verified_round_amount`, `_date`).
 - A second `upgrade` running at the same time waits on a PostgreSQL advisory lock
   (default 30s, `V2_MIGRATION_LOCK_TIMEOUT_SECONDS`) and then finds nothing to do.
 - Preview without a database: `alembic upgrade head --sql`.
@@ -194,7 +194,7 @@ and is tested there. Once V2 holds real evidence, a destructive downgrade is
 **not** the recovery strategy: take a backup/snapshot first, then fix forward
 with a new migration (expand/contract). `downgrade base` also refuses to drop
 schema `v2` if it still contains anything other than Alembic's own bookkeeping, and
-**`downgrade` past 0008 refuses to run while any financing candidate exists, past 0007 refuses to run while any company or resolution history exists, past 0006 while any candidate exists, past 0005 while `v2.processing_attempt` holds rows, past 0004 while
+**`downgrade` past 0009 refuses to run while any canonical financing or resolution history exists, past 0008 refuses to run while any financing candidate exists, past 0007 refuses to run while any company or resolution history exists, past 0006 while any candidate exists, past 0005 while `v2.processing_attempt` holds rows, past 0004 while
 `v2.observation_sighting` does, and past 0003 while `v2.raw_payload` or `v2.observation` do**: evidence is never discarded by a migration.
 
 Whether to automate this (for example a Render pre-deploy command, which I

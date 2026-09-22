@@ -159,6 +159,14 @@ convention.
 - **Capital (Increment 10).** `FinancingEventCandidate` (revision 0008) is an UNTRUSTED proposal about a canonical Company, backed by
   byte-exact evidence: amount semantics (`offering_amount` / `amount_sold` / `announced_round_amount`) and date kinds are never collapsed,
   money is integer minor units with an explicit currency, and unknown stage/type stays unknown. There is no canonical FinancingEvent yet.
+- **Capital resolution (Increment 11).** `app/v2/financing_resolution` (revision 0009) is the ONLY path from an UNTRUSTED
+  `FinancingEventCandidate` to a canonical `FinancingEvent`: `create_event`/`attach_to_event`/`reject_candidate`/`defer_candidate`,
+  human-only in practice (`FINANCING_RULE_AUTHORITY` is deliberately empty -- financing dedup is not yet safe to automate). Many
+  candidates may attach to one event (never merged); canonical facts (stage, type, `verified_round_amount`, dates) are explicitly
+  *selected*, never blindly copied, and are never overwritten once accepted. `verified_round_amount` can come only from a
+  candidate's `announced_round_amount`, only under human authority. Canonical financing tables are written only by the private
+  `app.v2.financing_resolution._writes` via `promotion.py`; this is a deliberately separate package from `app.v2.resolution`
+  (Company identity), not a shared framework.
 - **Tests.** Pytest is scoped to V2 only: `python -m pytest` (from this directory). It refuses any path outside
   `app/v2` (root `conftest.py`), because legacy tests are scripts that hit the real `DATABASE_URL`; run those as
   `python -m app.tests.<name>`, unchanged.

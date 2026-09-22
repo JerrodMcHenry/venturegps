@@ -238,8 +238,7 @@ def test_two_observations_can_yield_conflicting_untrusted_candidates_and_nothing
     assert amounts == {a.id: 2_000_000_000, b.id: 2_500_000_000}
     assert fin_counts(db)["financing_event_candidate"] == 2
     with db.connect() as conn:
-        tables = {r[0] for r in conn.execute(text("SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='v2' AND relkind='r'"))}
-    assert "financing_event" not in tables                                        # no canonical event was produced
+        assert conn.execute(text("SELECT count(*) FROM v2.financing_event")).scalar() == 0   # nothing was merged into a canonical event
 
 
 # ---------------- idempotency

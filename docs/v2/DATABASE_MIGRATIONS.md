@@ -365,6 +365,56 @@ the Company or any evidence.
   are stored side by side; nothing is merged.
 - **Downgrade** removes only these objects and refuses to run while any financing candidate exists.
 
+### Revision 0009: `v2.financing_event` + `v2.financing_resolution_decision` (+ `_stage`, `_type`, `_verified_round_amount`, `_date`) (the financing resolution boundary)
+
+```
+FinancingEventCandidate(s) [UNTRUSTED] -> FinancingResolutionDecision [human; rule vocabulary exists, none enabled] -> FinancingEvent [TRUSTED]
+```
+
+The central requirement: **multiple candidates from different sources may describe ONE real-world financing.**
+A Form D, a company announcement and a news article each produce their own `FinancingEventCandidate`; a human decides
+whether they are the same financing (`create_event` once, then `attach_to_event` for the rest) -- nothing is ever
+merged, copied or deleted, and each candidate's evidence stays exactly where it was proposed. This is a DELIBERATELY
+SEPARATE model from Company resolution (revision 0007): financing-event identity has different semantics (many
+candidates -> one event; facts are *selected*, never blindly copied), so it is its own package
+(`app.v2.financing_resolution`), not a generalisation.
+
+- **`financing_event`**: a bare anchor -- `id UUID` (database-generated), `company_id` (the ONE canonical Company;
+  never a name/domain/URL/candidate id), `created_at`. A **deferred constraint trigger** refuses to commit an event
+  without a `create_event` decision, so even direct SQL cannot mint one with no provenance.
+- **`financing_resolution_decision`** (append-only): `candidate_id`, `decision_kind` (`create_event` |
+  `attach_to_event` | `reject_candidate` | `defer_candidate`), `financing_event_id` (required for create/attach,
+  forbidden otherwise), `decided_by_kind` (`rule | human`, CHECKed; there is no third value), `decided_by_id`,
+  `reason_code` (required for reject/defer). **Every `rule` decision is refused by the insert trigger, unconditionally**
+  -- `FINANCING_RULE_AUTHORITY` (the Python registry) is deliberately empty: financing-event deduplication is harder
+  than an exact company identifier, and no rule is safe enough yet. At most one FINAL decision (create/attach/reject)
+  per candidate (partial unique index; nothing may follow one); a candidate may only resolve into an event of **its
+  own Company** (checked in the trigger); an `attach_to_event` requires the target event to already have a
+  `create_event` decision.
+- **Canonical facts are separate, append-only, one-row-per-fact(-kind)-per-event tables**: `financing_event_stage`,
+  `financing_event_type`, `financing_event_verified_round_amount`, `financing_event_date`. Each names the human
+  decision that accepted it and the exact candidate (fact) it came from, and the insert trigger (`v2.financing_fact_
+  candidate` + a per-table guard) re-verifies that the decision (a) is human, (b) resolved that exact candidate into
+  that exact event, and (c) the accepted value matches the candidate's own row bit-for-bit. A canonical fact is
+  **never overwritten**: a second attempt at the same fact kind on the same event hits the unique constraint
+  (`FactAlreadyAcceptedError`); conflicting values stay as candidate-level history, not canonical truth. **`verified_
+  round_amount`** means only "VentureGPS explicitly accepted this amount as the round amount, under an authoritative
+  decision" -- it can come ONLY from a candidate's `announced_round_amount`, and only under HUMAN authority (checked
+  in Python; `offering_amount`/`amount_sold` can never become it, and there is no path that would let them).
+- **Fact selection**: `FactSelection` (`stage`, `financing_type`, `verified_round_amount`, `dates: tuple[...]`) is a
+  small closed set, not a patch language. `create_event`/`attach_to_event` accept **zero facts by default**; nothing
+  is copied implicitly. Selecting a fact the resolved candidate never proposed (with evidence) is
+  `FactNotAvailableError`.
+- **Write surface**: canonical financing tables are written only by the private `app.v2.financing_resolution._writes`,
+  imported only by `app.v2.financing_resolution.promotion` (`create_event_from_candidate`, `attach_candidate_to_event`,
+  `reject_candidate`, `defer_candidate`). There is no generic `create_financing_event`. Reads
+  (`app.v2.repositories.financing_events`) are unrestricted. Architecture tests fail if any other module writes those
+  tables or if `app.v2.ai` / the candidate layer imports the boundary.
+- **Atomicity**: create = decision + event + selected facts, one transaction (a SAVEPOINT on a Connection); attach =
+  decision + selected facts. A failed fact selection rolls back the whole operation.
+- **Downgrade** removes only these objects and **refuses** to run while any canonical financing or resolution history
+  exists.
+
 ### Concurrency
 
 A PostgreSQL session-level advisory lock (`MIGRATION_LOCK_KEY`) is held for the whole

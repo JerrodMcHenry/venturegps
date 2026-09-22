@@ -260,3 +260,94 @@ financing_event_candidate_date_table = Table(
     UniqueConstraint("candidate_id", "date_kind", name="uq_financing_event_candidate_date_kind"),
     comment="UNTRUSTED proposed dated fact of a financing candidate, with the precision the source gave.",
 )
+
+# Revision 0009: canonical financing events and their explicit resolution (append-only; guarded by triggers in the
+# migration). Canonical financing tables may only be written by app.v2.financing_resolution._writes.
+financing_event_table = Table(
+    "financing_event",
+    metadata,
+    Column("id", Uuid, primary_key=True, server_default=text("gen_random_uuid()")),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_fe_company_id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    comment=("TRUSTED canonical financing-event identity anchor for ONE company. "
+             "Created only through a create_event FinancingResolutionDecision."),
+)
+
+financing_resolution_decision_table = Table(
+    "financing_resolution_decision",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("candidate_id", BigInteger, ForeignKey("v2.financing_event_candidate.id", ondelete="RESTRICT", name="fk_frd_candidate_id"), nullable=False),
+    Column("decision_kind", Text, nullable=False),
+    Column("financing_event_id", Uuid, ForeignKey("v2.financing_event.id", ondelete="RESTRICT", name="fk_frd_financing_event_id"), nullable=True),
+    Column("decided_by_kind", Text, nullable=False),
+    Column("decided_by_id", Text, nullable=False),
+    Column("reason_code", Text, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    Index("uq_frd_one_final", "candidate_id", unique=True,
+          postgresql_where=text("decision_kind IN ('create_event', 'attach_to_event', 'reject_candidate')")),
+    Index("uq_frd_one_create_per_event", "financing_event_id", unique=True, postgresql_where=text("decision_kind = 'create_event'")),
+    comment=("Append-only decisions by a HUMAN (a rule vocabulary exists, none is enabled; never AI) "
+             "that resolve an untrusted financing-event candidate."),
+)
+
+
+financing_event_stage_table = Table(
+    "financing_event_stage",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("financing_event_id", Uuid, ForeignKey("v2.financing_event.id", ondelete="RESTRICT", name="fk_fes_financing_event_id"), nullable=False),
+    Column("stage", Text, nullable=False),
+    Column("resolution_decision_id", BigInteger, ForeignKey("v2.financing_resolution_decision.id", ondelete="RESTRICT", name="fk_fes_resolution_decision_id"), nullable=False),
+    Column("candidate_id", BigInteger, ForeignKey("v2.financing_event_candidate.id", ondelete="RESTRICT", name="fk_fes_candidate_id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("financing_event_id", name="uq_fes_one_per_event"),
+    comment="Canonical stage explicitly accepted by a human decision from one candidate. Never inferred; never overwritten.",
+)
+
+financing_event_type_table = Table(
+    "financing_event_type",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("financing_event_id", Uuid, ForeignKey("v2.financing_event.id", ondelete="RESTRICT", name="fk_fet_financing_event_id"), nullable=False),
+    Column("financing_type", Text, nullable=False),
+    Column("resolution_decision_id", BigInteger, ForeignKey("v2.financing_resolution_decision.id", ondelete="RESTRICT", name="fk_fet_resolution_decision_id"), nullable=False),
+    Column("candidate_id", BigInteger, ForeignKey("v2.financing_event_candidate.id", ondelete="RESTRICT", name="fk_fet_candidate_id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("financing_event_id", name="uq_fet_one_per_event"),
+    comment="Canonical financing type explicitly accepted by a human decision from one candidate. Never inferred; never overwritten.",
+)
+
+financing_event_verified_round_amount_table = Table(
+    "financing_event_verified_round_amount",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("financing_event_id", Uuid, ForeignKey("v2.financing_event.id", ondelete="RESTRICT", name="fk_fev_financing_event_id"), nullable=False),
+    Column("currency_code", Text, nullable=False),
+    Column("amount_minor_units", BigInteger, nullable=False),
+    Column("resolution_decision_id", BigInteger, ForeignKey("v2.financing_resolution_decision.id", ondelete="RESTRICT", name="fk_fev_resolution_decision_id"), nullable=False),
+    Column("candidate_amount_id", BigInteger,
+           ForeignKey("v2.financing_event_candidate_amount.id", ondelete="RESTRICT", name="fk_fev_candidate_amount_id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("financing_event_id", name="uq_fev_one_per_event"),
+    UniqueConstraint("candidate_amount_id", name="uq_fev_candidate_amount"),
+    comment=("Round amount VentureGPS explicitly accepted as canonical, only from a candidate announced_round_amount, "
+             "only by a human decision."),
+)
+
+financing_event_date_table = Table(
+    "financing_event_date",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("financing_event_id", Uuid, ForeignKey("v2.financing_event.id", ondelete="RESTRICT", name="fk_fed_financing_event_id"), nullable=False),
+    Column("date_kind", Text, nullable=False),
+    Column("date_precision", Text, nullable=False),
+    Column("date_start", DateTime(timezone=True), nullable=False),
+    Column("resolution_decision_id", BigInteger, ForeignKey("v2.financing_resolution_decision.id", ondelete="RESTRICT", name="fk_fed_resolution_decision_id"), nullable=False),
+    Column("candidate_date_id", BigInteger,
+           ForeignKey("v2.financing_event_candidate_date.id", ondelete="RESTRICT", name="fk_fed_candidate_date_id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("financing_event_id", "date_kind", name="uq_fed_kind_per_event"),
+    UniqueConstraint("candidate_date_id", name="uq_fed_candidate_date"),
+    comment="Canonical semantic date explicitly accepted by a human decision from one candidate date, with its precision.",
+)

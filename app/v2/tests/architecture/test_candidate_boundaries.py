@@ -95,8 +95,11 @@ def test_the_candidate_repository_writes_only_candidate_tables():
     from app.v2.db.metadata import metadata
     assert sorted(metadata.tables) == ["v2.company", "v2.company_candidate", "v2.company_candidate_identifier",
                                        "v2.company_identifier", "v2.company_name",
-                                       "v2.financing_event_candidate", "v2.financing_event_candidate_amount",
-                                       "v2.financing_event_candidate_date", "v2.observation", "v2.observation_sighting", "v2.processing_attempt", "v2.raw_payload",
+                                       "v2.financing_event", "v2.financing_event_candidate", "v2.financing_event_candidate_amount",
+                                       "v2.financing_event_candidate_date", "v2.financing_event_date", "v2.financing_event_stage",
+                                       "v2.financing_event_type", "v2.financing_event_verified_round_amount",
+                                       "v2.financing_resolution_decision",
+                                       "v2.observation", "v2.observation_sighting", "v2.processing_attempt", "v2.raw_payload",
                                        "v2.resolution_decision", "v2.source"]
 
 

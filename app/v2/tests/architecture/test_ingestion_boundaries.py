@@ -39,7 +39,9 @@ def test_ingestion_and_repositories_cannot_import_network_modules(source, path):
 def test_the_network_rule_is_limited_to_the_configured_packages_and_is_configurable():
     assert rules_of("import socket", "app/v2/core/x.py") == set()                      # other deterministic code is not covered
     assert rules_of("from urllib.parse import urlsplit", "app/v2/ingestion/x.py") == set()  # parsing is not networking
-    assert DEFAULT_RULES.no_network_packages == ("app.v2.ingestion", "app.v2.repositories", "app.v2.candidates", "app.v2.resolution")
+    assert DEFAULT_RULES.no_network_packages == (
+        "app.v2.ingestion", "app.v2.repositories", "app.v2.candidates", "app.v2.resolution", "app.v2.financing_resolution",
+    )
 
 
 def test_the_real_service_source_is_clean_and_the_rules_bite_on_its_path():

@@ -46,10 +46,12 @@ def identifiers(path):
             yield node.name
 
 
-# ---------------- nothing canonical, nothing beyond the candidate model
+# ---------------- nothing beyond the candidate model AND (Increment 11) the approved resolution boundary; still no Capital metrics
 
-def test_no_canonical_financing_event_promotion_resolution_or_capital_code_exists():
-    for name in ("financing", "capital", "signals", "market", "market_pulse", "metrics", "collectors", "workers", "scheduler", "radar", "attribution"):
+def test_no_capital_metrics_market_pulse_or_workers_code_exists():
+    """Increment 11 legitimately adds app/v2/financing_resolution (canonical FinancingEvent); everything else in the
+    Capital chain beyond resolution is still deliberately absent."""
+    for name in ("capital", "signals", "market", "market_pulse", "metrics", "collectors", "workers", "scheduler", "radar", "attribution"):
         assert not (V2 / name).exists(), name
     defined = set()
     for path in V2.rglob("*.py"):
@@ -59,21 +61,25 @@ def test_no_canonical_financing_event_promotion_resolution_or_capital_code_exist
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
                 defined.add(node.name.lower())
-    for banned in ("promote_financing_event", "resolve_financing_event", "create_financing_event", "financingevent", "storedfinancingevent",
-                   "calculate_capital", "capital_signal", "market_pulse", "capital_metric"):
+    for banned in ("calculate_capital", "capital_signal", "market_pulse", "capital_metric", "merge_financing_event", "financingeventmerge"):
         assert banned not in defined, banned
-    assert not any(re.search(r"financing_?event(?!_?candidate)", n) for n in defined if "candidate" not in n and "proposed" not in n), defined
 
 
-def test_the_canonical_table_variables_do_not_include_any_financing_table():
-    assert not any("financing" in name for name in DEFAULT_RULES.canonical_table_variables + DEFAULT_RULES.canonical_table_names)
+def test_the_canonical_table_variables_now_include_exactly_the_financing_canonical_tables():
+    financing_canonical = {n for n in DEFAULT_RULES.canonical_table_names if "financing" in n}
+    assert financing_canonical == {"financing_event", "financing_resolution_decision", "financing_event_stage",
+                                   "financing_event_type", "financing_event_verified_round_amount", "financing_event_date"}
+    # the UNTRUSTED candidate tables are deliberately NOT in the canonical-writer registry: a different repository writes them
+    assert not financing_canonical & {"financing_event_candidate", "financing_event_candidate_amount", "financing_event_candidate_date"}
 
 
-def test_the_metadata_has_only_candidate_financing_tables():
+def test_the_metadata_has_exactly_the_expected_financing_tables():
     from app.v2.db import tables  # noqa: F401
     from app.v2.db.metadata import metadata
     financing = sorted(t for t in metadata.tables if "financing" in t)
-    assert financing == ["v2.financing_event_candidate", "v2.financing_event_candidate_amount", "v2.financing_event_candidate_date"]
+    assert financing == ["v2.financing_event", "v2.financing_event_candidate", "v2.financing_event_candidate_amount",
+                         "v2.financing_event_candidate_date", "v2.financing_event_date", "v2.financing_event_stage",
+                         "v2.financing_event_type", "v2.financing_event_verified_round_amount", "v2.financing_resolution_decision"]
 
 
 # ---------------- names that would imply truth or collapse semantics

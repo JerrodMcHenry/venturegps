@@ -13,6 +13,7 @@ from app.v2.tests.db.harness import (
     HEAD_REVISION,
     HEAD_V2_OBJECTS,
     REVISION_0007_V2_OBJECTS,
+    REVISION_0008_V2_OBJECTS,
     create_legacy_probe_objects,
     make_alembic_config,
     scalar,
@@ -32,8 +33,8 @@ def functions(engine):
     return [r[0] for r in rows(engine, "SELECT proname FROM pg_proc WHERE pronamespace = 'v2'::regnamespace ORDER BY 1")]
 
 
-def test_head_is_0008():
-    assert HEAD_REVISION == "0008"
+def test_head_is_at_least_0008():
+    assert HEAD_REVISION >= "0008"
 
 
 def test_upgrade_0007_to_0008_creates_only_the_financing_candidate_objects(clean_db, alembic_cfg):
@@ -41,7 +42,7 @@ def test_upgrade_0007_to_0008_creates_only_the_financing_candidate_objects(clean
     assert v2_objects(clean_db) == REVISION_0007_V2_OBJECTS
     command.upgrade(alembic_cfg(), "0008")
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0008"
-    assert v2_objects(clean_db) == HEAD_V2_OBJECTS
+    assert v2_objects(clean_db) == REVISION_0008_V2_OBJECTS
     added = set(functions(clean_db)) - {"company_candidate_guard", "company_candidate_identifier_guard", "company_guard", "company_identifier_guard",
                                         "company_name_guard", "company_requires_provenance", "forbid_evidence_change", "normalize_company_identifier",
                                         "observation_stamp", "processing_attempt_guard", "resolution_decision_guard", "source_guard"}
@@ -49,7 +50,7 @@ def test_upgrade_0007_to_0008_creates_only_the_financing_candidate_objects(clean
 
 
 def test_downgrade_0008_to_0007_removes_only_increment_10_objects_and_upgrade_again_works(clean_db, alembic_cfg):
-    command.upgrade(alembic_cfg(), "head")
+    command.upgrade(alembic_cfg(), "0008")
     command.downgrade(alembic_cfg(), "0007")
     assert v2_objects(clean_db) == REVISION_0007_V2_OBJECTS
     assert not [f for f in functions(clean_db) if "financing" in f or f == "evidence_span_matches"]
@@ -70,7 +71,7 @@ def test_downgrade_refuses_while_financing_candidate_history_exists(migrated_db,
     with pytest.raises(DBAPIError) as info:
         command.downgrade(alembic_cfg(), "0007")
     assert "refusing to downgrade 0008" in str(info.value.orig)
-    assert scalar(db, "SELECT version_num FROM v2.alembic_version") == "0008" and v2_objects(db) == HEAD_V2_OBJECTS
+    assert scalar(db, "SELECT version_num FROM v2.alembic_version") == HEAD_REVISION and v2_objects(db) == HEAD_V2_OBJECTS
     assert before == {t: count(db, t) for t in before}
     with pytest.raises(DBAPIError):
         command.downgrade(alembic_cfg(), "base")
@@ -80,8 +81,8 @@ def test_tables_are_labelled_untrusted_and_no_canonical_financing_object_exists(
     for table in ("financing_event_candidate", "financing_event_candidate_amount", "financing_event_candidate_date"):
         assert "UNTRUSTED" in scalar(migrated_db, "SELECT obj_description(to_regclass(:t)::oid, 'pg_class')", t=f"v2.{table}")
     names = {r[0] for r in rows(migrated_db, "SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'v2' AND relkind IN ('r','v','m')")}
-    assert not {n for n in names if n.startswith("financing") or "capital" in n or "market" in n or "signal" in n or "metric" in n} - {
-        "financing_event_candidate", "financing_event_candidate_amount", "financing_event_candidate_date"}
+    # Increment 11 legitimately added canonical financing_event tables; nothing about metrics/signals/market exists.
+    assert not {n for n in names if "capital" in n or "market" in n or "signal" in n or "metric" in n}
     assert not [f for f in functions(migrated_db) if "promote" in f or "resolve_financing" in f]
 
 
@@ -116,5 +117,5 @@ def test_legacy_objects_are_untouched_in_both_directions(clean_db, alembic_cfg):
 
 def test_history_is_linear_and_earlier_revisions_are_intact():
     script = ScriptDirectory.from_config(make_alembic_config())
-    assert [r.revision for r in script.walk_revisions()] == ["0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
+    assert [r.revision for r in script.walk_revisions()] == ["0009", "0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
     assert script.get_revision("0008").down_revision == "0007"
