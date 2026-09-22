@@ -41,6 +41,7 @@ def test_the_network_rule_is_limited_to_the_configured_packages_and_is_configura
     assert rules_of("from urllib.parse import urlsplit", "app/v2/ingestion/x.py") == set()  # parsing is not networking
     assert DEFAULT_RULES.no_network_packages == (
         "app.v2.ingestion", "app.v2.repositories", "app.v2.candidates", "app.v2.resolution", "app.v2.financing_resolution",
+        "app.v2.classification",
     )
 
 

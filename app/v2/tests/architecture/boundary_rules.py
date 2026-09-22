@@ -50,19 +50,25 @@ class BoundaryRules:
     wiring_modules: tuple[str, ...] = ("app.v2.wiring",)
     # The ONLY modules that may write the canonical tables (see canonical_write_tables). Everything else,
     # including every other repository, is scanned by test_resolution_boundaries.py.
-    canonical_writer_modules: tuple[str, ...] = ("app.v2.resolution._writes", "app.v2.financing_resolution._writes")
+    canonical_writer_modules: tuple[str, ...] = (
+        "app.v2.resolution._writes", "app.v2.financing_resolution._writes", "app.v2.classification._writes",
+    )
     canonical_table_variables: tuple[str, ...] = (
         "company_table", "resolution_decision_table", "company_name_table", "company_identifier_table",
         "financing_event_table", "financing_resolution_decision_table", "financing_event_stage_table",
         "financing_event_type_table", "financing_event_verified_round_amount_table", "financing_event_date_table",
+        "company_market_classification_table",
     )
     canonical_table_names: tuple[str, ...] = (
         "company", "resolution_decision", "company_name", "company_identifier",
         "financing_event", "financing_resolution_decision", "financing_event_stage", "financing_event_type",
         "financing_event_verified_round_amount", "financing_event_date",
+        "company_market_classification",
     )
     # Modules that may import the private writer.
-    canonical_writer_importers: tuple[str, ...] = ("app.v2.resolution.promotion", "app.v2.financing_resolution.promotion")
+    canonical_writer_importers: tuple[str, ...] = (
+        "app.v2.resolution.promotion", "app.v2.financing_resolution.promotion", "app.v2.classification.service",
+    )
 
     # Modules the static scan covers but the runtime probe cannot import
     # standalone (they only execute under Alembic).
@@ -111,6 +117,7 @@ class BoundaryRules:
         "app.v2.resolution", "app.v2.promotion", "app.v2.canonical", "app.v2.companies", "app.v2.claims",
         "app.v2.evidence_links", "app.v2.resolution_decisions", "app.v2.repositories.companies",
         "app.v2.financing_resolution", "app.v2.repositories.financing_events",
+        "app.v2.classification", "app.v2.repositories.markets", "app.v2.repositories.capital_metrics",
     )
 
     # Worker, queue and scheduler frameworks: no deterministic V2 module may depend on one until
@@ -123,6 +130,7 @@ class BoundaryRules:
     # ---- no-network packages (see docstring)
     no_network_packages: tuple[str, ...] = (
         "app.v2.ingestion", "app.v2.repositories", "app.v2.candidates", "app.v2.resolution", "app.v2.financing_resolution",
+        "app.v2.classification",
     )
     network_forbidden_import_prefixes: tuple[str, ...] = (
         "socket", "ssl", "http", "urllib.request", "urllib3", "requests", "httpx", "aiohttp",

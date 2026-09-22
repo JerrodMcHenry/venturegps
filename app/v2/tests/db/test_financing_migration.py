@@ -81,8 +81,10 @@ def test_tables_are_labelled_untrusted_and_no_canonical_financing_object_exists(
     for table in ("financing_event_candidate", "financing_event_candidate_amount", "financing_event_candidate_date"):
         assert "UNTRUSTED" in scalar(migrated_db, "SELECT obj_description(to_regclass(:t)::oid, 'pg_class')", t=f"v2.{table}")
     names = {r[0] for r in rows(migrated_db, "SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'v2' AND relkind IN ('r','v','m')")}
-    # Increment 11 legitimately added canonical financing_event tables; nothing about metrics/signals/market exists.
-    assert not {n for n in names if "capital" in n or "market" in n or "signal" in n or "metric" in n}
+    # Increment 11 added canonical financing_event tables; Increment 12 legitimately added market/taxonomy_version/
+    # company_market_classification. Nothing about Capital signals/metrics tables (there are none -- metrics are computed,
+    # never persisted) or Market Pulse exists.
+    assert not {n for n in names if "capital" in n or "signal" in n or "pulse" in n or "metric" in n}
     assert not [f for f in functions(migrated_db) if "promote" in f or "resolve_financing" in f]
 
 
@@ -117,5 +119,5 @@ def test_legacy_objects_are_untouched_in_both_directions(clean_db, alembic_cfg):
 
 def test_history_is_linear_and_earlier_revisions_are_intact():
     script = ScriptDirectory.from_config(make_alembic_config())
-    assert [r.revision for r in script.walk_revisions()] == ["0009", "0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
+    assert [r.revision for r in script.walk_revisions()] == ["0010", "0009", "0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
     assert script.get_revision("0008").down_revision == "0007"

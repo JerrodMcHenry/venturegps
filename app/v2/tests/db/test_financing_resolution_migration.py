@@ -16,6 +16,7 @@ from app.v2.tests.db.harness import (
     HEAD_REVISION,
     HEAD_V2_OBJECTS,
     REVISION_0008_V2_OBJECTS,
+    REVISION_0009_V2_OBJECTS,
     create_legacy_probe_objects,
     make_alembic_config,
     scalar,
@@ -37,8 +38,8 @@ def functions(engine):
     return [r[0] for r in rows(engine, "SELECT proname FROM pg_proc WHERE pronamespace = 'v2'::regnamespace ORDER BY 1")]
 
 
-def test_head_is_0009():
-    assert HEAD_REVISION == "0009"
+def test_head_is_at_least_0009():
+    assert HEAD_REVISION >= "0009"
 
 
 def test_upgrade_0008_to_0009_creates_only_the_financing_resolution_objects(clean_db, alembic_cfg):
@@ -46,7 +47,7 @@ def test_upgrade_0008_to_0009_creates_only_the_financing_resolution_objects(clea
     assert v2_objects(clean_db) == REVISION_0008_V2_OBJECTS
     command.upgrade(alembic_cfg(), "0009")
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0009"
-    assert v2_objects(clean_db) == HEAD_V2_OBJECTS
+    assert v2_objects(clean_db) == REVISION_0009_V2_OBJECTS
     before = {"company_candidate_guard", "company_candidate_identifier_guard", "company_guard", "company_identifier_guard",
               "company_name_guard", "company_requires_provenance", "forbid_evidence_change", "normalize_company_identifier",
               "observation_stamp", "processing_attempt_guard", "resolution_decision_guard", "source_guard",
@@ -59,7 +60,7 @@ def test_upgrade_0008_to_0009_creates_only_the_financing_resolution_objects(clea
 
 
 def test_downgrade_0009_to_0008_removes_only_increment_11_objects_and_upgrade_again_works(clean_db, alembic_cfg):
-    command.upgrade(alembic_cfg(), "head")
+    command.upgrade(alembic_cfg(), "0009")
     command.downgrade(alembic_cfg(), "0008")
     assert v2_objects(clean_db) == REVISION_0008_V2_OBJECTS
     assert not [f for f in functions(clean_db) if f.startswith("financing_event_guard") or f.startswith("financing_resolution_decision")
@@ -122,5 +123,5 @@ def test_legacy_objects_are_untouched_in_both_directions(clean_db, alembic_cfg):
 
 def test_history_is_linear_and_earlier_revisions_are_intact():
     script = ScriptDirectory.from_config(make_alembic_config())
-    assert [r.revision for r in script.walk_revisions()] == ["0009", "0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
+    assert [r.revision for r in script.walk_revisions()] == ["0010", "0009", "0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
     assert script.get_revision("0009").down_revision == "0008"

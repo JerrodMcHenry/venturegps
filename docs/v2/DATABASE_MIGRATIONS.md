@@ -415,6 +415,51 @@ candidates -> one event; facts are *selected*, never blindly copied), so it is i
 - **Downgrade** removes only these objects and **refuses** to run while any canonical financing or resolution history
   exists.
 
+### Revision 0010: `v2.taxonomy_version`, `v2.market`, `v2.company_market_classification` (Capital attribution)
+
+```
+canonical Company -> versioned Company/Market classification -> canonical FinancingEvent -> Capital metrics (computed, not persisted)
+```
+
+The minimum structure needed to answer "how much observable financing activity occurred in VentureGPS Market X
+during period Y?" from canonical FinancingEvents. No Capital metric is persisted: `app.v2.repositories.capital_metrics`
+queries canonical data and hands it to the pure engine (`app.v2.domain.capital_metrics`) at request time.
+
+- **`v2.taxonomy_version`**: a registered version id (e.g. `venturegps_taxonomy.v1`). Classification always names the
+  version it was made under; a methodology change is a NEW version with new rows, never a silent rewrite of an old
+  classification.
+- **`v2.market`**: a bare taxonomy-node identity -- `id UUID` (database-generated), a unique routing `slug`, and a
+  `display_name` (**NOT** identity: two different Markets may share a display name). No description/icon/score/
+  summary fields. **Registered directly, like `v2.source`** -- a Market is a taxonomy definition VentureGPS makes,
+  not evidence-derived truth about the world, so it is not behind a candidate/resolution boundary and is not in the
+  canonical-writer registry. Append-only (no rename operation exists yet; see design decisions).
+- **`v2.company_market_classification`**: the explicit, append-only, authoritative fact "under this taxonomy
+  version, this Company was classified into this Market with this role, by this authority." `decided_by_kind` is
+  CHECKed to `rule | human`; every `rule` decision is refused by the insert trigger, unconditionally -- no
+  classification rule is safe/enabled yet (same company/name/sector guess is not sufficient identity). Role is
+  `primary` (owns Capital attribution) or `secondary` (discovery/context only; **never** attributes Capital, so the
+  same financing can never be double-counted across two Markets). At most one `primary` per (Company, taxonomy
+  version) (partial unique index); a Company may hold any number of `secondary` classifications, but never the same
+  (Company, Market, taxonomy version) twice. Write surface: the private `app.v2.classification._writes`, reached
+  only through `app.v2.classification.service.classify_company`.
+- **Attribution is derived, never stored**: there is no `financing_event.market_id`, and never will be --
+  `app.v2.repositories.capital_metrics` joins FinancingEvent -> Company -> **primary** classification -> Market at
+  query time.
+- **Capital metric date policy**: a FinancingEvent's metric date is chosen by precedence -- `announcement_date` (the
+  most durable public signal), then `first_sale_date` (legally precise but often absent), then `filing_date`
+  (administrative, last resort). `Observation.observed_time` is never used. An event with none of the three has no
+  metric date and is excluded from every period-based metric (never fabricated), which is visible in
+  `CapitalMetrics.diagnostics`.
+- **Capital Deployed** sums only canonical `verified_round_amount` (never `offering_amount`/`amount_sold`/
+  `announced_round_amount`), by currency (no FX; currencies are never summed together). **Capital Concentration** is
+  `largest / total` verified capital per currency, kept exact (`largest_minor_units`/`total_minor_units`, not a
+  rounded ratio); a currency with no verified capital has no entry (never a divide-by-zero). **Stage Distribution**
+  is counts only, by canonical accepted `Stage` (including `unknown`); candidate-only stage is never counted.
+- **All three tables are append-only** (UPDATE/DELETE/TRUNCATE rejected), `created_at` is the database's clock, FKs
+  are `ON DELETE RESTRICT`.
+- **Downgrade** removes only these objects and **refuses** to run while any taxonomy version, market or
+  classification exists.
+
 ### Concurrency
 
 A PostgreSQL session-level advisory lock (`MIGRATION_LOCK_KEY`) is held for the whole

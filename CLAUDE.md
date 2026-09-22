@@ -167,6 +167,15 @@ convention.
   candidate's `announced_round_amount`, only under human authority. Canonical financing tables are written only by the private
   `app.v2.financing_resolution._writes` via `promotion.py`; this is a deliberately separate package from `app.v2.resolution`
   (Company identity), not a shared framework.
+- **Capital metrics (Increment 12).** `v2.market` / `v2.taxonomy_version` are taxonomy reference data, registered directly
+  (like `v2.source`, not authority-gated). `app/v2/classification` (revision 0010) is the ONLY way to write
+  `v2.company_market_classification` (Company -> Market, scoped to a taxonomy version; `primary` owns Capital attribution,
+  `secondary` never does, so one financing is never double-counted); human-only in practice. `financing_event.market_id`
+  does not exist -- attribution is always derived through the classification at query time
+  (`app.v2.repositories.capital_metrics`). `app.v2.domain.capital_metrics` is the PURE Capital metric engine (Financing
+  Activity, Companies Funded, Capital Deployed by currency, Capital Concentration, Stage Distribution): no DB, network, AI
+  or persisted result -- metrics are computed on demand, never stored. Capital Deployed counts only `verified_round_amount`;
+  the metric date policy is announcement_date > first_sale_date > filing_date, never `Observation.observed_time`.
 - **Tests.** Pytest is scoped to V2 only: `python -m pytest` (from this directory). It refuses any path outside
   `app/v2` (root `conftest.py`), because legacy tests are scripts that hit the real `DATABASE_URL`; run those as
   `python -m app.tests.<name>`, unchanged.

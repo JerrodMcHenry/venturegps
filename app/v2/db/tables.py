@@ -351,3 +351,42 @@ financing_event_date_table = Table(
     UniqueConstraint("candidate_date_id", name="uq_fed_candidate_date"),
     comment="Canonical semantic date explicitly accepted by a human decision from one candidate date, with its precision.",
 )
+
+# Revision 0010: minimal Market/taxonomy identity and the explicit Company -> Market classification (append-only).
+taxonomy_version_table = Table(
+    "taxonomy_version",
+    metadata,
+    Column("taxonomy_version", Text, primary_key=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    comment="Registered VentureGPS taxonomy versions. Classification always names one; a methodology change is a new version, never a silent rewrite.",
+)
+
+market_table = Table(
+    "market",
+    metadata,
+    Column("id", Uuid, primary_key=True, server_default=text("gen_random_uuid()")),
+    Column("slug", Text, nullable=False),
+    Column("display_name", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("slug", name="uq_market_slug"),
+    comment="A bare canonical taxonomy-node identity (not a profile): an opaque id, a routing slug, and a display name.",
+)
+
+company_market_classification_table = Table(
+    "company_market_classification",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_cmc_company_id"), nullable=False),
+    Column("market_id", Uuid, ForeignKey("v2.market.id", ondelete="RESTRICT", name="fk_cmc_market_id"), nullable=False),
+    Column("taxonomy_version", Text,
+           ForeignKey("v2.taxonomy_version.taxonomy_version", ondelete="RESTRICT", name="fk_cmc_taxonomy_version"), nullable=False),
+    Column("role", Text, nullable=False),
+    Column("decided_by_kind", Text, nullable=False),
+    Column("decided_by_id", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("company_id", "market_id", "taxonomy_version", name="uq_cmc_company_market_version"),
+    Index("uq_cmc_one_primary_per_company_version", "company_id", "taxonomy_version", unique=True,
+          postgresql_where=text("role = 'primary'")),
+    comment=("Append-only, authoritative Company -> Market classification by a HUMAN (never AI), scoped to a "
+             "taxonomy version. PRIMARY owns Capital attribution; SECONDARY never does."),
+)
