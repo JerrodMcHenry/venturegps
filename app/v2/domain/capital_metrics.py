@@ -69,6 +69,12 @@ METRIC_DATE_PRECEDENCE: tuple[FinancingDateKind, ...] = (
     FinancingDateKind.ANNOUNCEMENT_DATE, FinancingDateKind.FIRST_SALE_DATE, FinancingDateKind.FILING_DATE,
 )
 
+# Identifies which version of this methodology (window qualification, date precedence, verified-amount and
+# currency policy) produced a CapitalMetrics result -- an additive identifier (Increment 14), not a methodology
+# change. A future rule change here must introduce capital_metrics.v2 alongside this, never silently reinterpret
+# what a capital_metrics.v1 result meant.
+METHODOLOGY_VERSION = "capital_metrics.v1"
+
 
 def choose_metric_date(dates: Mapping[FinancingDateKind, EventTime]) -> tuple[FinancingDateKind, EventTime] | None:
     """The metric date and which kind produced it, by METRIC_DATE_PRECEDENCE, or None if the event has no usable

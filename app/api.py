@@ -442,6 +442,13 @@ create_venture_graduations_table()
 # table above exists.
 add_venture_graduations_startup_unique_constraint()
 
+# VentureGPS V2 -- Increment 14: read-only Capital Intelligence API, mounted as its own isolated router
+# (app/v2/api.py). No V1 route above or below this line is touched; the V2 router runs no schema migration of
+# its own here (V2 schema changes are applied by hand, never at import time, see
+# docs/v2/DATABASE_MIGRATIONS.md) and depends only on V2's own read repositories, never on anything above.
+from app.v2.api import router as v2_capital_router
+app.include_router(v2_capital_router)
+
 @app.get("/health")
 def health():
     return {"status": "healthy"}

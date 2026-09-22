@@ -176,9 +176,12 @@ class BoundaryRules:
     )
 
     # Legacy (app.*, excluding app.v2) modules deterministic V2 code may
-    # import. Empty by design; add an entry only with an explicit decision
-    # (for example app.observability).
-    legacy_import_allowlist: tuple[str, ...] = ()
+    # import. Empty by design; add an entry only with an explicit decision.
+    # app.observability (Increment 14): the read-only Capital API's error
+    # handler reuses the existing Sentry integration for parity with
+    # app/api.py's own except-Exception-and-report pattern -- it is a
+    # logging sink, never a source of canonical data or authority.
+    legacy_import_allowlist: tuple[str, ...] = ("app.observability",)
 
     # What app.v2.ai may import from inside V2 (default-deny for the rest).
     # Ancestor packages of an entry are implicitly allowed. app.v2.resolution is NOT listed:

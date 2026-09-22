@@ -61,13 +61,15 @@ def test_rules_are_extensible_without_touching_the_scanner():
     assert {v.rule for v in scan_source("import app.v2.exports", "app/v2/ai/x.py", stricter)} == {"ai-imports-persistence"}
 
 
-def test_legacy_allowlist_is_empty_by_default_and_opt_in():
-    assert DEFAULT_RULES.legacy_import_allowlist == ()
-    allowed = replace(DEFAULT_RULES, legacy_import_allowlist=("app.observability",))
+def test_legacy_allowlist_is_closed_and_opt_in():
+    # Increment 14: app.observability is the one explicit, documented exception (a logging/error-reporting sink,
+    # never a source of canonical data or authority) -- everything else legacy stays forbidden by default.
+    assert DEFAULT_RULES.legacy_import_allowlist == ("app.observability",)
     src = "from app.observability import capture_exception"
-    assert scan_source(src, "app/v2/core/x.py") != []
-    assert scan_source(src, "app/v2/core/x.py", allowed) == []
-    assert scan_source("import app.database.db", "app/v2/core/x.py", allowed) != []
+    assert scan_source(src, "app/v2/core/x.py") == []
+    assert scan_source("import app.database.db", "app/v2/core/x.py") != []
+    empty = replace(DEFAULT_RULES, legacy_import_allowlist=())
+    assert scan_source(src, "app/v2/core/x.py", empty) != []
 
 
 def _write(root, rel, text):

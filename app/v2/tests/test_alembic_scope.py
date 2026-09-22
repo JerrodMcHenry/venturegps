@@ -80,9 +80,15 @@ def test_only_numbered_revision_files_exist():
 
 
 def test_legacy_runtime_files_do_not_run_v2_migrations():
-    for rel in ("app/api.py", "app/database/db.py", "render.yaml"):
+    # Increment 14: app/api.py legitimately mounts app.v2.api's read-only router (see
+    # docs/v2/CAPITAL_API.md), so "app.v2" appearing there is no longer itself a violation -- the actual concern
+    # this test guards is that no legacy runtime file ever RUNS a V2 migration (alembic upgrade/downgrade) at
+    # import time or on deploy; V2 migrations stay manual (docs/v2/DATABASE_MIGRATIONS.md).
+    for rel in ("app/database/db.py", "render.yaml"):
         text = (REPO_ROOT / rel).read_text().lower()
         assert "alembic" not in text and "app.v2" not in text, rel
+    api_text = (REPO_ROOT / "app/api.py").read_text().lower()
+    assert "alembic" not in api_text and not re.search(r"command\.(upgrade|downgrade)", api_text)
     assert "predeploy" not in (REPO_ROOT / "render.yaml").read_text().lower()
 
 
