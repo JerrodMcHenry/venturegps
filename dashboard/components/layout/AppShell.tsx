@@ -1,5 +1,10 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+
 import TopNav from "./TopNav";
 import MobileTabBar from "./MobileTabBar";
+import PublicHeader from "./PublicHeader";
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -29,7 +34,40 @@ type AppShellProps = {
 // now uses the same token-driven classes as everything else, which is
 // what actually makes light mode work correctly at the shell level for
 // the first time.
+//
+// Increment 15.1 -- Consumer Experience Refinement, Part 1: a public
+// VentureGPS route (currently only /markets/[slug]) must not show the
+// legacy "Build / Analyze / My Startups / Learn" Startup Intelligence
+// Engine navigation or its mobile tab bar -- that chrome is for the
+// existing founder-facing product and would misbrand/confuse a visitor
+// arriving from a VentureGPS video link. Rather than restructuring the
+// route tree into parallel root layouts (a much larger, riskier change
+// this increment's own "frontend refinement only" scope forbids), this
+// branches on pathname -- the SAME pattern TopNav.tsx/MobileTabBar.tsx
+// already use internally (`usePathname()`, `"use client"`) for their own
+// active-route highlighting, just one level up. Legacy routes render
+// byte-identical chrome to before; only the /markets prefix's chrome
+// changes, and children (server-rendered page content either way) are
+// unaffected either way -- see "passing Server Components as children to
+// a Client Component" in Next's own docs.
+const PUBLIC_ROUTE_PREFIXES = ["/markets"];
+
+function isPublicRoute(pathname: string): boolean {
+  return PUBLIC_ROUTE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
 export default function AppShell({ children }: AppShellProps) {
+  const pathname = usePathname();
+
+  if (isPublicRoute(pathname)) {
+    return (
+      <div className="min-h-screen bg-background text-foreground">
+        <PublicHeader />
+        <main className="min-h-screen">{children}</main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <TopNav />

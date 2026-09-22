@@ -99,7 +99,22 @@ def _require_taxonomy_version(engine, taxonomy_version: str) -> None:
 
 
 @router.get("/markets", response_model=MarketListOut)
-def list_markets(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), engine=EngineDep):
+def list_markets(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    slug: str | None = Query(None, description="Exact slug lookup (e.g. a public /markets/{slug} page resolving its market). "
+                             "When set, limit/offset are ignored and at most one market is returned."),
+    engine=EngineDep,
+):
+    if slug is not None:
+        # Increment 15 (frontend): the only way a public market page can resolve its slug to a UUID -- reuses
+        # markets_repo.get_market_by_slug (already existed for Increment 12's own repository, just never wired to
+        # this router) rather than the client fetching every market and filtering, which does not scale and is
+        # exactly the unbounded-query pattern this API otherwise avoids.
+        market = _run(markets_repo.get_market_by_slug, engine, slug)
+        rows = [] if market is None else [market]
+        return MarketListOut(markets=[market_out(m) for m in rows], limit=1, offset=0, total=len(rows))
+
     rows = _run(markets_repo.list_markets, engine, limit=limit, offset=offset)
     total = _run(markets_repo.count_markets, engine)
     return MarketListOut(markets=[market_out(m) for m in rows], limit=limit, offset=offset, total=total)

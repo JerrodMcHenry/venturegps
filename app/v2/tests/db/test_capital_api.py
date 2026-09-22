@@ -77,6 +77,33 @@ def test_market_detail(client):
     assert body == {"id": str(m.id), "slug": "robotics", "display_name": "Robotics", "taxonomy_versions": [TV1]}
 
 
+def test_slug_lookup_resolves_to_the_matching_market(client):
+    c, db = client
+    m = markets_repo.register_market(db, "robotics", "Robotics")
+    markets_repo.register_market(db, "ai-infrastructure", "AI Infrastructure")
+    resp = c.get("/api/v2/markets", params={"slug": "robotics"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1 and len(body["markets"]) == 1
+    assert body["markets"][0] == {"id": str(m.id), "slug": "robotics", "display_name": "Robotics"}
+
+
+def test_slug_lookup_for_an_unknown_slug_returns_an_empty_list_not_404(client):
+    c, db = client
+    markets_repo.register_market(db, "robotics", "Robotics")
+    resp = c.get("/api/v2/markets", params={"slug": "no-such-slug"})
+    assert resp.status_code == 200
+    assert resp.json() == {"markets": [], "limit": 1, "offset": 0, "total": 0}
+
+
+def test_slug_lookup_ignores_limit_and_offset(client):
+    c, db = client
+    markets_repo.register_market(db, "robotics", "Robotics")
+    resp = c.get("/api/v2/markets", params={"slug": "robotics", "limit": 5, "offset": 3})
+    body = resp.json()
+    assert len(body["markets"]) == 1 and body["limit"] == 1 and body["offset"] == 0
+
+
 def test_pagination_boundaries(client):
     c, db = client
     ids = [markets_repo.register_market(db, f"market-{i}", f"Market {i}").id for i in range(5)]

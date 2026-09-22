@@ -18,12 +18,13 @@ delete any canonical record — there is no write path reachable from it at all 
 
 ### `GET /api/v2/markets`
 
-List registered Markets.
+List registered Markets, or resolve one by slug.
 
 | Query param | Type | Default | Notes |
 |---|---|---|---|
-| `limit` | int | 50 | 1–200 |
-| `offset` | int | 0 | ≥ 0 |
+| `limit` | int | 50 | 1–200. Ignored when `slug` is set. |
+| `offset` | int | 0 | ≥ 0. Ignored when `slug` is set. |
+| `slug` | string | — | Increment 15: exact slug lookup (e.g. a public `/markets/{slug}` page resolving its Market's UUID). Returns at most one market; an unknown slug returns `{"markets": [], "total": 0}`, never a 404 — this endpoint always lists, it never asserts a specific market must exist (use `GET /markets/{market_id}` for that). |
 
 ```json
 {
