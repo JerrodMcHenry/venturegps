@@ -118,6 +118,7 @@ class BoundaryRules:
         "app.v2.evidence_links", "app.v2.resolution_decisions", "app.v2.repositories.companies",
         "app.v2.financing_resolution", "app.v2.repositories.financing_events",
         "app.v2.classification", "app.v2.repositories.markets", "app.v2.repositories.capital_metrics",
+        "app.v2.repositories.capital_signal",
     )
 
     # Worker, queue and scheduler frameworks: no deterministic V2 module may depend on one until

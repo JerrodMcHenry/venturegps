@@ -176,6 +176,16 @@ convention.
   Activity, Companies Funded, Capital Deployed by currency, Capital Concentration, Stage Distribution): no DB, network, AI
   or persisted result -- metrics are computed on demand, never stored. Capital Deployed counts only `verified_round_amount`;
   the metric date policy is announcement_date > first_sale_date > filing_date, never `Observation.observed_time`.
+- **Capital Signal (Increment 13, no migration).** `app/v2/domain/capital_signal.py` is the PURE historical-comparison
+  engine: current trailing-30-day window `[as_of-30d, as_of)` vs. exactly 8 prior non-overlapping 30-day windows of the
+  SAME Market, compared by exact percentile rank (`fractions.Fraction`, never a float or a growth-rate threshold). A
+  metric needs >=3 non-zero historical windows to be trusted, else `insufficient_data` (never downgraded to `stable`).
+  Financing Activity, Companies Funded and Capital Deployed-per-currency VOTE on the overall signal by agreement (never
+  a weighted average); `strong_increase`/`strong_decrease` require unanimous strong agreement, so one giant round alone
+  cannot dominate. Capital Concentration is contextual only and never votes (its own vocabulary:
+  more_concentrated/less_concentrated, never increase/decrease). `app/v2/repositories/capital_signal.py` reuses
+  Increment 12's `compute_capital_metrics` per window rather than re-deriving attribution/date/currency rules; nothing
+  is persisted. Methodology: `capital_signal.v1`, documented in full in `docs/v2/CAPITAL_METHODOLOGY.md`.
 - **Tests.** Pytest is scoped to V2 only: `python -m pytest` (from this directory). It refuses any path outside
   `app/v2` (root `conftest.py`), because legacy tests are scripts that hit the real `DATABASE_URL`; run those as
   `python -m app.tests.<name>`, unchanged.

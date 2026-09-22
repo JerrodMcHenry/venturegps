@@ -60,8 +60,9 @@ def test_no_taxonomy_editor_or_market_discovery_code_exists():
         for node in ast.walk(ast.parse(src)):
             if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
                 defined.add(node.name.lower())
+    # Increment 13 legitimately added CapitalSignal (a deterministic historical comparison, not a discovery/AI tool).
     for banned in ("classifymarketai", "discovermarket", "suggestmarket", "marketembedding", "marketsimilarity",
-                   "forecastcapital", "capitalsignal", "marketpulse"):
+                   "forecastcapital", "marketpulse"):
         assert banned not in defined, banned
 
 
