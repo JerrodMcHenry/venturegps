@@ -142,8 +142,10 @@ def test_candidate_tables_are_labelled_untrusted_and_no_canonical_tables_exist(m
     # Increment 9 legitimately added the resolution boundary and canonical identity; nothing beyond it exists.
     assert names == {"alembic_version", "source", "raw_payload", "observation", "observation_sighting", "processing_attempt",
                      "company_candidate", "company_candidate_identifier",
-                     "company", "company_name", "company_identifier", "resolution_decision"}
-    for forbidden in ("claim", "evidence_link", "identifier_claim", "merge", "market", "financing"):
+                     "company", "company_name", "company_identifier", "resolution_decision",
+                     "financing_event_candidate", "financing_event_candidate_amount", "financing_event_candidate_date"}
+    assert "financing_event" not in names                      # no canonical financing table exists
+    for forbidden in ("claim", "evidence_link", "identifier_claim", "merge", "market"):
         assert not any(forbidden == n or n.startswith(forbidden + "_") or n.endswith("_" + forbidden) for n in names), forbidden
 
 

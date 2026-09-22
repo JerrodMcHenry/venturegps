@@ -14,6 +14,7 @@ from app.v2.tests.db.harness import (
     HEAD_REVISION,
     HEAD_V2_OBJECTS,
     REVISION_0006_V2_OBJECTS,
+    REVISION_0007_V2_OBJECTS,
     create_legacy_probe_objects,
     scalar,
     snapshot_non_v2,
@@ -31,8 +32,8 @@ def rows(engine, sql):
         return [tuple(r) for r in conn.execute(text(sql))]
 
 
-def test_head_is_0007():
-    assert HEAD_REVISION == "0007"
+def test_head_is_at_least_0007():
+    assert HEAD_REVISION >= "0007"
 
 
 def test_upgrade_0006_to_0007_creates_only_the_resolution_and_company_objects(clean_db, alembic_cfg):
@@ -40,7 +41,7 @@ def test_upgrade_0006_to_0007_creates_only_the_resolution_and_company_objects(cl
     assert v2_objects(clean_db) == REVISION_0006_V2_OBJECTS
     command.upgrade(alembic_cfg(), "0007")
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0007"
-    assert v2_objects(clean_db) == HEAD_V2_OBJECTS
+    assert v2_objects(clean_db) == REVISION_0007_V2_OBJECTS
     assert [r[0] for r in rows(clean_db, "SELECT p.proname FROM pg_proc p WHERE p.pronamespace = 'v2'::regnamespace ORDER BY 1")] == [
         "company_candidate_guard", "company_candidate_identifier_guard", "company_guard", "company_identifier_guard",
         "company_name_guard", "company_requires_provenance", "forbid_evidence_change", "normalize_company_identifier",
@@ -48,7 +49,7 @@ def test_upgrade_0006_to_0007_creates_only_the_resolution_and_company_objects(cl
 
 
 def test_downgrade_0007_to_0006_removes_only_increment_9_objects_and_upgrade_again_works(clean_db, alembic_cfg):
-    command.upgrade(alembic_cfg(), "head")
+    command.upgrade(alembic_cfg(), "0007")
     command.downgrade(alembic_cfg(), "0006")
     assert v2_objects(clean_db) == REVISION_0006_V2_OBJECTS
     assert [r[0] for r in rows(clean_db, "SELECT p.proname FROM pg_proc p WHERE p.pronamespace = 'v2'::regnamespace ORDER BY 1")] == [
@@ -70,7 +71,7 @@ def test_downgrade_refuses_while_resolution_or_company_history_exists(migrated_d
     with pytest.raises(DBAPIError) as info:
         command.downgrade(alembic_cfg(), "0006")
     assert "refusing to downgrade 0007" in str(info.value.orig)
-    assert scalar(db, "SELECT version_num FROM v2.alembic_version") == "0007"
+    assert scalar(db, "SELECT version_num FROM v2.alembic_version") == HEAD_REVISION      # the whole downgrade rolled back
     assert canonical_counts(db) == before and v2_objects(db) == HEAD_V2_OBJECTS
 
 
@@ -126,7 +127,7 @@ def test_earlier_revisions_are_unchanged_in_history():
     from alembic.script import ScriptDirectory
     from app.v2.tests.db.harness import make_alembic_config
     script = ScriptDirectory.from_config(make_alembic_config())
-    assert [r.revision for r in script.walk_revisions()] == ["0007", "0006", "0005", "0004", "0003", "0002", "0001"]
+    assert [r.revision for r in script.walk_revisions()] == ["0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
     assert script.get_revision("0007").down_revision == "0006"
 
 

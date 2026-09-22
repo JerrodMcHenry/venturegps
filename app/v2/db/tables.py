@@ -203,3 +203,60 @@ company_identifier_table = Table(
     UniqueConstraint("candidate_identifier_id", name="uq_company_identifier_candidate_identifier"),
     comment="Canonical normalized company identifiers accepted by a human resolution decision, with candidate provenance.",
 )
+
+# Revision 0008: UNTRUSTED financing-event candidate proposals (append-only; evidence and attempt-state enforced by
+# triggers in the migration). No canonical financing_event table exists.
+financing_event_candidate_table = Table(
+    "financing_event_candidate",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("processing_attempt_id", BigInteger, ForeignKey("v2.processing_attempt.id", ondelete="RESTRICT", name="fk_fec_processing_attempt_id"), nullable=False),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_fec_company_id"), nullable=False),
+    Column("candidate_ordinal", Integer, nullable=False),
+    Column("event_evidence_start", Integer, nullable=False),
+    Column("event_evidence_end", Integer, nullable=False),
+    Column("event_evidence_hash", Text, nullable=False),
+    Column("stage", Text, nullable=False, server_default=text("'unknown'")),
+    Column("stage_evidence_start", Integer, nullable=True),
+    Column("stage_evidence_end", Integer, nullable=True),
+    Column("stage_evidence_hash", Text, nullable=True),
+    Column("financing_type", Text, nullable=False, server_default=text("'unknown'")),
+    Column("type_evidence_start", Integer, nullable=True),
+    Column("type_evidence_end", Integer, nullable=True),
+    Column("type_evidence_hash", Text, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("processing_attempt_id", "candidate_ordinal", name="uq_financing_event_candidate_ordinal"),
+    comment=("UNTRUSTED PROPOSALS about what evidence appears to say concerning a startup financing. "
+             "Not a verified or canonical financing."),
+)
+
+financing_event_candidate_amount_table = Table(
+    "financing_event_candidate_amount",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("candidate_id", BigInteger, ForeignKey("v2.financing_event_candidate.id", ondelete="RESTRICT", name="fk_fec_amount_candidate_id"), nullable=False),
+    Column("amount_semantics", Text, nullable=False),
+    Column("currency_code", Text, nullable=False),
+    Column("amount_minor_units", BigInteger, nullable=False),
+    Column("evidence_start", Integer, nullable=False),
+    Column("evidence_end", Integer, nullable=False),
+    Column("evidence_hash", Text, nullable=False),
+    UniqueConstraint("candidate_id", "amount_semantics", name="uq_financing_event_candidate_amount_semantics"),
+    comment=("UNTRUSTED proposed amount of a financing candidate; the semantics column says what the amount claims "
+             "to be. Not a verified round size."),
+)
+
+financing_event_candidate_date_table = Table(
+    "financing_event_candidate_date",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("candidate_id", BigInteger, ForeignKey("v2.financing_event_candidate.id", ondelete="RESTRICT", name="fk_fec_date_candidate_id"), nullable=False),
+    Column("date_kind", Text, nullable=False),
+    Column("date_precision", Text, nullable=False),
+    Column("date_start", DateTime(timezone=True), nullable=False),
+    Column("evidence_start", Integer, nullable=False),
+    Column("evidence_end", Integer, nullable=False),
+    Column("evidence_hash", Text, nullable=False),
+    UniqueConstraint("candidate_id", "date_kind", name="uq_financing_event_candidate_date_kind"),
+    comment="UNTRUSTED proposed dated fact of a financing candidate, with the precision the source gave.",
+)

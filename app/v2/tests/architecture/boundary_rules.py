@@ -65,9 +65,11 @@ class BoundaryRules:
     # ---- pure packages (see docstring)
     pure_packages: tuple[str, ...] = (
         "app.v2.domain", "app.v2.observations", "app.v2.candidates.proposer", "app.v2.candidates.evidence",
+        "app.v2.candidates.financing_evidence",
     )
     pure_allowed_v2_imports: tuple[str, ...] = (
         "app.v2.domain", "app.v2.observations", "app.v2.candidates.proposer", "app.v2.candidates.evidence",
+        "app.v2.candidates.financing_evidence",
     )
     pure_forbidden_import_prefixes: tuple[str, ...] = (
         # database / SQL
@@ -96,7 +98,9 @@ class BoundaryRules:
     # ---- candidate layer: it can never promote anything
     # The candidate layer may not import any (future) resolution/promotion/canonical package. Those packages
     # do not exist yet and must not be created just for the rule; the rule is structural.
-    candidate_layer_packages: tuple[str, ...] = ("app.v2.candidates", "app.v2.repositories.company_candidates")
+    candidate_layer_packages: tuple[str, ...] = (
+        "app.v2.candidates", "app.v2.repositories.company_candidates", "app.v2.repositories.financing_event_candidates",
+    )
     canonical_forbidden_import_prefixes: tuple[str, ...] = (
         "app.v2.resolution", "app.v2.promotion", "app.v2.canonical", "app.v2.companies", "app.v2.claims",
         "app.v2.evidence_links", "app.v2.resolution_decisions", "app.v2.repositories.companies",

@@ -156,6 +156,9 @@ convention.
   canonical `Company` (`app/v2/resolution`, revision 0007). Canonical tables are written only by the private
   `app.v2.resolution._writes` via `promotion.py`; `app.v2.ai` and the candidate layer cannot import the package, and
   `decided_by_kind` is `rule | human` in the domain and the database. Name-only matches never resolve; there is no merge.
+- **Capital (Increment 10).** `FinancingEventCandidate` (revision 0008) is an UNTRUSTED proposal about a canonical Company, backed by
+  byte-exact evidence: amount semantics (`offering_amount` / `amount_sold` / `announced_round_amount`) and date kinds are never collapsed,
+  money is integer minor units with an explicit currency, and unknown stage/type stays unknown. There is no canonical FinancingEvent yet.
 - **Tests.** Pytest is scoped to V2 only: `python -m pytest` (from this directory). It refuses any path outside
   `app/v2` (root `conftest.py`), because legacy tests are scripts that hit the real `DATABASE_URL`; run those as
   `python -m app.tests.<name>`, unchanged.

@@ -12,8 +12,22 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # What schema v2 contains at the current head (update with each revision that adds objects).
 # Tables/sequences only (relkind r/S); indexes are excluded by v2_objects().
-HEAD_REVISION = "0007"
+HEAD_REVISION = "0008"
 HEAD_V2_OBJECTS = [
+    ("alembic_version", "r"), ("company", "r"), ("company_candidate", "r"), ("company_candidate_id_seq", "S"),
+    ("company_candidate_identifier", "r"), ("company_candidate_identifier_id_seq", "S"),
+    ("company_identifier", "r"), ("company_identifier_id_seq", "S"),
+    ("company_name", "r"), ("company_name_id_seq", "S"),
+    ("financing_event_candidate", "r"), ("financing_event_candidate_amount", "r"),
+    ("financing_event_candidate_amount_id_seq", "S"), ("financing_event_candidate_date", "r"),
+    ("financing_event_candidate_date_id_seq", "S"), ("financing_event_candidate_id_seq", "S"),
+    ("observation", "r"), ("observation_id_seq", "S"),
+    ("observation_sighting", "r"), ("observation_sighting_id_seq", "S"),
+    ("processing_attempt", "r"), ("processing_attempt_id_seq", "S"),
+    ("raw_payload", "r"), ("resolution_decision", "r"), ("resolution_decision_id_seq", "S"),
+    ("source", "r"), ("source_id_seq", "S"),
+]
+REVISION_0007_V2_OBJECTS = [
     ("alembic_version", "r"), ("company", "r"), ("company_candidate", "r"), ("company_candidate_id_seq", "S"),
     ("company_candidate_identifier", "r"), ("company_candidate_identifier_id_seq", "S"),
     ("company_identifier", "r"), ("company_identifier_id_seq", "S"),

@@ -322,6 +322,49 @@ CHECKed to `rule | human` (no enum, no third value, no AI table), actor ids are 
   state is derived from decision history.
 - **Downgrade** removes only these objects and **refuses** to run while any company, decision, name or identifier exists.
 
+### Revision 0008: `v2.financing_event_candidate` (+ `_amount`, `_date`) (untrusted Capital proposals)
+
+```
+Observation -> ProcessingAttempt -> FinancingEventCandidate [UNTRUSTED] -> (future) validation/resolution -> canonical FinancingEvent [not built]
+```
+
+A **FinancingEventCandidate is a proposal** about what evidence appears to say concerning a startup financing. It is not a
+verified financing, a "venture round", a funding amount or a metric, and **nothing can promote one**: there is no canonical
+`financing_event` table, no promotion/resolution function, and no collector, metric, signal or Market Pulse code. Tables carry
+comments saying UNTRUSTED. It concerns exactly one canonical Company (real FK to `v2.company`; never a name/domain/URL: a candidate
+about an unknown company must wait for company resolution) and belongs to exactly one ProcessingAttempt (nothing about the
+Observation or Source is duplicated). Persisting a candidate requires the attempt to be PROCESSING and never modifies the attempt,
+the Company or any evidence.
+
+- **Schema.** `financing_event_candidate`: `(processing_attempt_id, candidate_ordinal)` identity, `company_id`, mandatory
+  **event-level evidence** (a bare "$5 million" with no financing evidence cannot be stored), `stage`, `financing_type`
+  (each `unknown` by default, with its own evidence columns that exist iff the value is not `unknown`), database `created_at`, no
+  `updated_at`. `financing_event_candidate_amount`: at most one row per **semantics**. `financing_event_candidate_date`: at most one
+  row per **date kind**. (Two small typed child tables, deliberately not a generic fact/EAV system.)
+- **Amounts** keep three different meanings and never collapse: `offering_amount` (Form D "total offering amount": what may be
+  offered), `amount_sold` (Form D "total amount sold": what HAS been sold), `announced_round_amount` (an announcement's stated round).
+  There is no `verified_round_amount`, no generic `amount`, no `funding_amount`; verification belongs to a later layer. Money is exact:
+  `amount_minor_units BIGINT` (cents for USD, whole yen for JPY) with an explicit `currency_code` (CHECK `^[A-Z]{3}$`; the domain
+  allows only an explicit ISO-4217 allowlist with each currency's exponent). Never a float, never an assumed USD, no FX. **Currency
+  policy:** an amount without an established currency is not proposed at all; an amount with finer precision than the currency's minor
+  unit is refused, not rounded.
+- **Dates** keep three kinds (`first_sale_date`, `filing_date`, `announcement_date`) and their **precision** (`instant|day|month|year`,
+  CHECKed so a year cannot carry a March start). There is no generic event_date, and `observed_time` (when WE saw it) stays on the Observation.
+- **Unknown stays unknown.** Stage vocabulary `pre_seed|seed|series_a|series_b|growth|unknown`; financing type
+  `equity|convertible|debt|other|unknown`. Absence is `unknown`; a value exists only if its evidence states it, and is never inferred from
+  an amount, age, investor or headcount.
+- **Evidence** is the byte-exact locator from revision 0006 (half-open byte range + sha256 of exactly those bytes, text-like payloads
+  only, no OCR/PDF, no fuzzy matching), reused via `verify_locator`. On top of "the bytes exist" (`app.v2.candidates.financing_evidence`):
+  a stage/type must be *stated* in its span (explicit phrase tables), and an amount/date span must contain a digit. This checks
+  consistency, **not** arithmetic or classification: "$20 million == 2,000,000,000 minor units" and "this is the first-sale date" are not
+  verified here. The database re-verifies attempt state and every span (`v2.evidence_span_matches`).
+- **Idempotency.** Identity is `(processing_attempt_id, candidate_ordinal)`. Replaying an identical batch (even with facts listed in a
+  different order) returns the stored candidates with `created=False`; a different proposal at that ordinal is a `ConflictError`. The ordinal
+  is stable only while proposers are deterministic and **must be reconsidered when a real probabilistic proposer exists.**
+- **Atomicity.** Whole batch atomic (Engine: one transaction; Connection: a SAVEPOINT). Conflicting candidates from different observations
+  are stored side by side; nothing is merged.
+- **Downgrade** removes only these objects and refuses to run while any financing candidate exists.
+
 ### Concurrency
 
 A PostgreSQL session-level advisory lock (`MIGRATION_LOCK_KEY`) is held for the whole
