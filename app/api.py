@@ -449,6 +449,12 @@ add_venture_graduations_startup_unique_constraint()
 from app.v2.api import router as v2_capital_router
 app.include_router(v2_capital_router)
 
+# VentureGPS V2 -- Increment 18.4: internal evidence review API (app/v2_review_api.py), mounted the same way.
+# Lives on the legacy side (not app/v2/) precisely so it can import app.auth's RequireAdmin -- V2 code itself
+# may never import legacy. Every route in it is admin-gated; nothing here is public.
+from app.v2_review_api import router as v2_review_router
+app.include_router(v2_review_router)
+
 @app.get("/health")
 def health():
     return {"status": "healthy"}

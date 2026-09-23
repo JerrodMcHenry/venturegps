@@ -23,9 +23,10 @@ from app.v2.classification.errors import AlreadyClassifiedError, PrimaryAlreadyA
 from app.v2.db.tables import company_market_classification_table as cmc
 from app.v2.db.tables import company_table, market_table, taxonomy_version_table
 from app.v2.domain.errors import InvalidInputError, InvariantViolationError
-from app.v2.domain.resolution import Authority
+from app.v2.domain.resolution import Authority, AuthorityKind
 from app.v2.domain.taxonomy import ClassificationRole, StoredCompanyMarketClassification, may_classify
 from app.v2.repositories._db import atomic, constraint_of, integrity_error_to_domain
+from app.v2.repositories._db import connection as _connection
 from app.v2.repositories.errors import NotFoundError
 
 
@@ -79,3 +80,19 @@ def classify_company(db: Engine | Connection, company_id: UUID, market_id: UUID,
         role=ClassificationRole(row.role), authority=Authority(kind=authority.kind, id=row.decided_by_id), created_at=row.created_at,
     )
     return ClassificationResult(classification=stored)
+
+
+def list_classifications_for_company(db: Engine | Connection, company_id: UUID) -> list[StoredCompanyMarketClassification]:
+    """Increment 18.4 -- a plain read, added here (not a new repository module) because this module is already
+    the sole writer of company_market_classification and the natural place to read what it wrote. Existing, not
+    reused elsewhere yet: the review interface shows a company's current classifications before a reviewer adds
+    another, so a duplicate PRIMARY or an exact repeat is visibly avoidable rather than just server-refused."""
+    with _connection(db) as connection:
+        rows = connection.execute(select(cmc).where(cmc.c.company_id == company_id).order_by(cmc.c.created_at)).all()
+    return [
+        StoredCompanyMarketClassification(
+            id=r.id, company_id=r.company_id, market_id=r.market_id, taxonomy_version=r.taxonomy_version,
+            role=ClassificationRole(r.role), authority=Authority(kind=AuthorityKind(r.decided_by_kind), id=r.decided_by_id), created_at=r.created_at,
+        )
+        for r in rows
+    ]

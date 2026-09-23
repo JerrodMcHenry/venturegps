@@ -24,9 +24,10 @@ from app.v2.db.tables import observation_table as obs
 from app.v2.db.tables import processing_attempt_table as pa
 from app.v2.db.tables import source_table as src
 from app.v2.domain.candidate import EvidenceLocator
-from app.v2.domain.errors import DomainError, InvariantViolationError
-from app.v2.domain.financing import AmountSemantics, FinancingDateKind, FinancingType, Money, Stage
+from app.v2.domain.errors import DomainError, InvalidInputError, InvariantViolationError
+from app.v2.domain.financing import AmountSemantics, FinancingDateKind, FinancingType, Money, Stage, StoredFinancingEventCandidate
 from app.v2.domain.financing_resolution import (
+    FINAL_FINANCING_DECISION_KINDS,
     Authority,
     AuthorityKind,
     CanonicalFinancingEvent,
@@ -38,6 +39,8 @@ from app.v2.domain.financing_resolution import (
     derive_financing_candidate_state,
 )
 from app.v2.repositories._db import connection as _connection
+
+MAX_PENDING_LIST_LIMIT = 200
 
 
 def _decision(row) -> StoredFinancingResolutionDecision:
@@ -102,6 +105,25 @@ def list_decisions_for_financing_candidate(db: Engine | Connection, candidate_id
 
 def get_financing_candidate_resolution_state(db: Engine | Connection, candidate_id: int) -> FinancingCandidateResolutionState:
     return derive_financing_candidate_state([d.decision_kind for d in list_decisions_for_financing_candidate(db, candidate_id)])
+
+
+def list_pending_financing_candidates(db: Engine | Connection, limit: int = 50, offset: int = 0) -> list[StoredFinancingEventCandidate]:
+    """Increment 18.4 -- the financing review queue, the same shape and reasoning as
+    companies.list_pending_company_candidates: every candidate with no final decision
+    (FINAL_FINANCING_DECISION_KINDS), newest first."""
+    if type(limit) is not int or limit < 1 or limit > MAX_PENDING_LIST_LIMIT:
+        raise InvalidInputError("invalid_limit", f"limit must be 1-{MAX_PENDING_LIST_LIMIT}")
+    if type(offset) is not int or offset < 0:
+        raise InvalidInputError("invalid_offset", "offset must be 0 or a positive integer")
+    has_final_decision = (
+        select(decision.c.id).where(decision.c.candidate_id == fcc.c.id, decision.c.decision_kind.in_([k.value for k in FINAL_FINANCING_DECISION_KINDS])).exists()
+    )
+    with _connection(db) as connection:
+        ids = connection.execute(
+            select(fcc.c.id).where(~has_final_decision).order_by(fcc.c.created_at.desc(), fcc.c.id.desc()).limit(limit).offset(offset)
+        ).scalars().all()
+    from app.v2.repositories.financing_event_candidates import get_financing_event_candidate  # local import: avoids a load-order cycle
+    return [found for i in ids if (found := get_financing_event_candidate(db, i)) is not None]
 
 
 def lock_financing_candidate_for_resolution(connection: Connection, candidate_id: int):

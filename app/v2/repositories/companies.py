@@ -20,7 +20,7 @@ from app.v2.db.tables import observation_table as obs
 from app.v2.db.tables import processing_attempt_table as pa
 from app.v2.db.tables import resolution_decision_table as decision
 from app.v2.db.tables import source_table as src
-from app.v2.domain.candidate import IdentifierType
+from app.v2.domain.candidate import IdentifierType, StoredCompanyCandidate
 from app.v2.domain.company import (
     CompanyNameRole,
     LineageLink,
@@ -29,8 +29,9 @@ from app.v2.domain.company import (
     StoredCompanyName,
     normalize_identifier,
 )
-from app.v2.domain.errors import DomainError, InvariantViolationError
+from app.v2.domain.errors import DomainError, InvalidInputError, InvariantViolationError
 from app.v2.domain.resolution import (
+    FINAL_DECISION_KINDS,
     Authority,
     AuthorityKind,
     CandidateResolutionState,
@@ -39,6 +40,8 @@ from app.v2.domain.resolution import (
     derive_candidate_state,
 )
 from app.v2.repositories._db import connection as _connection
+
+MAX_PENDING_LIST_LIMIT = 200
 
 
 def _decision(row) -> StoredResolutionDecision:
@@ -102,6 +105,29 @@ def list_decisions_for_candidate(db: Engine | Connection, candidate_id: int) -> 
 def get_candidate_resolution_state(db: Engine | Connection, candidate_id: int) -> CandidateResolutionState:
     """DERIVED from the decision history; candidates store no resolution status."""
     return derive_candidate_state([d.decision_kind for d in list_decisions_for_candidate(db, candidate_id)])
+
+
+def list_pending_company_candidates(db: Engine | Connection, limit: int = 50, offset: int = 0) -> list[StoredCompanyCandidate]:
+    """Increment 18.4 -- the review queue: every candidate with no FINAL decision (FINAL_DECISION_KINDS -- the
+    exact same closed set resolution.promotion itself checks; this adds no new business meaning, only a read
+    over it). A deferred candidate (not a final kind) is correctly still pending. Newest first. This module is
+    the right home for it (not app.v2.repositories.company_candidates, which is candidate-table-only by a
+    closed, architecture-enforced import set -- see that module's own test): "reads may be broad" here, and this
+    module already reads both the candidate and resolution_decision tables together (get_candidate_resolution_state,
+    just above)."""
+    if type(limit) is not int or limit < 1 or limit > MAX_PENDING_LIST_LIMIT:
+        raise InvalidInputError("invalid_limit", f"limit must be 1-{MAX_PENDING_LIST_LIMIT}")
+    if type(offset) is not int or offset < 0:
+        raise InvalidInputError("invalid_offset", "offset must be 0 or a positive integer")
+    has_final_decision = (
+        select(decision.c.id).where(decision.c.candidate_id == cc.c.id, decision.c.decision_kind.in_([k.value for k in FINAL_DECISION_KINDS])).exists()
+    )
+    with _connection(db) as connection:
+        ids = connection.execute(
+            select(cc.c.id).where(~has_final_decision).order_by(cc.c.created_at.desc(), cc.c.id.desc()).limit(limit).offset(offset)
+        ).scalars().all()
+    from app.v2.repositories.company_candidates import get_company_candidate  # local import: avoids a module-load-order cycle
+    return [found for i in ids if (found := get_company_candidate(db, i)) is not None]
 
 
 def lock_candidate_for_resolution(connection: Connection, candidate_id: int) -> bool:
