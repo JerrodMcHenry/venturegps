@@ -1,65 +1,60 @@
-import CompetitionTeaser from "@/components/home/CompetitionTeaser";
-import EntryPaths from "@/components/home/EntryPaths";
-import Hero from "@/components/home/Hero";
-import IdeaJourney from "@/components/home/IdeaJourney";
-import ScenarioExamples from "@/components/home/ScenarioExamples";
-import TrustSection from "@/components/home/TrustSection";
-import VisualPayoff from "@/components/home/VisualPayoff";
+import type { Metadata } from "next";
 
-// Phase 10.5 -- Consumer Home V2. Replaces the old "platform average SPS"
-// analytics dashboard (identical for every visitor, signed-in or not --
-// see Phase 10.2's own audit finding) with a homepage built around the
-// product's actual acquisition loop: IDEA -> MODEL -> ITERATE. Public,
-// unauthenticated (Part 14) -- the ONLY auth boundary on this page is the
-// existing one every other protected route already has, enforced when
-// Hero's "Build My Startup" navigates to /idea-lab/new, not by anything
-// here.
-//
-// A Server Component (the old Home was "use client" for its own
-// client-side analytics fetch -- Hero is the only piece here that needs
-// the client, and it's marked "use client" itself).
-//
-// Phase 15 -- Founder Beta Surface Audit, Part 14/19: ExplorePreview
-// ("See how real startups stack up") removed from this page -- not
-// deleted (components/home/ExplorePreview.tsx is untouched and still
-// exports a working component). The live discovery dataset it rendered
-// currently has exactly one row, whose own company_name is literally
-// "Unknown" -- rendering that on the homepage is a straightforward
-// "empty product surface" failure (Part 22), not a acceptable "small
-// but real" example. Bring it back once the dataset backing GET
-// /top-startups is credible again.
-//
-// force-dynamic kept (harmless with no dynamic content left on this
-// page today; a deliberate precaution against silently re-baking stale
-// data into a build-time-prerendered page if ExplorePreview, or
-// anything else data-driven, is ever added back here without someone
-// re-checking this line).
-export const dynamic = "force-dynamic";
+import VentureGpsHero from "@/components/home/ventureGps/VentureGpsHero.tsx";
+import MarketDiscoverySection from "@/components/home/ventureGps/MarketDiscoverySection.tsx";
 
-export default function HomePage() {
-  // Phase 31C -- Founder Experience Simplification, Part 11: the prior
-  // space-y-24/28 gap between EVERY section (six of them) compounded
-  // into several hundred pixels of pure dead space down an already-short
-  // page -- confirmed live (a visitor scrolling past "Where do you want
-  // to start?" landed on an almost entirely empty viewport before the
-  // next section's content appeared). Tightened, not removed: sections
-  // still read as distinct, but the page no longer feels mostly blank.
+import { loadHomepageMarkets } from "@/components/home/ventureGps/homepageData.ts";
+import { absoluteUrl } from "@/lib/site.ts";
+
+// VentureGPS Increment 17.1 -- the public homepage, promoted from the approved /design/cinematic-homepage
+// prototype (VentureGpsHero.tsx / MarketDiscoverySection.tsx's own header comments have the full detail on what
+// changed and why: real V2 market data instead of SAMPLE_MARKET_SIGNALS, and a rights-clear placeholder standing
+// in for the approved design's real photography -- see this increment's report for that blocker).
+//
+// Replaces the Phase 10.5 "Consumer Home V2" founder-funnel homepage (Hero/EntryPaths/IdeaJourney/
+// ScenarioExamples/CompetitionTeaser/TrustSection, all in components/home/) at this same route. Not deleted --
+// those components are untouched and still exist for reuse elsewhere -- but no longer imported here, since this
+// increment establishes the public VentureGPS brand experience as what a visitor lands on at "/". Every route
+// that funnel pointed into (/idea-lab/new, /analyze, sign-in, the authenticated app) is completely unaffected;
+// only what "/" itself renders has changed.
+//
+// A Server Component: loadHomepageMarkets does the one real data fetch (bounded, cached via Next's Data Cache
+// through v2Fetch's own revalidate option -- see homepageData.ts) that both this page and generateMetadata
+// below need; React's cache() wrapper on that function means it only actually runs once per request either way.
+export async function generateMetadata(): Promise<Metadata> {
+  const url = absoluteUrl("/");
+  const description = "Navigate the startup economy. Verified startup market intelligence from VentureGPS.";
+
+  return {
+    // Bypasses the root layout's "%s | Startup Intelligence Engine" template (same reasoning as
+    // /markets/[slug]'s own generateMetadata) -- this is the VentureGPS-branded public homepage now, not the
+    // legacy Startup Intelligence Engine product.
+    title: { absolute: "VentureGPS — Navigate the Startup Economy" },
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      title: "VentureGPS — Navigate the Startup Economy",
+      description,
+      url,
+      type: "website",
+      siteName: "VentureGPS",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: "VentureGPS — Navigate the Startup Economy",
+      description,
+    },
+  };
+}
+
+export default async function HomePage() {
+  const homepageMarkets = await loadHomepageMarkets();
+  const featured = homepageMarkets.status === "ok" ? (homepageMarkets.markets[0] ?? null) : null;
+
   return (
-    <div className="space-y-14 pb-16 sm:space-y-16">
-      <div>
-        <Hero />
-        <VisualPayoff />
-      </div>
-
-      <EntryPaths />
-
-      <IdeaJourney />
-
-      <ScenarioExamples />
-
-      <CompetitionTeaser />
-
-      <TrustSection />
+    <div>
+      <VentureGpsHero featured={featured} />
+      <MarketDiscoverySection result={homepageMarkets} />
     </div>
   );
 }

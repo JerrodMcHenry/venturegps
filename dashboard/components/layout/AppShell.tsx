@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import TopNav from "./TopNav";
 import MobileTabBar from "./MobileTabBar";
 import PublicHeader from "./PublicHeader";
+import PublicNav from "./PublicNav";
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -52,10 +53,14 @@ type AppShellProps = {
 // a Client Component" in Next's own docs.
 // Increment 16: "/design" added for the dev-only Consumer Experience Blueprint prototype
 // (app/design/discover/page.tsx) -- a brand-new route prefix nothing else uses, so this is purely additive; no
-// existing route's chrome changes. Gets the same minimal VentureGPS branding as /markets rather than the legacy
-// Startup Intelligence Engine nav, since the whole point of the prototype is reviewing the VentureGPS brand
-// experience without that chrome bleeding in.
-const PUBLIC_ROUTE_PREFIXES = ["/markets", "/design"];
+// existing route's chrome changes. Gets the same minimal VentureGPS branding /markets used to, since the whole
+// point of the prototype is reviewing the VentureGPS brand experience without legacy chrome bleeding in.
+//
+// Increment 17.1: "/markets" removed from this list -- it now matches REAL_PUBLIC_NAV_ROUTE_PREFIXES below
+// instead (checked first), which is what actually renders for it now. Left as a single-entry list rather than
+// collapsed into a plain `pathname.startsWith` check so a future prototype route can be added the same additive
+// way "/design" was.
+const PUBLIC_ROUTE_PREFIXES = ["/design"];
 
 // Increment 16.2 (Cinematic Homepage hero refinement), Part 4: the cinematic hero builds its own complete,
 // self-contained nav overlay as part of its full-bleed composition -- PublicHeader stacked above it duplicated
@@ -63,10 +68,22 @@ const PUBLIC_ROUTE_PREFIXES = ["/markets", "/design"];
 // point is an uninterrupted first viewport. `BARE_ROUTE_PREFIXES` renders children with NO shared header at
 // all, checked before PUBLIC_ROUTE_PREFIXES -- scoped to exactly this one route; every other /design/* prototype
 // (direction-a/b/c, discover, directions) is unaffected and still gets PublicHeader as before.
-const BARE_ROUTE_PREFIXES = ["/design/cinematic-homepage"];
+//
+// Increment 17.1: "/" joins this list for the identical reason -- the production homepage's VentureGpsHero
+// (promoted from the cinematic-homepage prototype) renders the real PublicNav itself, as part of its own
+// full-bleed composition, so a second shared header stacked above it would duplicate the wordmark/nav exactly as
+// it would have for the prototype.
+const BARE_ROUTE_PREFIXES = ["/design/cinematic-homepage", "/"];
+
+// Increment 17.1: "/markets" moved out of PUBLIC_ROUTE_PREFIXES into its own group -- it now gets the real,
+// functional PublicNav (working links + mobile menu) rather than PublicHeader (deliberately branding-only, no
+// links, since no second real public route existed when it was written). "/design" stays on PublicHeader,
+// unchanged -- Increment 17.1's own instruction is to keep the original prototype available in development
+// exactly as it already behaves, not to upgrade its chrome too.
+const REAL_PUBLIC_NAV_ROUTE_PREFIXES = ["/markets"];
 
 function matchesPrefix(pathname: string, prefixes: string[]): boolean {
-  return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  return prefixes.some((prefix) => (prefix === "/" ? pathname === "/" : pathname === prefix || pathname.startsWith(`${prefix}/`)));
 }
 
 export default function AppShell({ children }: AppShellProps) {
@@ -74,6 +91,15 @@ export default function AppShell({ children }: AppShellProps) {
 
   if (matchesPrefix(pathname, BARE_ROUTE_PREFIXES)) {
     return <div className="min-h-screen bg-background text-foreground">{children}</div>;
+  }
+
+  if (matchesPrefix(pathname, REAL_PUBLIC_NAV_ROUTE_PREFIXES)) {
+    return (
+      <div className="min-h-screen bg-background text-foreground">
+        <PublicNav variant="header" />
+        <main className="min-h-screen">{children}</main>
+      </div>
+    );
   }
 
   if (matchesPrefix(pathname, PUBLIC_ROUTE_PREFIXES)) {
