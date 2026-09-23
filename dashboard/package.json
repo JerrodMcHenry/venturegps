@@ -31,7 +31,9 @@
     "test:v2ChartData": "node tests/v2ChartData.test.ts",
     "test:v2MarketSlug": "node tests/v2MarketSlug.test.ts",
     "test:site": "node tests/site.test.ts",
-    "test": "npm run test:playbooks && npm run test:journey && npm run test:founderBetaNav && npm run test:concepts && npm run test:simulate && npm run test:fundraising && npm run test:fundraisingUi && npm run test:captureSignals && npm run test:weeklyReview && npm run test:graduation && npm run test:graduationSummary && npm run test:whatIfSemantics && npm run test:trustState && npm run test:ideaLabKnowledge && npm run test:buildIntelligenceLoop && npm run test:financeMoney && npm run test:commandCenterPriority && npm run test:commandCenterCrossSystem && npm run test:v2Money && npm run test:v2SignalLabels && npm run test:v2TaxonomyVersion && npm run test:v2ChartData && npm run test:v2MarketSlug && npm run test:site"
+    "test:v2SectionBInteraction": "node tests/v2SectionBInteraction.test.ts",
+    "test:v2SectionBBrowserInteraction": "node tests/v2SectionBBrowserInteraction.test.ts",
+    "test": "npm run test:playbooks && npm run test:journey && npm run test:founderBetaNav && npm run test:concepts && npm run test:simulate && npm run test:fundraising && npm run test:fundraisingUi && npm run test:captureSignals && npm run test:weeklyReview && npm run test:graduation && npm run test:graduationSummary && npm run test:whatIfSemantics && npm run test:trustState && npm run test:ideaLabKnowledge && npm run test:buildIntelligenceLoop && npm run test:financeMoney && npm run test:commandCenterPriority && npm run test:commandCenterCrossSystem && npm run test:v2Money && npm run test:v2SignalLabels && npm run test:v2TaxonomyVersion && npm run test:v2ChartData && npm run test:v2MarketSlug && npm run test:site && npm run test:v2SectionBInteraction && npm run test:v2SectionBBrowserInteraction"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.8.2",
@@ -42,11 +44,13 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "jsdom": "^30.1.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

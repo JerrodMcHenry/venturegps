@@ -50,16 +50,33 @@ type AppShellProps = {
 // changes, and children (server-rendered page content either way) are
 // unaffected either way -- see "passing Server Components as children to
 // a Client Component" in Next's own docs.
-const PUBLIC_ROUTE_PREFIXES = ["/markets"];
+// Increment 16: "/design" added for the dev-only Consumer Experience Blueprint prototype
+// (app/design/discover/page.tsx) -- a brand-new route prefix nothing else uses, so this is purely additive; no
+// existing route's chrome changes. Gets the same minimal VentureGPS branding as /markets rather than the legacy
+// Startup Intelligence Engine nav, since the whole point of the prototype is reviewing the VentureGPS brand
+// experience without that chrome bleeding in.
+const PUBLIC_ROUTE_PREFIXES = ["/markets", "/design"];
 
-function isPublicRoute(pathname: string): boolean {
-  return PUBLIC_ROUTE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+// Increment 16.2 (Cinematic Homepage hero refinement), Part 4: the cinematic hero builds its own complete,
+// self-contained nav overlay as part of its full-bleed composition -- PublicHeader stacked above it duplicated
+// that nav (two "VentureGPS" wordmarks, two navigation rows) and ate vertical space from a hero whose whole
+// point is an uninterrupted first viewport. `BARE_ROUTE_PREFIXES` renders children with NO shared header at
+// all, checked before PUBLIC_ROUTE_PREFIXES -- scoped to exactly this one route; every other /design/* prototype
+// (direction-a/b/c, discover, directions) is unaffected and still gets PublicHeader as before.
+const BARE_ROUTE_PREFIXES = ["/design/cinematic-homepage"];
+
+function matchesPrefix(pathname: string, prefixes: string[]): boolean {
+  return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 export default function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
 
-  if (isPublicRoute(pathname)) {
+  if (matchesPrefix(pathname, BARE_ROUTE_PREFIXES)) {
+    return <div className="min-h-screen bg-background text-foreground">{children}</div>;
+  }
+
+  if (matchesPrefix(pathname, PUBLIC_ROUTE_PREFIXES)) {
     return (
       <div className="min-h-screen bg-background text-foreground">
         <PublicHeader />
