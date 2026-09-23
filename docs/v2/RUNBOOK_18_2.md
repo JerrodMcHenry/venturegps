@@ -6,12 +6,19 @@ existing, already-tested V2 infrastructure plus the new tooling in `app/v2/tools
 actually run, once, against an isolated development database (never the shared preview or production database)
 as part of this increment; the exact IDs shown are from that real run.
 
+> **Superseded in part by Increment 18.3** (`docs/v2/RUNBOOK_18_3.md`): automated SEC Form D collection now
+> exists (`app/v2/tools/sec_form_d_collector.py`, the `collect-form-d`/`discover-form-d`/`collect-form-d-batch`
+> CLI commands). The "No automated fetching" line below described this increment's own scope accurately at the
+> time; it no longer describes the whole tool. Everything else on this page -- the manual-upload `ingest` path,
+> the extraction/resolution/classification walkthrough -- is unchanged and still accurate.
+
 ## What this is, and is not
 
 - **Local only.** `app/v2/tools/cli.py` is a command-line tool. There is no HTTP server, no listening socket, no
   unauthenticated endpoint anywhere in this package.
-- **No automated fetching.** Every file `ingest` reads is a file a human already downloaded onto local disk.
-  There is no HTTP-fetch code anywhere in `app/v2` (see the Increment 18.1 audit) and none was added here.
+- **No automated fetching (as of Increment 18.2).** Every file `ingest` reads is a file a human already
+  downloaded onto local disk. There was no HTTP-fetch code anywhere in `app/v2` as of this increment (see the
+  Increment 18.1 audit) -- see the note above for what changed in 18.3.
 - **No AI extraction.** The Form D parser (`app/v2/tools/form_d_xml.py`) is deterministic XML parsing; the
   financing-announcement path (`app/v2/tools/manual_fact.py`) is human-guided substring location, not free-text
   inference — see that module's own docstring for why a second automated proposer was deliberately not built.

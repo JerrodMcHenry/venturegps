@@ -54,7 +54,7 @@ from app.v2.observations.hashing import build_raw_payload
 from app.v2.observations.media import sniff_media_type
 from app.v2.repositories.company_candidates import get_company_candidate, list_company_candidates_for_observation
 from app.v2.repositories.financing_event_candidates import get_financing_event_candidate, list_financing_event_candidates_for_observation
-from app.v2.repositories.markets import get_market_by_slug, register_market, register_taxonomy_version
+from app.v2.repositories.markets import get_market_by_slug, get_taxonomy_version, register_market, register_taxonomy_version
 from app.v2.repositories.processing_attempts import get_processing_attempt, mark_failed, mark_processed, start_processing
 from app.v2.repositories.raw_payloads import get_raw_payload
 from app.v2.repositories.sources import get_source_by_key, register_source
@@ -62,6 +62,7 @@ from app.v2.resolution import human_review as company_promotion
 from app.v2.domain.capital_signal import build_windows
 from app.v2.repositories.capital_metrics import compute_capital_metrics_for_market
 from app.v2.repositories.capital_signal import compute_capital_signal_for_market
+from app.v2.tools import sec_form_d_collector
 from app.v2.tools.form_d_company_proposer import FormDCompanyProposer
 from app.v2.tools.form_d_financing_proposer import propose_financing_from_form_d
 from app.v2.tools.form_d_xml import FormDParseError
@@ -115,13 +116,22 @@ SOURCE_MEDIA_ANNOUNCEMENT = Source(
     source_key="media_funding_announcement", name="Reputable media funding announcement (manual upload)",
     source_type=SourceType.MEDIA_NEWS, collection_method=CollectionMethod.MANUAL_UPLOAD, url=None, is_active=True,
 )
+# Increment 18.3 -- a SEPARATE source from SOURCE_SEC_FORM_D (which stays MANUAL_UPLOAD, unchanged): this one's
+# collection_method is honestly HTTP_FETCH, and keeping it a distinct source_key means every observation's
+# provenance (manually uploaded in Increment 18.2 vs automatically collected from here on) stays visible from
+# the source alone, not just a code comment.
+SOURCE_SEC_FORM_D_AUTO = Source(
+    source_key="sec_edgar_form_d_http", name="SEC EDGAR -- Form D filings (automated HTTP collection)",
+    source_type=SourceType.GOVERNMENT_REGULATORY, collection_method=CollectionMethod.HTTP_FETCH,
+    url="https://www.sec.gov/Archives/edgar/", is_active=True,
+)
 
 
 def cmd_bootstrap(args, engine) -> None:
     """Idempotent: registering an already-registered source/market/taxonomy version is a no-op (see each
     repository function's own duplicate-key handling), so this is always safe to re-run."""
     results = {}
-    for source in (SOURCE_SEC_FORM_D, SOURCE_MEDIA_ANNOUNCEMENT):
+    for source in (SOURCE_SEC_FORM_D, SOURCE_SEC_FORM_D_AUTO, SOURCE_MEDIA_ANNOUNCEMENT):
         existing = get_source_by_key(engine, source.source_key)
         if existing is not None:
             results[source.source_key] = {"already_registered": True, "id": existing.id}
@@ -129,8 +139,12 @@ def cmd_bootstrap(args, engine) -> None:
         registration = register_source(engine, source)
         results[source.source_key] = {"already_registered": False, "id": registration.stored.id}
 
-    taxonomy = register_taxonomy_version(engine, args.taxonomy_version)
-    results["taxonomy_version"] = taxonomy.taxonomy_version
+    existing_taxonomy = get_taxonomy_version(engine, args.taxonomy_version)
+    if existing_taxonomy is not None:
+        results["taxonomy_version"] = {"already_registered": True, "value": existing_taxonomy.taxonomy_version}
+    else:
+        taxonomy = register_taxonomy_version(engine, args.taxonomy_version)
+        results["taxonomy_version"] = {"already_registered": False, "value": taxonomy.taxonomy_version}
 
     existing_market = get_market_by_slug(engine, args.market_slug)
     if existing_market is not None:
@@ -183,6 +197,101 @@ def cmd_ingest(args, engine) -> None:
         "sniffed_media_type": result.observation.observation.sniffed_media_type.value,
         "content_hash": result.observation.observation.content_hash,
     })
+
+
+# ---------------------------------------------------------------- automated SEC collection (Increment 18.3)
+
+def _collect_and_extract_one(engine, cik: str, accession: str, *, dry_run: bool) -> dict:
+    """One filing, start to (candidate) finish: fetch -> ingest -> company-candidate extraction. Never resolves
+    or promotes anything -- extraction only ever produces untrusted candidates, exactly as in Increment 18.2.
+    Returns a status dict the CLI prints directly; never raises for a single filing's ordinary failure modes
+    (network/parse/etc.) so a batch can report each item and keep going -- see cmd_collect_form_d_batch."""
+    try:
+        sec_form_d_collector.validate_cik(cik)
+        sec_form_d_collector.validate_accession(accession)
+    except sec_form_d_collector.CollectionError as exc:
+        return {"cik": cik, "accession": accession, "status": "failed", "reason": str(exc)}
+
+    url = sec_form_d_collector.form_d_primary_document_url(cik, accession)
+    if dry_run:
+        return {"cik": cik, "accession": accession, "status": "dry_run", "url": url}
+
+    try:
+        collected = sec_form_d_collector.collect_form_d_filing(cik, accession)
+    except sec_form_d_collector.CollectionError as exc:
+        return {"cik": cik, "accession": accession, "status": "failed", "reason": f"{type(exc).__name__}: {exc}"}
+
+    command = IngestionCommand(
+        source_key=SOURCE_SEC_FORM_D_AUTO.source_key, source_record_identifier=accession,
+        observation_type="sec_form_d_filing", event_time=None, observed_time=collected.fetched_at,
+        collection_version=make_version_id("sec_form_d_collector", 1), collector_id="sec_form_d_collector",
+        declared_media_type=None, payload_bytes=collected.content,
+        acquisition_key=f"sec_form_d_collector:{accession}:{collected.fetched_at.isoformat()}",
+    )
+    try:
+        ingestion = ingest_evidence(engine, command)
+    except Exception as exc:  # noqa: BLE001 - a single item's ingestion failure must not abort a batch
+        return {"cik": cik, "accession": accession, "status": "failed", "reason": f"ingestion failed: {type(exc).__name__}"}
+
+    observation_id = ingestion.observation.id
+    from app.v2.repositories.processing_attempts import get_latest_attempt
+
+    existing_attempt = get_latest_attempt(engine, observation_id, "form_d_company_extractor")
+    if existing_attempt is not None and existing_attempt.status.value == "processed":
+        existing_candidates = list_company_candidates_for_observation(engine, observation_id)
+        return {
+            "cik": cik, "accession": accession, "status": "duplicate", "observation_id": observation_id,
+            "reason": "already ingested and extracted", "candidate_ids": [c.id for c in existing_candidates],
+        }
+    if existing_attempt is not None and existing_attempt.status.value == "processing":
+        return {"cik": cik, "accession": accession, "status": "failed", "observation_id": observation_id,
+                "reason": "an extraction attempt for this observation is already in progress"}
+
+    attempt = start_processing(engine, observation_id, processor_id="form_d_company_extractor",
+                               processor_version=make_version_id("form_d_company_extractor", 1))
+    try:
+        result = persist_verified_candidates(engine, attempt.id, FormDCompanyProposer())
+    except ProposerFailedError as exc:
+        mark_failed(engine, attempt.id, reason_code="proposer_failed", detail_code=exc.exception_type)
+        return {"cik": cik, "accession": accession, "status": "failed", "observation_id": observation_id,
+                "reason": f"extraction failed: {exc.exception_type}"}
+    mark_processed(engine, attempt.id)
+
+    status = "duplicate" if ingestion.is_replay else "new"
+    return {
+        "cik": cik, "accession": accession, "status": status, "observation_id": observation_id,
+        "candidate_ids": [c.id for c in result.candidates], "pending_review": result.created_count > 0,
+    }
+
+
+def cmd_collect_form_d(args, engine) -> None:
+    outcome = _collect_and_extract_one(engine, args.cik, args.accession, dry_run=args.dry_run)
+    _print(outcome)
+    if outcome["status"] == "failed":
+        raise SystemExit(1)
+
+
+def cmd_discover_form_d(args, engine) -> None:
+    try:
+        results = sec_form_d_collector.discover_form_d_filings(args.query, max_results=args.max_results)
+    except sec_form_d_collector.CollectionError as exc:
+        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
+    _print([{"cik": r.cik, "accession": r.accession, "display_name": r.display_name, "file_date": r.file_date} for r in results])
+
+
+def cmd_collect_form_d_batch(args, engine) -> None:
+    try:
+        discovered = sec_form_d_collector.discover_form_d_filings(args.query, max_results=args.max_results)
+    except sec_form_d_collector.CollectionError as exc:
+        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
+
+    outcomes = [_collect_and_extract_one(engine, d.cik, d.accession, dry_run=args.dry_run) for d in discovered]
+    summary = {"new": 0, "duplicate": 0, "failed": 0, "dry_run": 0}
+    for outcome in outcomes:
+        summary[outcome["status"]] = summary.get(outcome["status"], 0) + 1
+    _print({"query": args.query, "discovered": len(discovered), "summary": summary, "results": outcomes})
 
 
 # ---------------------------------------------------------------- company extraction
@@ -445,6 +554,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--declared-media-type", default=None)
     p.add_argument("--acquisition-key", required=True)
     p.set_defaults(func=cmd_ingest)
+
+    p = sub.add_parser("collect-form-d", help="fetch one real Form D filing from SEC EDGAR and run it through ingestion + company-candidate extraction")
+    p.add_argument("--cik", required=True)
+    p.add_argument("--accession", required=True, help="NNNNNNNNNN-NN-NNNNNN")
+    p.add_argument("--dry-run", action="store_true", help="validate and print the URL that would be fetched; no network, no database writes")
+    p.set_defaults(func=cmd_collect_form_d)
+
+    p = sub.add_parser("discover-form-d", help="bounded search of SEC EDGAR's own full-text search API for candidate Form D filings (read-only, never collects)")
+    p.add_argument("--query", required=True)
+    p.add_argument("--max-results", type=int, default=sec_form_d_collector.MAX_DISCOVERY_RESULTS)
+    p.set_defaults(func=cmd_discover_form_d)
+
+    p = sub.add_parser("collect-form-d-batch", help="bounded discovery + collection: discover, then collect+extract each result, reporting new/duplicate/failed")
+    p.add_argument("--query", required=True)
+    p.add_argument("--max-results", type=int, default=sec_form_d_collector.MAX_DISCOVERY_RESULTS)
+    p.add_argument("--dry-run", action="store_true", help="discover and report what would be collected; no network fetch of any filing, no database writes")
+    p.set_defaults(func=cmd_collect_form_d_batch)
 
     p = sub.add_parser("extract-company", help="run the Form D company proposer against an observation")
     p.add_argument("--observation-id", type=int, required=True)
