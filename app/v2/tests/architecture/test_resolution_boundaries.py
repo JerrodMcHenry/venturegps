@@ -2,6 +2,10 @@
 The resolution boundary, structurally:
 
   - only the approved private writer touches the canonical tables, and only promotion imports it
+  - only two, narrow, reviewed modules may import promotion itself: rules.py (the deterministic-rule-authority
+    front door) and, since Increment 18.2.1, human_review.py (the human-authority front door for operational
+    callers such as a local CLI) -- never a general application/tooling module directly (see
+    app.v2.resolution.promotion's own docstring and app.v2.resolution.human_review's for the full reasoning)
   - AI (app.v2.ai) can never import resolution, promotion, the writer or the company repository
   - the candidate layer (including the proposer) can never reach promotion
   - nothing in the resolution package takes a confidence/score or names a model provider
@@ -88,7 +92,15 @@ def test_the_read_repository_never_writes():
     assert "_writes" not in code and "promotion" not in code
 
 
-def test_only_promotion_imports_the_private_writer_and_only_rules_import_promotion():
+def test_only_promotion_imports_the_private_writer_and_only_rules_and_human_review_import_promotion():
+    """Increment 18.2.1: `promoters` was `{"app.v2.resolution.rules"}` until a real operational caller for the
+    HUMAN side of promotion (a local, human-confirmed CLI) needed one and found none existed. The fix is not to
+    add that caller here directly -- a CLI can grow new commands and new imports over time, and "any module
+    under app.v2.tools may reach promotion" would be a materially broader grant than "exactly one small,
+    reviewed module may". app.v2.resolution.human_review is that module: the human-authority counterpart to
+    rules.py's rule-authority front door, adding no logic of its own (see its own docstring). This assertion
+    stays a closed, explicit set of exactly two names -- not a package prefix, not a pattern -- so a THIRD
+    caller still requires a deliberate, reviewed change here, not an incidental one."""
     importers, promoters = set(), set()
     for rel, src in modules():
         module, is_package = module_name_for(rel)
@@ -99,7 +111,7 @@ def test_only_promotion_imports_the_private_writer_and_only_rules_import_promoti
             if target == "app.v2.resolution.promotion" or target.startswith("app.v2.resolution.promotion."):
                 promoters.add(module)
     assert importers <= set(DEFAULT_RULES.canonical_writer_importers) and importers == {"app.v2.resolution.promotion"}
-    assert promoters == {"app.v2.resolution.rules"}
+    assert promoters == {"app.v2.resolution.rules", "app.v2.resolution.human_review"}
 
 
 def test_a_create_company_function_exists_only_in_promotion_and_no_generic_repository_api_creates_companies():

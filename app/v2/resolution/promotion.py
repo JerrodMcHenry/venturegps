@@ -13,6 +13,13 @@ transaction (a SAVEPOINT when the caller passes a Connection): a failure leaves 
 Company. The candidate, its attempt and all evidence are never modified. The database re-verifies
 everything (see migration 0007), including under concurrency: candidate rows are locked so decisions
 on one candidate serialise, and the unique indexes are the final authority.
+
+Exactly two modules may import this one (enforced by app/v2/tests/architecture/test_resolution_boundaries.py):
+app.v2.resolution.rules (the deterministic-rule-authority front door) and, since Increment 18.2.1,
+app.v2.resolution.human_review (the human-authority front door -- for operational callers such as a local,
+human-confirmed CLI). Neither adds logic beyond selecting which authority they act under; nothing else should
+import this module directly, including future application/tooling code -- add a caller to human_review.py, or
+propose a third, equally narrow and reviewed module, rather than importing promotion.py from anywhere broader.
 """
 
 from dataclasses import dataclass
