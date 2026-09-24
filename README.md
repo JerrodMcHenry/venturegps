@@ -250,6 +250,8 @@ dashboard/tests/
 
 The repository also contains separate calibration and reliability harnesses for evaluating behavior beyond conventional application tests.
 
+VentureGPS V2 (`app/v2/`) has its own `pytest`-based suite under `app/v2/tests/`, including static architecture-boundary enforcement. GitHub Actions (`.github/workflows/ci.yml`) runs this suite and the frontend's lint/typecheck/test/build checks on every push and pull request against `main` — see `docs/portfolio/CI.md` for how it isolates its disposable test database and how to reproduce every check locally.
+
 ## Documentation
 
 Engineering and methodology documentation lives alongside the implementation.

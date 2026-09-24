@@ -1,0 +1,162 @@
+name: CI
+
+# Portfolio-completion CI (VentureGPS Audit P0-1). Verifies VentureGPS V2 and
+# the Next.js frontend on every push to main and every pull request targeting
+# main. Deliberately does NOT run the legacy app/tests/* scripts -- those hit
+# the real local DATABASE_URL and are not database-isolated (see
+# docs/portfolio/VENTUREGPS_READINESS_AUDIT.md, area E); wiring them into CI
+# is out of scope for this milestone.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: neither job writes anything (no PR comments, no releases,
+# no package publishing), so the default token only needs read access.
+permissions:
+  contents: read
+
+# A new push to the same branch/PR cancels the previous, still-running run
+# for that ref, instead of letting stale runs pile up.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-v2:
+    name: Backend — VentureGPS V2 (pytest)
+    runs-on: ubuntu-latest
+
+    # A throwaway PostgreSQL server for this job only -- torn down with the
+    # runner when the job ends. Its default `postgres` maintenance database
+    # is never used as a test target; the actual disposable database is
+    # created and attested explicitly below.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The ONLY database URL this job ever sets. DATABASE_URL and
+      # V2_DATABASE_URL are deliberately left UNSET: app/v2/tests/conftest.py
+      # (_isolated_environment, autouse) strips them from the process
+      # environment for the whole V2 test session regardless, snapshotting
+      # them first only to refuse a test database URL that collides with a
+      # "production" one -- leaving them unset here means that check is
+      # trivially satisfied and the suite can never fall back to a real
+      # database by accident.
+      #
+      # Host is `localhost` (loopback) and the database name matches
+      # app/v2/tests/db/guard.py's required pattern
+      # (^venturegps_v2_test(_[a-z0-9]+)?$) -- this is the exact same
+      # disposable-database shape docs/v2/DATABASE_MIGRATIONS.md documents
+      # for local development, just provisioned fresh per CI run instead of
+      # created once by hand.
+      V2_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/venturegps_v2_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.5"
+          cache: pip
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create and attest the disposable V2 test database
+        # app/v2/tests/db/guard.py refuses to run any destructive test unless
+        # the SERVER ITSELF attests the database is disposable
+        # (COMMENT ON DATABASE ... IS 'VENTUREGPS_V2_DISPOSABLE_TEST_DB'),
+        # independent of whatever the connection URL claims. This is the
+        # exact same two commands docs/v2/DATABASE_MIGRATIONS.md documents
+        # for a local disposable database (`createdb` + `COMMENT ON
+        # DATABASE`), run here against the fresh service-container Postgres.
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
+            -c "CREATE DATABASE venturegps_v2_test;"
+          PGPASSWORD=postgres psql -h localhost -U postgres -d venturegps_v2_test \
+            -c "COMMENT ON DATABASE venturegps_v2_test IS 'VENTUREGPS_V2_DISPOSABLE_TEST_DB';"
+
+      - name: Run VentureGPS V2 test suite
+        # pytest.ini scopes a bare `pytest` (and this explicit `app/v2` path)
+        # to app/v2/tests only -- this one invocation already covers
+        # architecture-boundary tests (app/v2/tests/architecture), pure
+        # domain/evidence tests, and every database-marked test
+        # (app/v2/tests/db, via the `db` marker): each DB test applies its
+        # own migrations up to head through the `migrated_db` fixture and
+        # tears its own schema down again, so no separate "apply migrations"
+        # step belongs in this job.
+        #
+        # No OPENAI_API_KEY / ANTHROPIC_API_KEY / TAVILY_API_KEY is set in
+        # this job's env, matching app/v2/tests/conftest.py's own documented
+        # CI instruction ("CI should additionally run the suite with
+        # env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u TAVILY_API_KEY
+        # pytest") -- unset here is the same thing as explicitly unsetting.
+        run: python -m pytest app/v2 -q
+
+  frontend:
+    name: Frontend — lint, typecheck, tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+
+    env:
+      # Syntactically valid but entirely fake Clerk test keys -- NEVER real
+      # credentials. ClerkProvider (rendered in the root layout, so present
+      # for every route `next build` prerenders) only validates the KEY
+      # SHAPE at build time (see node_modules/@clerk/shared/dist/keys.js:
+      # isPublishableKey / isValidDecodedPublishableKey); it makes no
+      # network call to Clerk during a build. Verified locally in this
+      # session: `npm run build` with exactly these two values produces the
+      # identical 39-route output as building with real dev keys.
+      #
+      # This publishable key decodes (base64) to
+      # "ci-fake-test.clerk.accounts.dev$", a made-up hostname that matches
+      # the SDK's own shape requirements (ends with "$", contains a ".",
+      # only one "$") without corresponding to any real Clerk instance.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2ktZmFrZS10ZXN0LmNsZXJrLmFjY291bnRzLmRldiQ
+      CLERK_SECRET_KEY: sk_test_ci_placeholder_not_a_real_credential
+      # No backend needs to be reachable for `next build` -- /markets (and
+      # every other page that calls the V2 API) already fails closed to an
+      # "unavailable" empty state on a fetch error (dashboard/app/markets/page.tsx),
+      # which is exactly what happens against this unreachable placeholder URL.
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Run frontend test suite
+        run: npm test
+
+      - name: Production build
+        run: npm run build
