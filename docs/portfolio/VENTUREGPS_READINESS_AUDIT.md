@@ -12,6 +12,18 @@
 
 ---
 
+## Update — 2026-09-24 (P0.2: Deployment and Database Verification)
+
+Two facts below have changed since the original audit; everything else in this document is unchanged and still reflects what was true when written.
+
+1. **P0-1 (CI) is done and confirmed passing on GitHub**, not just implemented and locally validated: commit `55b38f2`, run `36036368738` — `Backend — VentureGPS V2 (pytest)` ✓ (10m42s), `Frontend — lint, typecheck, tests, build` ✓ (1m24s). Verified directly via `gh run view`, not taken on faith. Full detail: `docs/portfolio/CI.md`.
+2. **Migration `0012` has been applied to the isolated local dev database** (`venturegps_v2_dev_1801`), verified `0011` beforehand by direct read-only query, matching this audit's original finding exactly (no surprise, no stop condition triggered). Applied via the standard documented procedure; verified after: all 10 new lifecycle tables exist and are empty; Gecko Robotics' company/name/website-identifier/financing-event/Robotics-classification rows are **byte-for-byte unchanged** (same IDs, same timestamps to the microsecond); every pre-existing canonical table's row count is unchanged. One **pre-existing, unrelated** finding surfaced by `alembic check` on this specific database: `v2.collection_run`'s two indexes still carry `DESC` (fixed in the migration 0011 *file* after this database's own 0011 was originally applied, so the fix never retroactively reached already-created indexes here) — cosmetic/performance-only, touches no row data, unconnected to migration 0012. Not fixed in this pass (out of scope); flagged for a decision. **Preview and production databases were not touched, and this local migration says nothing about whether either of them is on 0012** — that remains unresolved (see below).
+3. **The live production experience is unchanged**: `https://app.venturegps.ai/` still shows its empty/unavailable market-data state today, confirmed by direct browser DOM inspection (not just a text-summarized fetch). New evidence this pass: the page's own network requests reveal a real Vercel deployment id (`dpl_FJTgGdHBVYnrQbGqwg7uwfpKQukX`) and a real custom Clerk auth domain (`clerk.venturegps.ai`, not a bare `*.clerk.accounts.dev` sandbox) — concrete confirmation a genuine, somewhat-mature deployment exists, still with **no way to map that deployment id to a specific git commit, or to inspect the production database, without Vercel/Render dashboard access I don't have.** That remains UNKNOWN.
+
+`DEPLOYMENT.md` and `README.md` have been updated to match (see `DEPLOYMENT.md`'s "VentureGPS V2 database migrations" section and README's Testing section).
+
+---
+
 ## 1. Executive Summary
 
 VentureGPS is **two products sharing one repository**, at very different levels of finish:
@@ -459,8 +471,8 @@ If you cannot currently explain any of these without re-reading the code, that i
 ## Open Questions Requiring Your Input
 
 1. **Which system do you want as the portfolio centerpiece — V2, legacy SIE, or a stated combination?** This audit recommends V2, but it's your call; P0-3's plan changes based on the answer.
-2. **What is production actually deployed from, and is V2 meant to be live there at all right now?** I cannot determine this without Render/Vercel dashboard access — please check and let me know what you find, since P0-2 depends entirely on the answer.
-3. **Do you want migration `0012` applied to `venturegps_v2_dev_1801` as a next step?** This audit did not do so (explicitly out of scope), but it's a one-command, low-risk action (`alembic upgrade head` against the dev DB) once you approve it.
+2. **What is production actually deployed from, and is V2 meant to be live there at all right now?** Still **UNKNOWN** as of the 2026-09-24 update above — I now have a real Vercel deployment id and confirmed the frontend is genuinely live with real custom-domain auth, but still cannot map that to a git commit or inspect the production database without dashboard access. Please check and let me know what you find.
+3. ~~Do you want migration `0012` applied to `venturegps_v2_dev_1801`?~~ **Done, 2026-09-24** — see the update note above. The open question now is whether/when to apply it to preview or production, which is explicitly a separate, later decision requiring your approval (not done in this pass).
 4. **Is the `sprint-1-platform-ui` / `sprint-2-intelligence-framework-dashboard` branch history relevant to the portfolio story**, or should the narrative center entirely on `main`? Not investigated in this audit.
 5. **Timeline** — how soon are you interviewing? This changes whether P1 items are worth any time at all before P0 is done.
 

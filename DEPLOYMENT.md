@@ -6,8 +6,20 @@ option suited to a staging environment, and its `render.yaml` Blueprint format
 (see `render.yaml` at the repo root) lets one file define both the web service
 and the database together.
 
-This document describes how to deploy staging. **No deployment has been
-performed** — this is preparation only.
+This document describes how to deploy staging. It originally read "No
+deployment has been performed — this is preparation only," written when V2
+was new (see the `alembic upgrade head` example further down, which used to
+say "expect: 0010 (head)"). **That is no longer accurate and this note
+exists so the two don't silently disagree again:** the frontend is live at
+`https://app.venturegps.ai/` (confirmed reachable, with its own custom Clerk
+auth domain), which by itself means *some* deployment of *something* has
+happened. What exactly is deployed — which commit, whether it matches
+`main`, and whether its database has ever had V2 migrations applied — is
+**not verifiable from this repository or this runbook alone**; see
+`docs/portfolio/VENTUREGPS_READINESS_AUDIT.md` §2/§6 for the full, dated
+investigation and its explicit UNKNOWNs. The steps below remain the
+documented *procedure* for standing up the `render.yaml` staging Blueprint
+from scratch; they are not a claim about what is currently running.
 
 ## Hosts
 
@@ -168,7 +180,7 @@ pre-deploy command. Nothing in `render.yaml` or the start command changed.
 export V2_DATABASE_URL='postgresql://...'   # the intended database (Render: the External Database URL)
 alembic current                              # prints "V2 migration target: host:port/database" first - check it
 alembic upgrade head
-alembic current                              # expect: 0010 (head)
+alembic current                              # expect: 0012 (head), as of Increment 18.7
 ```
 
 - Target resolution: `V2_DATABASE_URL`, else `DATABASE_URL`. **No `.env` file is
@@ -187,7 +199,27 @@ alembic current                              # expect: 0010 (head)
   (default 30s, `V2_MIGRATION_LOCK_TIMEOUT_SECONDS`) and then finds nothing to do.
 - Preview without a database: `alembic upgrade head --sql`.
 - Run `upgrade` **before** deploying code that needs a newer V2 schema.
-  (Nothing deployed uses V2 tables yet.)
+  Whether anything currently deployed reads V2 tables, and whether preview/
+  production have ever had these migrations applied, is **not verifiable
+  from this repository** — see `docs/portfolio/VENTUREGPS_READINESS_AUDIT.md`
+  §6 (the earlier claim here that nothing deployed uses V2 tables predates
+  the live site that now exists and should not be relied on).
+
+**Local isolated dev database, verified 2026-09-24.** `venturegps_v2_dev_1801`
+(127.0.0.1:54331 — never preview or production) was confirmed at revision
+`0011` by direct read-only query, then upgraded to `0012` (Company Lifecycle,
+Increment 18.7) via the exact procedure above. Verified before and after:
+Gecko Robotics' canonical company row, name, website identifier, financing
+event (verified $125,000,000.00 USD round amount, filing/first-sale dates),
+and Robotics market classification are byte-for-byte unchanged (same row
+IDs, same timestamps to the microsecond); all pre-existing canonical table
+row counts are unchanged; all 10 new lifecycle tables exist and are empty
+(no lifecycle candidates were created). `alembic check` against this
+database separately flagged a **pre-existing, unrelated** index-direction
+drift on `v2.collection_run` (its indexes still carry `DESC`, fixed in the
+migration 0011 file before this database's own 0011 was applied — cosmetic/
+performance-only, never touches row data) — not introduced by, or connected
+to, migration 0012. Preview and production were not touched.
 
 **Rollback.** `alembic downgrade` exists for disposable, dev and test databases
 and is tested there. Once V2 holds real evidence, a destructive downgrade is

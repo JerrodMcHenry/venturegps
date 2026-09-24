@@ -3,7 +3,7 @@
 **Workflow:** `.github/workflows/ci.yml`
 **Added:** Audit P0-1 (`docs/portfolio/VENTUREGPS_READINESS_AUDIT.md`, §7) — before this, nothing in the repository ran automatically on push or pull request.
 
-**Status: not yet verified on GitHub.** Everything below was validated by running the *exact* commands the workflow runs, locally, including a from-scratch disposable database created and attested with the workflow's own two commands (see "Reproducing the checks locally"). The workflow file itself has not yet been pushed, so no real GitHub-hosted Actions run has confirmed it end-to-end (runner-image quirks, `postgres:16` service-container startup timing, and the pinned `node-version: "26"`'s actual availability on `actions/setup-node` are the specific things only a real run can confirm). Treat the first real run after pushing as the actual acceptance test, and see the "Investigating a CI failure" section below if it doesn't go green immediately.
+**Status: verified.** Pushed as commit `55b38f2`; the resulting GitHub Actions run (`gh run view 36036368738`) **succeeded end-to-end**: `Backend — VentureGPS V2 (pytest)` in 10m42s, `Frontend — lint, typecheck, tests, build` in 1m24s, both ✓. Confirmed directly via the GitHub CLI (`gh run list`, `gh run view`), not just by reading the commit history. Two informational-only annotations appeared (GitHub's own Node 20→24 runner-forcing notice on `actions/checkout@v4`/`actions/setup-python@v5`/`actions/setup-node@v4`, and a future `ubuntu-latest`→Ubuntu 26 migration notice for October 2026) — neither is a failure and neither requires any change to this workflow today.
 
 ## What runs, and when
 

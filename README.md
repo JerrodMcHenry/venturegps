@@ -8,6 +8,13 @@ The platform is powered by the Startup Intelligence Engine (SIE), which combines
 
 **Live application:** https://app.venturegps.ai/
 
+The live homepage's public Markets experience (VentureGPS V2's read-only
+Capital Intelligence API) is currently showing its own honest empty/
+unavailable state rather than real market data — confirmed 2026-09-24. This
+is a known data-coverage gap, not a bug in the page itself (it fails closed
+by design); see `docs/portfolio/VENTUREGPS_READINESS_AUDIT.md` for the full,
+dated investigation.
+
 ## What It Does
 
 VentureGPS supports multiple startup intelligence workflows, including:
@@ -250,7 +257,7 @@ dashboard/tests/
 
 The repository also contains separate calibration and reliability harnesses for evaluating behavior beyond conventional application tests.
 
-VentureGPS V2 (`app/v2/`) has its own `pytest`-based suite under `app/v2/tests/`, including static architecture-boundary enforcement. GitHub Actions (`.github/workflows/ci.yml`) runs this suite and the frontend's lint/typecheck/test/build checks on every push and pull request against `main` — see `docs/portfolio/CI.md` for how it isolates its disposable test database and how to reproduce every check locally.
+VentureGPS V2 (`app/v2/`) has its own `pytest`-based suite under `app/v2/tests/`, including static architecture-boundary enforcement. GitHub Actions (`.github/workflows/ci.yml`) runs this suite and the frontend's lint/typecheck/test/build checks on every push and pull request against `main` — **confirmed passing** on commit `55b38f2` (both jobs green; see `docs/portfolio/CI.md` for the run details, its disposable-database isolation mechanism, and how to reproduce every check locally).
 
 ## Documentation
 
