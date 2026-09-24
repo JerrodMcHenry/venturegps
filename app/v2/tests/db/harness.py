@@ -12,8 +12,43 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # What schema v2 contains at the current head (update with each revision that adds objects).
 # Tables/sequences only (relkind r/S); indexes are excluded by v2_objects().
-HEAD_REVISION = "0011"
+HEAD_REVISION = "0012"
 HEAD_V2_OBJECTS = [
+    # Strict alphabetical order by relname -- this MUST match v2_objects()'s own `ORDER BY 1` exactly, not
+    # grouped by topic (a lesson from a real ordering bug this list once had: company_name_id_seq briefly sat
+    # before company_name_history although 'h' < 'i').
+    ("alembic_version", "r"), ("collection_run", "r"), ("collection_run_id_seq", "S"), ("company", "r"),
+    ("company_acquisition", "r"), ("company_acquisition_id_seq", "S"), ("company_candidate", "r"),
+    ("company_candidate_id_seq", "S"), ("company_candidate_identifier", "r"),
+    ("company_candidate_identifier_id_seq", "S"), ("company_identifier", "r"), ("company_identifier_id_seq", "S"),
+    ("company_market_classification", "r"), ("company_market_classification_id_seq", "S"), ("company_name", "r"),
+    ("company_name_history", "r"), ("company_name_history_id_seq", "S"), ("company_name_id_seq", "S"),
+    ("company_operating_status", "r"), ("company_operating_status_id_seq", "S"),
+    ("company_successor_relationship", "r"), ("company_successor_relationship_id_seq", "S"),
+    ("financing_event", "r"), ("financing_event_candidate", "r"), ("financing_event_candidate_amount", "r"),
+    ("financing_event_candidate_amount_id_seq", "S"), ("financing_event_candidate_date", "r"),
+    ("financing_event_candidate_date_id_seq", "S"), ("financing_event_candidate_id_seq", "S"),
+    ("financing_event_date", "r"), ("financing_event_date_id_seq", "S"), ("financing_event_stage", "r"),
+    ("financing_event_stage_id_seq", "S"), ("financing_event_type", "r"), ("financing_event_type_id_seq", "S"),
+    ("financing_event_verified_round_amount", "r"), ("financing_event_verified_round_amount_id_seq", "S"),
+    ("financing_resolution_decision", "r"), ("financing_resolution_decision_id_seq", "S"),
+    ("lifecycle_event_candidate", "r"), ("lifecycle_event_candidate_acquisition", "r"),
+    ("lifecycle_event_candidate_acquisition_id_seq", "S"), ("lifecycle_event_candidate_id_seq", "S"),
+    ("lifecycle_event_candidate_name_change", "r"), ("lifecycle_event_candidate_name_change_id_seq", "S"),
+    ("lifecycle_event_candidate_operating_status", "r"),
+    ("lifecycle_event_candidate_operating_status_id_seq", "S"), ("lifecycle_event_candidate_successor", "r"),
+    ("lifecycle_event_candidate_successor_id_seq", "S"), ("lifecycle_resolution_decision", "r"),
+    ("lifecycle_resolution_decision_id_seq", "S"), ("market", "r"), ("observation", "r"),
+    ("observation_id_seq", "S"), ("observation_sighting", "r"), ("observation_sighting_id_seq", "S"),
+    ("processing_attempt", "r"), ("processing_attempt_id_seq", "S"), ("raw_payload", "r"),
+    ("resolution_decision", "r"), ("resolution_decision_id_seq", "S"), ("source", "r"), ("source_id_seq", "S"),
+    ("taxonomy_version", "r"),
+]
+# What schema v2 contained through revision 0011, before 0012 added the lifecycle candidate/resolution/
+# canonical-fact tables (Increment 18.7). No test is scoped specifically to revision 0011 the way
+# test_taxonomy_migration.py is scoped to 0010, but this is kept for the same reason: a precise historical
+# snapshot, available if a future revision-specific test needs it.
+REVISION_0011_V2_OBJECTS = [
     ("alembic_version", "r"), ("collection_run", "r"), ("collection_run_id_seq", "S"),
     ("company", "r"), ("company_candidate", "r"), ("company_candidate_id_seq", "S"),
     ("company_candidate_identifier", "r"), ("company_candidate_identifier_id_seq", "S"),

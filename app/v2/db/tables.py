@@ -425,3 +425,162 @@ collection_run_table = Table(
     comment=("Operational job history for one bounded collection attempt (Increment 18.5). Not evidence, not a "
              "candidate, not a canonical fact. Mutable while running; frozen once terminal."),
 )
+
+# Revision 0012 -- Increment 18.7: lifecycle candidates (untrusted) about an ALREADY-canonical Company.
+lifecycle_event_candidate_table = Table(
+    "lifecycle_event_candidate",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("processing_attempt_id", BigInteger, ForeignKey("v2.processing_attempt.id", ondelete="RESTRICT", name="fk_lec_processing_attempt_id"), nullable=False),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_lec_company_id"), nullable=False),
+    Column("candidate_ordinal", Integer, nullable=False),
+    Column("event_evidence_start", Integer, nullable=False),
+    Column("event_evidence_end", Integer, nullable=False),
+    Column("event_evidence_hash", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("processing_attempt_id", "candidate_ordinal", name="uq_lec_attempt_ordinal"),
+    Index("ix_lec_company_id", "company_id"),
+    comment="UNTRUSTED lifecycle-event candidate about an already-canonical Company. Never creates or merges a Company.",
+)
+
+lifecycle_event_candidate_name_change_table = Table(
+    "lifecycle_event_candidate_name_change",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("candidate_id", BigInteger, ForeignKey("v2.lifecycle_event_candidate.id", ondelete="RESTRICT", name="fk_lec_nc_candidate_id"), nullable=False),
+    Column("new_name", Text, nullable=False),
+    Column("effective_precision", Text, nullable=True),
+    Column("effective_start", DateTime(timezone=True), nullable=True),
+    Column("evidence_start", Integer, nullable=False),
+    Column("evidence_end", Integer, nullable=False),
+    Column("evidence_hash", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("candidate_id", name="uq_lec_nc_candidate"),
+)
+
+lifecycle_event_candidate_operating_status_table = Table(
+    "lifecycle_event_candidate_operating_status",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("candidate_id", BigInteger, ForeignKey("v2.lifecycle_event_candidate.id", ondelete="RESTRICT", name="fk_lec_os_candidate_id"), nullable=False),
+    Column("status", Text, nullable=False),
+    Column("as_of_precision", Text, nullable=True),
+    Column("as_of_start", DateTime(timezone=True), nullable=True),
+    Column("evidence_start", Integer, nullable=False),
+    Column("evidence_end", Integer, nullable=False),
+    Column("evidence_hash", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("candidate_id", name="uq_lec_os_candidate"),
+)
+
+lifecycle_event_candidate_acquisition_table = Table(
+    "lifecycle_event_candidate_acquisition",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("candidate_id", BigInteger, ForeignKey("v2.lifecycle_event_candidate.id", ondelete="RESTRICT", name="fk_lec_acq_candidate_id"), nullable=False),
+    Column("acquirer_name", Text, nullable=False),
+    Column("acquirer_company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_lec_acq_acquirer_company_id"), nullable=True),
+    Column("transaction_date_precision", Text, nullable=True),
+    Column("transaction_date_start", DateTime(timezone=True), nullable=True),
+    Column("evidence_start", Integer, nullable=False),
+    Column("evidence_end", Integer, nullable=False),
+    Column("evidence_hash", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("candidate_id", name="uq_lec_acq_candidate"),
+)
+
+lifecycle_event_candidate_successor_table = Table(
+    "lifecycle_event_candidate_successor",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("candidate_id", BigInteger, ForeignKey("v2.lifecycle_event_candidate.id", ondelete="RESTRICT", name="fk_lec_succ_candidate_id"), nullable=False),
+    Column("related_entity_name", Text, nullable=False),
+    Column("related_company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_lec_succ_related_company_id"), nullable=True),
+    Column("relationship_kind", Text, nullable=False),
+    Column("evidence_start", Integer, nullable=False),
+    Column("evidence_end", Integer, nullable=False),
+    Column("evidence_hash", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("candidate_id", name="uq_lec_succ_candidate"),
+)
+
+lifecycle_resolution_decision_table = Table(
+    "lifecycle_resolution_decision",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("candidate_id", BigInteger, ForeignKey("v2.lifecycle_event_candidate.id", ondelete="RESTRICT", name="fk_lrd_candidate_id"), nullable=False),
+    Column("decision_kind", Text, nullable=False),
+    Column("decided_by_kind", Text, nullable=False),
+    Column("decided_by_id", Text, nullable=False),
+    Column("reason_code", Text, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    Index("uq_lrd_one_final", "candidate_id", unique=True,
+          postgresql_where=text("decision_kind IN ('accept_lifecycle_event', 'reject_candidate')")),
+    comment="Append-only decisions by a HUMAN (rule vocabulary exists, none enabled; never AI) that resolve an untrusted lifecycle candidate.",
+)
+
+company_name_history_table = Table(
+    "company_name_history",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_cnh_company_id"), nullable=False),
+    Column("new_name", Text, nullable=False),
+    Column("effective_precision", Text, nullable=True),
+    Column("effective_start", DateTime(timezone=True), nullable=True),
+    Column("resolution_decision_id", BigInteger, ForeignKey("v2.lifecycle_resolution_decision.id", ondelete="RESTRICT", name="fk_cnh_resolution_decision_id"), nullable=False),
+    Column("candidate_id", BigInteger, ForeignKey("v2.lifecycle_event_candidate.id", ondelete="RESTRICT", name="fk_cnh_candidate_id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("resolution_decision_id", name="uq_cnh_resolution_decision"),
+    UniqueConstraint("candidate_id", name="uq_cnh_candidate"),
+    comment=("A legal rename explicitly accepted by a human decision. company_name's own canonical row is never "
+             "rewritten; current name is a derived, latest-wins read."),
+)
+
+company_operating_status_table = Table(
+    "company_operating_status",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_cos_company_id"), nullable=False),
+    Column("status", Text, nullable=False),
+    Column("as_of_precision", Text, nullable=True),
+    Column("as_of_start", DateTime(timezone=True), nullable=True),
+    Column("resolution_decision_id", BigInteger, ForeignKey("v2.lifecycle_resolution_decision.id", ondelete="RESTRICT", name="fk_cos_resolution_decision_id"), nullable=False),
+    Column("candidate_id", BigInteger, ForeignKey("v2.lifecycle_event_candidate.id", ondelete="RESTRICT", name="fk_cos_candidate_id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("resolution_decision_id", name="uq_cos_resolution_decision"),
+    UniqueConstraint("candidate_id", name="uq_cos_candidate"),
+    comment="Dated operating status explicitly accepted by a human decision. unknown is a legitimate accepted claim, not merely an absent row.",
+)
+
+company_acquisition_table = Table(
+    "company_acquisition",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_ca_company_id"), nullable=False),
+    Column("acquirer_name", Text, nullable=False),
+    Column("acquirer_company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_ca_acquirer_company_id"), nullable=True),
+    Column("transaction_date_precision", Text, nullable=True),
+    Column("transaction_date_start", DateTime(timezone=True), nullable=True),
+    Column("resolution_decision_id", BigInteger, ForeignKey("v2.lifecycle_resolution_decision.id", ondelete="RESTRICT", name="fk_ca_resolution_decision_id"), nullable=False),
+    Column("candidate_id", BigInteger, ForeignKey("v2.lifecycle_event_candidate.id", ondelete="RESTRICT", name="fk_ca_candidate_id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("resolution_decision_id", name="uq_ca_resolution_decision"),
+    UniqueConstraint("candidate_id", name="uq_ca_candidate"),
+    comment="A documented relationship between distinct entities, explicitly accepted by a human decision. Never implies a status change by itself.",
+)
+
+company_successor_relationship_table = Table(
+    "company_successor_relationship",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_csr_company_id"), nullable=False),
+    Column("related_entity_name", Text, nullable=False),
+    Column("related_company_id", Uuid, ForeignKey("v2.company.id", ondelete="RESTRICT", name="fk_csr_related_company_id"), nullable=True),
+    Column("relationship_kind", Text, nullable=False),
+    Column("resolution_decision_id", BigInteger, ForeignKey("v2.lifecycle_resolution_decision.id", ondelete="RESTRICT", name="fk_csr_resolution_decision_id"), nullable=False),
+    Column("candidate_id", BigInteger, ForeignKey("v2.lifecycle_event_candidate.id", ondelete="RESTRICT", name="fk_csr_candidate_id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    UniqueConstraint("resolution_decision_id", name="uq_csr_resolution_decision"),
+    UniqueConstraint("candidate_id", name="uq_csr_candidate"),
+    comment="A possible or confirmed relationship between distinct entities, explicitly accepted by a human decision. Never transfers identifiers, financing, or classifications.",
+)

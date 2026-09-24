@@ -123,5 +123,5 @@ def test_legacy_objects_are_untouched_in_both_directions(clean_db, alembic_cfg):
 
 def test_history_is_linear_and_earlier_revisions_are_intact():
     script = ScriptDirectory.from_config(make_alembic_config())
-    assert [r.revision for r in script.walk_revisions()] == ["0011", "0010", "0009", "0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
+    assert [r.revision for r in script.walk_revisions()] == ["0012", "0011", "0010", "0009", "0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
     assert script.get_revision("0010").down_revision == "0009"

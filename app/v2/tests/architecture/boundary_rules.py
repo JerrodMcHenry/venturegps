@@ -52,22 +52,28 @@ class BoundaryRules:
     # including every other repository, is scanned by test_resolution_boundaries.py.
     canonical_writer_modules: tuple[str, ...] = (
         "app.v2.resolution._writes", "app.v2.financing_resolution._writes", "app.v2.classification._writes",
+        "app.v2.lifecycle._writes",
     )
     canonical_table_variables: tuple[str, ...] = (
         "company_table", "resolution_decision_table", "company_name_table", "company_identifier_table",
         "financing_event_table", "financing_resolution_decision_table", "financing_event_stage_table",
         "financing_event_type_table", "financing_event_verified_round_amount_table", "financing_event_date_table",
         "company_market_classification_table",
+        "lifecycle_resolution_decision_table", "company_name_history_table", "company_operating_status_table",
+        "company_acquisition_table", "company_successor_relationship_table",
     )
     canonical_table_names: tuple[str, ...] = (
         "company", "resolution_decision", "company_name", "company_identifier",
         "financing_event", "financing_resolution_decision", "financing_event_stage", "financing_event_type",
         "financing_event_verified_round_amount", "financing_event_date",
         "company_market_classification",
+        "lifecycle_resolution_decision", "company_name_history", "company_operating_status",
+        "company_acquisition", "company_successor_relationship",
     )
     # Modules that may import the private writer.
     canonical_writer_importers: tuple[str, ...] = (
         "app.v2.resolution.promotion", "app.v2.financing_resolution.promotion", "app.v2.classification.service",
+        "app.v2.lifecycle.promotion",
     )
 
     # Modules the static scan covers but the runtime probe cannot import
@@ -77,11 +83,11 @@ class BoundaryRules:
     # ---- pure packages (see docstring)
     pure_packages: tuple[str, ...] = (
         "app.v2.domain", "app.v2.observations", "app.v2.candidates.proposer", "app.v2.candidates.evidence",
-        "app.v2.candidates.financing_evidence",
+        "app.v2.candidates.financing_evidence", "app.v2.candidates.lifecycle_evidence",
     )
     pure_allowed_v2_imports: tuple[str, ...] = (
         "app.v2.domain", "app.v2.observations", "app.v2.candidates.proposer", "app.v2.candidates.evidence",
-        "app.v2.candidates.financing_evidence",
+        "app.v2.candidates.financing_evidence", "app.v2.candidates.lifecycle_evidence",
     )
     pure_forbidden_import_prefixes: tuple[str, ...] = (
         # database / SQL
@@ -112,6 +118,7 @@ class BoundaryRules:
     # do not exist yet and must not be created just for the rule; the rule is structural.
     candidate_layer_packages: tuple[str, ...] = (
         "app.v2.candidates", "app.v2.repositories.company_candidates", "app.v2.repositories.financing_event_candidates",
+        "app.v2.repositories.lifecycle_candidates",
     )
     canonical_forbidden_import_prefixes: tuple[str, ...] = (
         "app.v2.resolution", "app.v2.promotion", "app.v2.canonical", "app.v2.companies", "app.v2.claims",
@@ -119,6 +126,7 @@ class BoundaryRules:
         "app.v2.financing_resolution", "app.v2.repositories.financing_events",
         "app.v2.classification", "app.v2.repositories.markets", "app.v2.repositories.capital_metrics",
         "app.v2.repositories.capital_signal",
+        "app.v2.lifecycle", "app.v2.repositories.company_lifecycle",
     )
 
     # Worker, queue and scheduler frameworks: no deterministic V2 module may depend on one until
@@ -131,7 +139,7 @@ class BoundaryRules:
     # ---- no-network packages (see docstring)
     no_network_packages: tuple[str, ...] = (
         "app.v2.ingestion", "app.v2.repositories", "app.v2.candidates", "app.v2.resolution", "app.v2.financing_resolution",
-        "app.v2.classification",
+        "app.v2.classification", "app.v2.lifecycle",
     )
     network_forbidden_import_prefixes: tuple[str, ...] = (
         "socket", "ssl", "http", "urllib.request", "urllib3", "requests", "httpx", "aiohttp",

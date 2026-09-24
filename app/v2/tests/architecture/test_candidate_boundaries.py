@@ -94,12 +94,18 @@ def test_the_candidate_repository_writes_only_candidate_tables():
     from app.v2.db import tables  # noqa: F401 - registers every V2 table on the metadata
     from app.v2.db.metadata import metadata
     assert sorted(metadata.tables) == ["v2.collection_run",  # Increment 18.5: operational job history, not a candidate table
-                                       "v2.company", "v2.company_candidate", "v2.company_candidate_identifier",
+                                       "v2.company", "v2.company_acquisition", "v2.company_candidate", "v2.company_candidate_identifier",
                                        "v2.company_identifier", "v2.company_market_classification", "v2.company_name",
+                                       "v2.company_name_history", "v2.company_operating_status", "v2.company_successor_relationship",
                                        "v2.financing_event", "v2.financing_event_candidate", "v2.financing_event_candidate_amount",
                                        "v2.financing_event_candidate_date", "v2.financing_event_date", "v2.financing_event_stage",
                                        "v2.financing_event_type", "v2.financing_event_verified_round_amount",
-                                       "v2.financing_resolution_decision", "v2.market",
+                                       "v2.financing_resolution_decision",
+                                       # Increment 18.7: untrusted lifecycle candidates and their resolution/canonical facts.
+                                       "v2.lifecycle_event_candidate", "v2.lifecycle_event_candidate_acquisition",
+                                       "v2.lifecycle_event_candidate_name_change", "v2.lifecycle_event_candidate_operating_status",
+                                       "v2.lifecycle_event_candidate_successor", "v2.lifecycle_resolution_decision",
+                                       "v2.market",
                                        "v2.observation", "v2.observation_sighting", "v2.processing_attempt", "v2.raw_payload",
                                        "v2.resolution_decision", "v2.source", "v2.taxonomy_version"]
 

@@ -234,6 +234,104 @@ export function decideFinancingCandidate(
   });
 }
 
+// ---------------------------------------------------------------- lifecycle candidates (Increment 18.7)
+
+export type LifecycleCandidateSummary = {
+  id: number;
+  processing_attempt_id: number;
+  candidate_ordinal: number;
+  company_id: string;
+  fact_kinds: string[];
+  created_at: string;
+  resolution_state: string;
+};
+
+export type LifecycleCandidatePage = {
+  items: LifecycleCandidateSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type ProposedNameChangeOut = { new_name: string; effective: string | null; evidence: EvidenceExcerpt };
+export type ProposedOperatingStatusOut = { status: string; as_of: string | null; evidence: EvidenceExcerpt };
+export type ProposedAcquisitionOut = {
+  acquirer_name: string;
+  acquirer_company_id: string | null;
+  transaction_date: string | null;
+  evidence: EvidenceExcerpt;
+};
+export type ProposedSuccessorOut = {
+  related_entity_name: string;
+  relationship_kind: string;
+  related_company_id: string | null;
+  evidence: EvidenceExcerpt;
+};
+
+// What the company's CURRENT accepted lifecycle facts already say, wherever this candidate proposes something
+// of the same fact kind -- the exact consequence of accepting, shown before the reviewer acts. Never blocking.
+export type LifecycleConflict = { kind: string; description: string };
+
+export type LifecycleCandidateDetail = LifecycleCandidateSummary & {
+  company_is_canonical: boolean;
+  existing_company_name: string | null;
+  existing_current_legal_name: string | null;
+  existing_current_operating_status: string | null;
+  event_evidence: EvidenceExcerpt;
+  name_change: ProposedNameChangeOut | null;
+  operating_status: ProposedOperatingStatusOut | null;
+  acquisition: ProposedAcquisitionOut | null;
+  successor: ProposedSuccessorOut | null;
+  provenance: ProvenanceInfo;
+  decisions: DecisionRecord[];
+  conflicts: LifecycleConflict[];
+};
+
+export type LifecycleDecisionAction = "accept" | "reject" | "defer";
+
+export type LifecycleFactSelectionInput = {
+  name_change?: boolean;
+  operating_status?: boolean;
+  acquisition?: boolean;
+  successor?: boolean;
+};
+
+export type LifecycleDecisionResult = {
+  decision_id: number | null;
+  decision_kind: string;
+  company_id: string | null;
+  accepted_name_change: boolean;
+  accepted_operating_status: boolean;
+  accepted_acquisition: boolean;
+  accepted_successor: boolean;
+};
+
+export function listLifecycleCandidates(
+  token: string,
+  filters?: ReviewQueueFilters
+): Promise<LifecycleCandidatePage> {
+  return apiFetch<LifecycleCandidatePage>(`${PREFIX}/lifecycle-candidates${queryStringFor(filters)}`, { token });
+}
+
+export function getLifecycleCandidateDetail(
+  token: string,
+  candidateId: number
+): Promise<LifecycleCandidateDetail> {
+  return apiFetch<LifecycleCandidateDetail>(`${PREFIX}/lifecycle-candidates/${candidateId}`, { token });
+}
+
+export function decideLifecycleCandidate(
+  token: string,
+  candidateId: number,
+  body: { action: LifecycleDecisionAction; facts?: LifecycleFactSelectionInput; reason_code?: string }
+): Promise<LifecycleDecisionResult> {
+  return apiFetch<LifecycleDecisionResult>(`${PREFIX}/lifecycle-candidates/${candidateId}/decide`, {
+    method: "POST",
+    token,
+    body: { ...body, confirm: true },
+  });
+}
+
 // ---------------------------------------------------------------- companies / market classification
 
 export type CompanyNameOut = { name: string; role: string };

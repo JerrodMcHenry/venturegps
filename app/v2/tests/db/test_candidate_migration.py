@@ -147,11 +147,20 @@ def test_candidate_tables_are_labelled_untrusted_and_no_canonical_tables_exist(m
                      "financing_event", "financing_resolution_decision", "financing_event_stage", "financing_event_type",
                      "financing_event_verified_round_amount", "financing_event_date",
                      "company_market_classification", "market", "taxonomy_version",
-                     "collection_run"}
+                     "collection_run",
+                     # Increment 18.7: untrusted lifecycle candidates and their resolution/canonical-fact tables.
+                     "lifecycle_event_candidate", "lifecycle_event_candidate_name_change",
+                     "lifecycle_event_candidate_operating_status", "lifecycle_event_candidate_acquisition",
+                     "lifecycle_event_candidate_successor", "lifecycle_resolution_decision",
+                     "company_name_history", "company_operating_status", "company_acquisition",
+                     "company_successor_relationship"}
     # Increment 12 legitimately added market/taxonomy_version/company_market_classification.
     # Increment 18.5 legitimately added collection_run -- operational job history, not evidence, a candidate,
     # or a canonical fact; it carries no confidence/score/model/canonical/company_id/etc. column either (see
     # the next test), so it does not weaken what this test actually guards against.
+    # Increment 18.7 legitimately added the lifecycle candidate/resolution/canonical-fact tables above: the
+    # candidate-side ones are untrusted (company_candidate's own sibling shape), the canonical-fact ones are
+    # the SAME kind of addition Increment 9/12 already made for company/financing/classification identity.
     for forbidden in ("claim", "evidence_link", "identifier_claim", "merge"):
         assert not any(forbidden == n or n.startswith(forbidden + "_") or n.endswith("_" + forbidden) for n in names), forbidden
 

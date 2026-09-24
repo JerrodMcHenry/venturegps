@@ -44,16 +44,20 @@ from app.auth import AuthenticatedUser, RequireAdmin
 from app.observability import capture_exception
 from app.v2.candidates.evidence import verify_proposal
 from app.v2.candidates.financing_evidence import verify_financing_proposal
+from app.v2.candidates.lifecycle_evidence import verify_lifecycle_proposal
 from app.v2.classification.service import classify_company, list_classifications_for_company
 from app.v2.config import ConfigurationError
 from app.v2.db.engine import get_engine
 from app.v2.domain.collection import MAX_FILINGS_PER_RUN, CollectionTriggerType
+from app.v2.domain.company import CompanyNameRole
 from app.v2.domain.errors import DomainError, InvalidInputError, InvariantViolationError, UnsupportedInputError
 from app.v2.domain.financing import FinancingDateKind
 from app.v2.domain.financing_resolution import FactSelection
+from app.v2.domain.lifecycle_resolution import LifecycleFactSelection
 from app.v2.domain.resolution import Authority, human_authority
 from app.v2.domain.taxonomy import ClassificationRole
 from app.v2.financing_resolution import promotion as financing_promotion
+from app.v2.lifecycle import promotion as lifecycle_promotion
 from app.v2.repositories.collection_runs import count_pending_review_candidates, list_collection_runs
 from app.v2.repositories.companies import (
     find_company_ids_by_identifier,
@@ -65,6 +69,12 @@ from app.v2.repositories.companies import (
     list_decisions_for_candidate,
 )
 from app.v2.repositories.company_candidates import get_company_candidate
+from app.v2.repositories.company_lifecycle import (
+    get_company_lifecycle_state,
+    get_lifecycle_candidate_resolution_state,
+    list_decisions_for_lifecycle_candidate,
+    list_lifecycle_candidates_for_review,
+)
 from app.v2.repositories.errors import ConflictError, NotFoundError
 from app.v2.repositories.financing_event_candidates import get_financing_event_candidate
 from app.v2.repositories.financing_events import (
@@ -73,6 +83,7 @@ from app.v2.repositories.financing_events import (
     list_financing_candidates_for_review,
     list_financing_events_for_company,
 )
+from app.v2.repositories.lifecycle_candidates import get_lifecycle_event_candidate
 from app.v2.repositories.markets import list_markets, list_taxonomy_versions
 from app.v2.repositories.observations import get_observation_by_id
 from app.v2.repositories.processing_attempts import get_processing_attempt
@@ -439,6 +450,119 @@ class DecideFinancingRequest(BaseModel):
         return self
 
 
+# ---------------------------------------------------------------- lifecycle-candidate shapes (Increment 18.7)
+
+class LifecycleCandidateSummary(BaseModel):
+    id: int
+    processing_attempt_id: int
+    candidate_ordinal: int
+    company_id: str
+    fact_kinds: list[str]   # which of name_change / operating_status / acquisition / successor this candidate proposes
+    created_at: str
+    resolution_state: str
+
+
+class LifecycleCandidatePage(BaseModel):
+    items: list[LifecycleCandidateSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class ProposedNameChangeOut(BaseModel):
+    new_name: str
+    effective: str | None = None
+    evidence: EvidenceExcerpt
+
+
+class ProposedOperatingStatusOut(BaseModel):
+    status: str
+    as_of: str | None = None
+    evidence: EvidenceExcerpt
+
+
+class ProposedAcquisitionOut(BaseModel):
+    acquirer_name: str
+    acquirer_company_id: str | None = None
+    transaction_date: str | None = None
+    evidence: EvidenceExcerpt
+
+
+class ProposedSuccessorOut(BaseModel):
+    related_entity_name: str
+    relationship_kind: str
+    related_company_id: str | None = None
+    evidence: EvidenceExcerpt
+
+
+class LifecycleConflict(BaseModel):
+    """What the company's CURRENT accepted lifecycle facts already say, wherever this candidate proposes
+    something of the same fact kind -- the exact consequence of accepting, spelled out for the reviewer before
+    they act. Never a blocking condition: append-only history means an accepted fact here becomes the new
+    "current" one, it never overwrites or deletes the earlier row."""
+    kind: str            # "name_change" | "operating_status" | "acquisition" | "successor"
+    description: str
+
+
+class LifecycleCandidateDetail(BaseModel):
+    id: int
+    processing_attempt_id: int
+    candidate_ordinal: int
+    created_at: str
+    resolution_state: str
+    company_id: str
+    company_is_canonical: bool
+    existing_company_name: str | None = None
+    existing_current_legal_name: str | None = None
+    existing_current_operating_status: str | None = None
+    event_evidence: EvidenceExcerpt
+    name_change: ProposedNameChangeOut | None = None
+    operating_status: ProposedOperatingStatusOut | None = None
+    acquisition: ProposedAcquisitionOut | None = None
+    successor: ProposedSuccessorOut | None = None
+    provenance: ProvenanceInfo
+    decisions: list[DecisionOut]
+    conflicts: list[LifecycleConflict]
+
+
+class LifecycleFactSelectionIn(BaseModel):
+    name_change: bool = False
+    operating_status: bool = False
+    acquisition: bool = False
+    successor: bool = False
+
+    @property
+    def is_empty_input(self) -> bool:
+        return not (self.name_change or self.operating_status or self.acquisition or self.successor)
+
+
+class DecideLifecycleRequest(BaseModel):
+    action: Literal["accept", "reject", "defer"]
+    facts: LifecycleFactSelectionIn = Field(default_factory=LifecycleFactSelectionIn)
+    reason_code: str | None = None
+    confirm: bool = False
+
+    @model_validator(mode="after")
+    def _shape_matches_the_action(self) -> "DecideLifecycleRequest":
+        if self.action in ("reject", "defer") and not self.reason_code:
+            raise ValueError("reason_code is required to reject or defer a candidate")
+        if self.action in ("reject", "defer") and not self.facts.is_empty_input:
+            raise ValueError("facts cannot be selected on a reject or defer decision")
+        if not self.confirm:
+            raise ValueError("confirm must be true to submit a review decision")
+        return self
+
+
+class LifecycleDecisionResult(BaseModel):
+    decision_id: int | None = None
+    decision_kind: str
+    company_id: str | None = None
+    accepted_name_change: bool = False
+    accepted_operating_status: bool = False
+    accepted_acquisition: bool = False
+    accepted_successor: bool = False
+
+
 # ---------------------------------------------------------------- company / classification shapes
 
 class CompanyNameOut(BaseModel):
@@ -696,6 +820,159 @@ def decide_financing_candidate(candidate_id: int, body: DecideFinancingRequest, 
         accepted_stage=result.accepted_stage, accepted_financing_type=result.accepted_financing_type,
         accepted_verified_round_amount=result.accepted_verified_round_amount,
         accepted_dates=[k.value for k in result.accepted_dates],
+    )
+
+
+# ================================================================== lifecycle candidates (Increment 18.7)
+
+@router.get("/lifecycle-candidates", response_model=LifecycleCandidatePage)
+def list_lifecycle_candidates_endpoint(
+    status: Literal["pending", "resolved", "all"] = "pending",
+    search: str | None = None,
+    include_test_sources: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: AuthenticatedUser = RequireAdmin,
+):
+    engine = _engine_or_503()
+    candidates, total = _domain_call(
+        list_lifecycle_candidates_for_review, engine, status=status, search=search,
+        include_test_sources=include_test_sources, limit=limit, offset=offset,
+    )
+    items = [
+        LifecycleCandidateSummary(
+            id=c.id, processing_attempt_id=c.processing_attempt_id, candidate_ordinal=c.candidate_ordinal,
+            company_id=str(c.proposal.company_id),
+            fact_kinds=[name for name, present in (
+                ("name_change", c.proposal.name_change), ("operating_status", c.proposal.operating_status),
+                ("acquisition", c.proposal.acquisition), ("successor", c.proposal.successor),
+            ) if present is not None],
+            created_at=c.created_at.isoformat(),
+            resolution_state=_run(get_lifecycle_candidate_resolution_state, engine, c.id).value,
+        )
+        for c in candidates
+    ]
+    return LifecycleCandidatePage(items=items, total=total, limit=limit, offset=offset)
+
+
+def _lifecycle_conflicts(state, proposal) -> list["LifecycleConflict"]:
+    conflicts: list[LifecycleConflict] = []
+    if proposal.name_change is not None and state.current_legal_name:
+        conflicts.append(LifecycleConflict(kind="name_change",
+            description=f"the company's current accepted legal name is {state.current_legal_name!r}"))
+    if proposal.operating_status is not None and state.current_operating_status is not None:
+        conflicts.append(LifecycleConflict(kind="operating_status",
+            description=f"the company's current accepted operating status is {state.current_operating_status.value!r}"))
+    if proposal.acquisition is not None and state.acquisitions:
+        conflicts.append(LifecycleConflict(kind="acquisition",
+            description=f"{len(state.acquisitions)} acquisition fact(s) are already accepted for this company"))
+    if proposal.successor is not None and state.successors:
+        conflicts.append(LifecycleConflict(kind="successor",
+            description=f"{len(state.successors)} successor-relationship fact(s) are already accepted for this company"))
+    return conflicts
+
+
+@router.get("/lifecycle-candidates/{candidate_id}", response_model=LifecycleCandidateDetail)
+def get_lifecycle_candidate_detail(candidate_id: int, current_user: AuthenticatedUser = RequireAdmin):
+    engine = _engine_or_503()
+    candidate = _run(get_lifecycle_event_candidate, engine, candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="candidate not found")
+
+    payload, media_type = _live_payload_and_media_type(engine, candidate.processing_attempt_id)
+    # Re-verify the WHOLE proposal (event + every present fact) against the live payload bytes before showing or
+    # trusting anything from the stored row -- catches evidence tampering rather than displaying unverifiable text.
+    _verify_evidence(verify_lifecycle_proposal, candidate.proposal, payload, media_type, ordinal=candidate.candidate_ordinal)
+    data = payload.payload_bytes
+    proposal = candidate.proposal
+
+    # Never assumed from the candidate's structural requirement (persist_lifecycle_event_candidates only ever
+    # accepts a company_id already present in the canonical company table) -- re-checked fresh, right now.
+    company = _run(get_company, engine, proposal.company_id)
+    state = _run(get_company_lifecycle_state, engine, proposal.company_id)
+    existing_name = None
+    if company is not None:
+        names = _run(list_company_names, engine, proposal.company_id)
+        canonical = next((n for n in names if n.name_role == CompanyNameRole.CANONICAL), None)
+        existing_name = canonical.name if canonical is not None else (names[0].name if names else None)
+
+    name_change_out = None
+    if proposal.name_change is not None:
+        nc = proposal.name_change
+        name_change_out = ProposedNameChangeOut(
+            new_name=nc.new_name, effective=nc.effective.start.isoformat() if nc.effective else None,
+            evidence=_excerpt(data, nc.evidence.byte_start, nc.evidence.byte_end))
+    status_out = None
+    if proposal.operating_status is not None:
+        st = proposal.operating_status
+        status_out = ProposedOperatingStatusOut(
+            status=st.status.value, as_of=st.as_of.start.isoformat() if st.as_of else None,
+            evidence=_excerpt(data, st.evidence.byte_start, st.evidence.byte_end))
+    acquisition_out = None
+    if proposal.acquisition is not None:
+        aq = proposal.acquisition
+        acquisition_out = ProposedAcquisitionOut(
+            acquirer_name=aq.acquirer_name, acquirer_company_id=str(aq.acquirer_company_id) if aq.acquirer_company_id else None,
+            transaction_date=aq.transaction_date.start.isoformat() if aq.transaction_date else None,
+            evidence=_excerpt(data, aq.evidence.byte_start, aq.evidence.byte_end))
+    successor_out = None
+    if proposal.successor is not None:
+        su = proposal.successor
+        successor_out = ProposedSuccessorOut(
+            related_entity_name=su.related_entity_name, relationship_kind=su.relationship_kind.value,
+            related_company_id=str(su.related_company_id) if su.related_company_id else None,
+            evidence=_excerpt(data, su.evidence.byte_start, su.evidence.byte_end))
+
+    decisions = [_decision_out(d) for d in _run(list_decisions_for_lifecycle_candidate, engine, candidate_id)]
+
+    return LifecycleCandidateDetail(
+        id=candidate.id, processing_attempt_id=candidate.processing_attempt_id, candidate_ordinal=candidate.candidate_ordinal,
+        created_at=candidate.created_at.isoformat(),
+        resolution_state=_run(get_lifecycle_candidate_resolution_state, engine, candidate_id).value,
+        company_id=str(proposal.company_id), company_is_canonical=company is not None,
+        existing_company_name=existing_name, existing_current_legal_name=state.current_legal_name,
+        existing_current_operating_status=state.current_operating_status.value if state.current_operating_status else None,
+        event_evidence=_excerpt(data, proposal.event_evidence.byte_start, proposal.event_evidence.byte_end),
+        name_change=name_change_out, operating_status=status_out, acquisition=acquisition_out, successor=successor_out,
+        provenance=_provenance_for(engine, candidate.processing_attempt_id),
+        decisions=decisions, conflicts=_lifecycle_conflicts(state, proposal),
+    )
+
+
+@router.post("/lifecycle-candidates/{candidate_id}/decide", response_model=LifecycleDecisionResult)
+def decide_lifecycle_candidate(candidate_id: int, body: DecideLifecycleRequest, current_user: AuthenticatedUser = RequireAdmin):
+    engine = _engine_or_503()
+    authority = _authority_for(current_user)
+
+    candidate = _run(get_lifecycle_event_candidate, engine, candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="candidate not found")
+
+    # The server-side gate mirroring decide_financing_candidate's own: never take the frontend's word that the
+    # candidate's company is canonical. Structurally it always is (persist_lifecycle_event_candidates only ever
+    # accepts a company_id already present in the canonical company table) -- re-checked fresh anyway.
+    if _run(get_company, engine, candidate.proposal.company_id) is None:
+        raise HTTPException(status_code=409, detail="the candidate's company is not canonical; it cannot be reviewed")
+
+    payload, media_type = _live_payload_and_media_type(engine, candidate.processing_attempt_id)
+    _verify_evidence(verify_lifecycle_proposal, candidate.proposal, payload, media_type, ordinal=candidate.candidate_ordinal)
+
+    facts = LifecycleFactSelection(name_change=body.facts.name_change, operating_status=body.facts.operating_status,
+                                   acquisition=body.facts.acquisition, successor=body.facts.successor)
+
+    if body.action == "accept":
+        result = _domain_call(lifecycle_promotion.accept_lifecycle_event, engine, candidate_id, authority, facts)
+    elif body.action == "reject":
+        result = _domain_call(lifecycle_promotion.reject_candidate, engine, candidate_id, authority, body.reason_code)
+    else:
+        result = _domain_call(lifecycle_promotion.defer_candidate, engine, candidate_id, authority, body.reason_code)
+
+    return LifecycleDecisionResult(
+        decision_id=result.decision.id if result.decision else None,
+        decision_kind=result.decision.decision_kind.value if result.decision else body.action,
+        company_id=str(result.company_id) if result.company_id else None,
+        accepted_name_change=result.accepted_name_change, accepted_operating_status=result.accepted_operating_status,
+        accepted_acquisition=result.accepted_acquisition, accepted_successor=result.accepted_successor,
     )
 
 

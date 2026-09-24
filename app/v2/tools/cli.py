@@ -42,12 +42,23 @@ from app.v2.domain.candidate import CompanyCandidateProposal, IdentifierType, Pr
 from app.v2.domain.errors import DomainError
 from app.v2.domain.financing import AmountSemantics, FinancingDateKind, FinancingEventCandidateProposal, StoredFinancingEventCandidate
 from app.v2.domain.financing_resolution import FactSelection, NO_FACTS
+from app.v2.domain.lifecycle import (
+    LifecycleEventCandidateProposal,
+    OperatingStatus,
+    ProposedAcquisition,
+    ProposedNameChange,
+    ProposedOperatingStatus,
+    ProposedSuccessorRelationship,
+    SuccessorRelationshipKind,
+)
+from app.v2.domain.lifecycle_resolution import NO_LIFECYCLE_FACTS, LifecycleFactSelection
 from app.v2.domain.resolution import Authority, human_authority
 from app.v2.domain.source import CollectionMethod, Source, SourceType
 from app.v2.domain.taxonomy import ClassificationRole
 from app.v2.domain.time import EventTime
 from app.v2.domain.versions import make_version_id
 from app.v2.financing_resolution import promotion as financing_promotion
+from app.v2.lifecycle import promotion as lifecycle_promotion
 from app.v2.ingestion.models import IngestionCommand
 from app.v2.ingestion.service import ingest_evidence
 from app.v2.classification.service import classify_company
@@ -581,6 +592,182 @@ def cmd_decide_financing(args, engine) -> None:
     })
 
 
+# ---------------------------------------------------------------- Increment 18.7: lifecycle candidates
+
+def cmd_add_lifecycle_candidate(args, engine) -> None:
+    """A human-guided lifecycle-event candidate about an ALREADY-canonical company -- the same discipline as
+    add-identity-candidate/add-announcement-candidate (see manual_fact.py's own docstring): a human names the
+    exact substring(s) that support each fact; this is never automated extraction. At least one of --new-name,
+    --status, --acquirer-name, --related-name is required (an empty proposal is refused by the domain model
+    itself, LifecycleEventCandidateProposal). Each fact kind is independently evidenced and independently
+    acceptable later, at decide-lifecycle time -- this command only stores an UNTRUSTED candidate; it never
+    renames, merges, or otherwise changes anything canonical.
+
+    Duplicate submission is handled exactly like add-identity-candidate's own duplicate case: reported back,
+    never a second identical candidate and never an unhandled exception."""
+    if args.new_name and not args.name_find:
+        print("error: --name-find is required with --new-name", file=sys.stderr)
+        raise SystemExit(2)
+    if args.status and not args.status_find:
+        print("error: --status-find is required with --status", file=sys.stderr)
+        raise SystemExit(2)
+    if args.acquirer_name and not args.acquirer_find:
+        print("error: --acquirer-find is required with --acquirer-name", file=sys.stderr)
+        raise SystemExit(2)
+    if args.related_name and not args.related_find:
+        print("error: --related-find is required with --related-name", file=sys.stderr)
+        raise SystemExit(2)
+    if not (args.new_name or args.status or args.acquirer_name or args.related_name):
+        print("error: at least one of --new-name, --status, --acquirer-name, --related-name is required", file=sys.stderr)
+        raise SystemExit(2)
+
+    from app.v2.repositories.lifecycle_candidates import list_lifecycle_event_candidates_for_observation, persist_lifecycle_event_candidates
+    from app.v2.repositories.processing_attempts import get_latest_attempt
+
+    existing_attempt = get_latest_attempt(engine, args.observation_id, "manual_lifecycle_entry")
+    if existing_attempt is not None and existing_attempt.status.value == "processed":
+        existing = list_lifecycle_event_candidates_for_observation(engine, args.observation_id)
+        _print({"status": "duplicate", "reason": "a lifecycle candidate was already proposed for this observation",
+               "attempt_id": existing_attempt.id, "candidate_ids": [c.id for c in existing]})
+        return
+
+    attempt = start_processing(engine, args.observation_id, processor_id="manual_lifecycle_entry",
+                               processor_version=make_version_id("manual_lifecycle_entry", 1))
+    from app.v2.repositories.observations import get_observation_by_id
+    observation = get_observation_by_id(engine, args.observation_id)
+    payload = get_raw_payload(engine, observation.observation.content_hash, verify=True)
+    raw = payload.payload_bytes
+
+    def _date(iso_date: str | None) -> EventTime | None:
+        if not iso_date:
+            return None
+        y, m, d = (int(part) for part in iso_date.split("-"))
+        return EventTime.of_day(y, m, d)
+
+    try:
+        event_evidence = locate_evidence(raw, args.event_find, occurrence=args.event_occurrence)
+
+        name_change = None if not args.new_name else ProposedNameChange(
+            new_name=args.new_name, effective=_date(args.effective),
+            evidence=locate_evidence(raw, args.name_find, occurrence=args.name_occurrence),
+        )
+        operating_status = None if not args.status else ProposedOperatingStatus(
+            status=OperatingStatus(args.status), as_of=_date(args.as_of),
+            evidence=locate_evidence(raw, args.status_find, occurrence=args.status_occurrence),
+        )
+        acquisition = None if not args.acquirer_name else ProposedAcquisition(
+            acquirer_name=args.acquirer_name,
+            acquirer_company_id=uuid.UUID(args.acquirer_company_id) if args.acquirer_company_id else None,
+            transaction_date=_date(args.transaction_date),
+            evidence=locate_evidence(raw, args.acquirer_find, occurrence=args.acquirer_occurrence),
+        )
+        successor = None if not args.related_name else ProposedSuccessorRelationship(
+            related_entity_name=args.related_name, relationship_kind=SuccessorRelationshipKind(args.relationship_kind),
+            related_company_id=uuid.UUID(args.related_company_id) if args.related_company_id else None,
+            evidence=locate_evidence(raw, args.related_find, occurrence=args.related_occurrence),
+        )
+        proposal = LifecycleEventCandidateProposal(
+            company_id=uuid.UUID(args.company_id), event_evidence=event_evidence,
+            name_change=name_change, operating_status=operating_status, acquisition=acquisition, successor=successor,
+        )
+    except (FactNotFoundError, DomainError) as exc:
+        # DomainError's own .code is already a valid lowercase machine code by design (app/v2/domain/errors.py);
+        # FactNotFoundError is a plain Exception with no such attribute, hence the fallback.
+        detail_code = exc.code if isinstance(exc, DomainError) else "fact_not_found"
+        mark_failed(engine, attempt.id, reason_code="proposer_failed", detail_code=detail_code)
+        print(f"error: {exc}; attempt {attempt.id} marked failed", file=sys.stderr)
+        raise SystemExit(1) from None
+
+    try:
+        result = persist_lifecycle_event_candidates(engine, attempt.id, [proposal])
+    except DomainError as exc:
+        mark_failed(engine, attempt.id, reason_code="proposal_rejected", detail_code=exc.code)
+        print(f"error: {exc}; attempt {attempt.id} marked failed", file=sys.stderr)
+        raise SystemExit(1) from None
+    mark_processed(engine, attempt.id)
+    _print({
+        "attempt_id": attempt.id, "candidates_created": result.created_count,
+        "candidate_ids": [c.id for c in result.candidates],
+        "facts_proposed": [name for name, present in (
+            ("name_change", name_change), ("operating_status", operating_status),
+            ("acquisition", acquisition), ("successor", successor),
+        ) if present is not None],
+    })
+
+
+def _print_lifecycle_candidate(c) -> None:
+    p = c.proposal
+    _print({
+        "id": c.id, "processing_attempt_id": c.processing_attempt_id, "candidate_ordinal": c.candidate_ordinal,
+        "company_id": str(p.company_id),
+        "name_change": None if p.name_change is None else {
+            "new_name": p.name_change.new_name, "effective": p.name_change.effective.start.isoformat() if p.name_change.effective else None},
+        "operating_status": None if p.operating_status is None else {
+            "status": p.operating_status.status.value, "as_of": p.operating_status.as_of.start.isoformat() if p.operating_status.as_of else None},
+        "acquisition": None if p.acquisition is None else {
+            "acquirer_name": p.acquisition.acquirer_name,
+            "acquirer_company_id": str(p.acquisition.acquirer_company_id) if p.acquisition.acquirer_company_id else None,
+            "transaction_date": p.acquisition.transaction_date.start.isoformat() if p.acquisition.transaction_date else None},
+        "successor": None if p.successor is None else {
+            "related_entity_name": p.successor.related_entity_name, "relationship_kind": p.successor.relationship_kind.value,
+            "related_company_id": str(p.successor.related_company_id) if p.successor.related_company_id else None},
+        "created_at": c.created_at.isoformat(),
+    })
+
+
+def cmd_list_lifecycle_candidates(args, engine) -> None:
+    from app.v2.repositories.lifecycle_candidates import list_lifecycle_event_candidates_for_observation
+    for c in list_lifecycle_event_candidates_for_observation(engine, args.observation_id):
+        _print_lifecycle_candidate(c)
+
+
+def cmd_show_lifecycle_candidate(args, engine) -> None:
+    from app.v2.repositories.lifecycle_candidates import get_lifecycle_event_candidate
+    c = get_lifecycle_event_candidate(engine, args.candidate_id)
+    if c is None:
+        print("no such candidate", file=sys.stderr)
+        raise SystemExit(1)
+    _print_lifecycle_candidate(c)
+
+
+_LIFECYCLE_FACT_FIELDS = {"name_change", "operating_status", "acquisition", "successor"}
+
+
+def _parse_lifecycle_facts(spec: str | None) -> LifecycleFactSelection:
+    if not spec:
+        return NO_LIFECYCLE_FACTS
+    names = {n.strip() for n in spec.split(",") if n.strip()}
+    unknown = names - _LIFECYCLE_FACT_FIELDS
+    if unknown:
+        raise SystemExit(f"error: unknown fact name(s): {sorted(unknown)}; valid: {sorted(_LIFECYCLE_FACT_FIELDS)}")
+    return LifecycleFactSelection(
+        name_change="name_change" in names, operating_status="operating_status" in names,
+        acquisition="acquisition" in names, successor="successor" in names,
+    )
+
+
+def cmd_decide_lifecycle(args, engine) -> None:
+    authority = human_authority(args.as_actor)
+    facts = _parse_lifecycle_facts(args.facts)
+    action_label = {"accept": "ACCEPT", "reject": "REJECT", "defer": "DEFER"}[args.action]
+    _confirm(f"About to {action_label} lifecycle candidate {args.candidate_id}, accepting facts "
+             f"{sorted(f for f in _LIFECYCLE_FACT_FIELDS if getattr(facts, f, False))}, as {args.as_actor}.", auto=args.confirm)
+
+    if args.action == "accept":
+        result = lifecycle_promotion.accept_lifecycle_event(engine, args.candidate_id, authority, facts)
+    elif args.action == "reject":
+        result = lifecycle_promotion.reject_candidate(engine, args.candidate_id, authority, args.reason)
+    else:
+        result = lifecycle_promotion.defer_candidate(engine, args.candidate_id, authority, args.reason)
+
+    _print({
+        "decision_id": result.decision.id if result.decision else None,
+        "company_id": str(result.company_id) if result.company_id else None,
+        "accepted_name_change": result.accepted_name_change, "accepted_operating_status": result.accepted_operating_status,
+        "accepted_acquisition": result.accepted_acquisition, "accepted_successor": result.accepted_successor,
+    })
+
+
 # ---------------------------------------------------------------- classification
 
 def cmd_classify(args, engine) -> None:
@@ -809,6 +996,49 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--as", dest="as_actor", required=True)
     p.add_argument("--confirm", action="store_true")
     p.set_defaults(func=cmd_decide_financing)
+
+    p = sub.add_parser("add-lifecycle-candidate", help="human-guided lifecycle candidate (name change / operating status / acquisition / "
+                                                        "successor relationship) about an ALREADY-canonical company")
+    p.add_argument("--observation-id", type=int, required=True)
+    p.add_argument("--company-id", required=True, help="the ALREADY-canonical company this candidate is about")
+    p.add_argument("--event-find", required=True, help="exact substring showing a lifecycle-relevant event is being discussed at all")
+    p.add_argument("--event-occurrence", type=int, default=0)
+    p.add_argument("--new-name", default=None, help="proposed new legal name")
+    p.add_argument("--name-find", default=None, help="exact substring stating the new name (required with --new-name)")
+    p.add_argument("--name-occurrence", type=int, default=0)
+    p.add_argument("--effective", default=None, help="YYYY-MM-DD the rename took effect, if known")
+    p.add_argument("--status", default=None, choices=["active", "acquired", "ceased_operations", "unknown"])
+    p.add_argument("--status-find", default=None, help="exact substring stating the status (required with --status)")
+    p.add_argument("--status-occurrence", type=int, default=0)
+    p.add_argument("--as-of", default=None, help="YYYY-MM-DD the status was observed as of, if known")
+    p.add_argument("--acquirer-name", default=None)
+    p.add_argument("--acquirer-find", default=None, help="exact substring naming the acquirer (required with --acquirer-name)")
+    p.add_argument("--acquirer-occurrence", type=int, default=0)
+    p.add_argument("--acquirer-company-id", default=None, help="ONLY if the acquirer is itself an already-canonical company")
+    p.add_argument("--transaction-date", default=None, help="YYYY-MM-DD, if known")
+    p.add_argument("--related-name", default=None, help="the related entity's name, for a possible/confirmed successor relationship")
+    p.add_argument("--related-find", default=None, help="exact substring naming the related entity (required with --related-name)")
+    p.add_argument("--related-occurrence", type=int, default=0)
+    p.add_argument("--relationship-kind", default="possible_successor", choices=["possible_successor", "confirmed_successor"])
+    p.add_argument("--related-company-id", default=None, help="ONLY if the related entity is itself an already-canonical company")
+    p.set_defaults(func=cmd_add_lifecycle_candidate)
+
+    p = sub.add_parser("list-lifecycle-candidates")
+    p.add_argument("--observation-id", type=int, required=True)
+    p.set_defaults(func=cmd_list_lifecycle_candidates)
+
+    p = sub.add_parser("show-lifecycle-candidate")
+    p.add_argument("candidate_id", type=int)
+    p.set_defaults(func=cmd_show_lifecycle_candidate)
+
+    p = sub.add_parser("decide-lifecycle", help="human decision on a lifecycle candidate")
+    p.add_argument("candidate_id", type=int)
+    p.add_argument("--action", required=True, choices=["accept", "reject", "defer"])
+    p.add_argument("--facts", default=None, help="comma-separated: name_change,operating_status,acquisition,successor")
+    p.add_argument("--reason", default=None)
+    p.add_argument("--as", dest="as_actor", required=True)
+    p.add_argument("--confirm", action="store_true")
+    p.set_defaults(func=cmd_decide_lifecycle)
 
     p = sub.add_parser("classify", help="human decision: classify a company into a market")
     p.add_argument("--company-id", required=True)

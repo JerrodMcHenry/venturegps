@@ -11,12 +11,15 @@ import {
   classifyCompany,
   decideCompanyCandidate,
   decideFinancingCandidate,
+  decideLifecycleCandidate,
   getCollectionSummary,
   getCompanyCandidateDetail,
   getFinancingCandidateDetail,
+  getLifecycleCandidateDetail,
   listCollectionRuns,
   listCompanyCandidates,
   listFinancingCandidates,
+  listLifecycleCandidates,
   listReviewMarkets,
   listReviewTaxonomyVersions,
   triggerCollection,
@@ -29,6 +32,9 @@ import {
   type FinancingCandidateDetail,
   type FinancingCandidateSummary,
   type FinancingDecisionAction,
+  type LifecycleCandidateDetail,
+  type LifecycleCandidateSummary,
+  type LifecycleDecisionAction,
   type MarketOut,
   type ReviewQueueFilters,
 } from "@/lib/api/v2/review";
@@ -39,7 +45,7 @@ import {
 // create/attach/reject/defer/classify/trigger call goes straight to the backend's existing, unmodified
 // services (app/v2_review_api.py), and every evidence read is re-verified server-side on every load.
 
-type Tab = "company" | "financing" | "collection";
+type Tab = "company" | "financing" | "lifecycle" | "collection";
 const PAGE_SIZE = 20;
 
 function isAccessDenied(err: unknown): boolean {
@@ -726,6 +732,281 @@ function FinancingCandidatePanel({ token }: { token: string }) {
   );
 }
 
+// ---------------------------------------------------------------- lifecycle candidates (Increment 18.7)
+
+function LifecycleCandidatePanel({ token }: { token: string }) {
+  const [filters, setFilters] = useState<QueueFilterState>(DEFAULT_QUEUE_FILTERS);
+  const [items, setItems] = useState<LifecycleCandidateSummary[]>([]);
+  const [total, setTotal] = useState(0);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<LifecycleCandidateDetail | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  const [action, setAction] = useState<LifecycleDecisionAction>("accept");
+  const [reasonCode, setReasonCode] = useState("");
+  const [acceptNameChange, setAcceptNameChange] = useState(true);
+  const [acceptStatus, setAcceptStatus] = useState(true);
+  const [acceptAcquisition, setAcceptAcquisition] = useState(true);
+  const [acceptSuccessor, setAcceptSuccessor] = useState(true);
+
+  const loadList = useCallback(async () => {
+    setListError(null);
+    try {
+      const page = await listLifecycleCandidates(token, queueFiltersToApi(filters));
+      setItems(page.items);
+      setTotal(page.total);
+    } catch (err) {
+      if (isAccessDenied(err)) setAccessDenied(true);
+      else setListError("Couldn't load lifecycle candidates.");
+    }
+  }, [token, filters]);
+
+  const loadDetail = useCallback(
+    async (id: number) => {
+      setDetailError(null);
+      setDetail(null);
+      try {
+        setDetail(await getLifecycleCandidateDetail(token, id));
+      } catch (err) {
+        if (isAccessDenied(err)) setAccessDenied(true);
+        else if (isEvidenceIntegrityFailure(err))
+          setDetailError("This candidate's evidence failed integrity verification (it no longer matches what was originally recorded). It cannot be reviewed.");
+        else setDetailError("Couldn't load this candidate's evidence.");
+      }
+    },
+    [token]
+  );
+
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      loadList();
+    });
+  }, [loadList]);
+
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      if (selectedId !== null) loadDetail(selectedId);
+    });
+  }, [selectedId, loadDetail]);
+
+  const submit = async () => {
+    if (selectedId === null) return;
+    setSubmitting(true);
+    setActionMessage(null);
+    try {
+      const result = await decideLifecycleCandidate(token, selectedId, {
+        action,
+        reason_code: action === "reject" || action === "defer" ? reasonCode : undefined,
+        facts:
+          action === "accept"
+            ? {
+                name_change: acceptNameChange,
+                operating_status: acceptStatus,
+                acquisition: acceptAcquisition,
+                successor: acceptSuccessor,
+              }
+            : undefined,
+      });
+      setActionMessage(`Recorded: ${result.decision_kind}${result.company_id ? ` (company ${result.company_id})` : ""}`);
+      await loadList();
+      await loadDetail(selectedId);
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "The decision could not be recorded.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (accessDenied) return <AccessDenied />;
+
+  return (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[340px_1fr]">
+      <BaseCard className="p-4">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted">Lifecycle candidates</h2>
+        <QueueFilterBar filters={filters} onChange={setFilters} />
+        {listError ? <p className="mt-2 text-sm text-danger">{listError}</p> : null}
+        <ul className="mt-2 flex flex-col gap-1">
+          {items.map((c) => (
+            <li key={c.id}>
+              <button
+                onClick={() => setSelectedId(c.id)}
+                className={`w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-muted ${
+                  selectedId === c.id ? "bg-surface-muted font-medium" : ""
+                }`}
+              >
+                <div className="font-mono text-xs text-text-primary">company {c.company_id}</div>
+                <div className="text-xs text-text-muted">
+                  #{c.id} &middot; {c.fact_kinds.join(", ")} &middot; {c.resolution_state} &middot;{" "}
+                  {new Date(c.created_at).toLocaleString()}
+                </div>
+              </button>
+            </li>
+          ))}
+          {items.length === 0 && !listError ? (
+            <li className="px-3 py-2 text-sm text-text-muted">No matching candidates.</li>
+          ) : null}
+        </ul>
+        <PaginationBar total={total} filters={filters} onChange={setFilters} />
+      </BaseCard>
+
+      <BaseCard className="p-5">
+        {selectedId === null ? (
+          <p className="text-sm text-text-muted">Select a candidate to review its evidence.</p>
+        ) : detailError ? (
+          <p className="text-sm text-danger">{detailError}</p>
+        ) : !detail ? (
+          <p className="text-sm text-text-muted">Loading&hellip;</p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-text-primary">Lifecycle candidate #{detail.id}</h2>
+              <p className="text-xs text-text-muted">
+                Company {detail.company_id}
+                {detail.existing_company_name ? ` (${detail.existing_company_name})` : ""} &middot;{" "}
+                {detail.company_is_canonical ? (
+                  <span className="text-success">canonical -- eligible for review</span>
+                ) : (
+                  <span className="text-danger">not canonical -- decisions blocked server-side</span>
+                )}
+                {" "}&middot; state: {detail.resolution_state}
+              </p>
+              <p className="mt-1 text-xs text-text-muted">
+                Current accepted legal name: {detail.existing_current_legal_name ?? "(none accepted -- original canonical name stands)"}
+                {" "}&middot; current accepted operating status: {detail.existing_current_operating_status ?? "(none accepted)"}
+              </p>
+            </div>
+
+            {detail.conflicts.length > 0 ? (
+              <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-text-primary">
+                <div className="font-semibold">Accepting will add to existing history, not replace it</div>
+                <p className="mt-1 text-xs text-text-secondary">
+                  Every accepted lifecycle fact is append-only history -- accepting a fact below never deletes or overwrites
+                  what already exists; it only becomes the new most-recent one.
+                </p>
+                <ul className="mt-1 flex flex-col gap-1">
+                  {detail.conflicts.map((c, i) => (
+                    <li key={i} className="font-mono text-xs">
+                      {c.kind}: {c.description}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            <Evidence label="Lifecycle event" excerpt={detail.event_evidence} />
+            {detail.name_change ? (
+              <Evidence
+                label={`Name change: ${detail.name_change.new_name}${detail.name_change.effective ? ` (effective ${detail.name_change.effective})` : ""}`}
+                excerpt={detail.name_change.evidence}
+              />
+            ) : null}
+            {detail.operating_status ? (
+              <Evidence
+                label={`Operating status: ${detail.operating_status.status}${detail.operating_status.as_of ? ` (as of ${detail.operating_status.as_of})` : ""}`}
+                excerpt={detail.operating_status.evidence}
+              />
+            ) : null}
+            {detail.acquisition ? (
+              <Evidence
+                label={`Acquisition: acquirer ${detail.acquisition.acquirer_name}${detail.acquisition.transaction_date ? ` (${detail.acquisition.transaction_date})` : ""}`}
+                excerpt={detail.acquisition.evidence}
+              />
+            ) : null}
+            {detail.successor ? (
+              <Evidence
+                label={`Successor (${detail.successor.relationship_kind}): ${detail.successor.related_entity_name}`}
+                excerpt={detail.successor.evidence}
+              />
+            ) : null}
+
+            {detail.decisions.length > 0 ? (
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">Decision history</h3>
+                <ul className="mt-1 flex flex-col gap-1 text-sm text-text-secondary">
+                  {detail.decisions.map((d) => (
+                    <li key={d.id} className="font-mono text-xs">
+                      {d.created_at} &middot; {d.decision_kind} &middot; by {d.authority_id}
+                      {d.reason_code ? ` (${d.reason_code})` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {(detail.resolution_state === "unresolved" || detail.resolution_state === "deferred") &&
+            detail.company_is_canonical ? (
+              <div className="rounded-xl border border-border p-4">
+                <h3 className="text-sm font-semibold text-text-primary">Record a decision</h3>
+                <div className="mt-2 flex flex-col gap-2">
+                  <select
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                    value={action}
+                    onChange={(e) => setAction(e.target.value as LifecycleDecisionAction)}
+                  >
+                    <option value="accept">Accept (record selected facts as canonical)</option>
+                    <option value="defer">Defer (need more evidence)</option>
+                    <option value="reject">Reject (not a valid lifecycle claim)</option>
+                  </select>
+                  {action === "reject" || action === "defer" ? (
+                    <input
+                      className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                      placeholder="Reason code"
+                      value={reasonCode}
+                      onChange={(e) => setReasonCode(e.target.value)}
+                    />
+                  ) : null}
+                  {action === "accept" ? (
+                    <div className="flex flex-col gap-1 text-sm text-text-secondary">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                        Accept these proposed facts as canonical
+                      </span>
+                      {detail.name_change ? (
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={acceptNameChange} onChange={(e) => setAcceptNameChange(e.target.checked)} />
+                          Name change: {detail.name_change.new_name}
+                        </label>
+                      ) : null}
+                      {detail.operating_status ? (
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={acceptStatus} onChange={(e) => setAcceptStatus(e.target.checked)} />
+                          Operating status: {detail.operating_status.status}
+                        </label>
+                      ) : null}
+                      {detail.acquisition ? (
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={acceptAcquisition} onChange={(e) => setAcceptAcquisition(e.target.checked)} />
+                          Acquisition: acquirer {detail.acquisition.acquirer_name}
+                        </label>
+                      ) : null}
+                      {detail.successor ? (
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={acceptSuccessor} onChange={(e) => setAcceptSuccessor(e.target.checked)} />
+                          Successor ({detail.successor.relationship_kind}): {detail.successor.related_entity_name}
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+                <ConfirmAndSubmit
+                  label="Submit decision"
+                  submitting={submitting}
+                  disabled={(action === "reject" || action === "defer") && !reasonCode}
+                  onSubmit={submit}
+                />
+                {actionMessage ? <p className="mt-2 text-sm text-text-secondary">{actionMessage}</p> : null}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </BaseCard>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- collection operations (Increment 18.5)
 
 const STATUS_COLORS: Record<string, string> = {
@@ -910,6 +1191,9 @@ export default function V2ReviewView() {
             <Button variant={tab === "financing" ? "primary" : "secondary"} size="sm" onClick={() => setTab("financing")}>
               Financing candidates
             </Button>
+            <Button variant={tab === "lifecycle" ? "primary" : "secondary"} size="sm" onClick={() => setTab("lifecycle")}>
+              Lifecycle candidates
+            </Button>
             <Button variant={tab === "collection" ? "primary" : "secondary"} size="sm" onClick={() => setTab("collection")}>
               Collection operations
             </Button>
@@ -918,6 +1202,8 @@ export default function V2ReviewView() {
             <CompanyCandidatePanel token={token} />
           ) : tab === "financing" ? (
             <FinancingCandidatePanel token={token} />
+          ) : tab === "lifecycle" ? (
+            <LifecycleCandidatePanel token={token} />
           ) : (
             <CollectionOperationsPanel token={token} />
           )}
