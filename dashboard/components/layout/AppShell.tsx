@@ -80,7 +80,15 @@ const BARE_ROUTE_PREFIXES = ["/design/cinematic-homepage", "/"];
 // links, since no second real public route existed when it was written). "/design" stays on PublicHeader,
 // unchanged -- Increment 17.1's own instruction is to keep the original prototype available in development
 // exactly as it already behaves, not to upgrade its chrome too.
-const REAL_PUBLIC_NAV_ROUTE_PREFIXES = ["/markets"];
+//
+// Milestone 1, Task 1 -- Unify Navigation: "/admin" added. Before this, /admin/v2-review and /admin/analytics
+// fell through to the default branch below and rendered the OLD "Startup Intelligence Engine" TopNav shell --
+// the exact "two separate products" confusion this task exists to remove, on the one route where it mattered
+// most (the internal V2 review tool looked like it belonged to a different, older product). This is chrome
+// only: auth.protect() on each /admin page and RequireAdmin on every backend call are both completely
+// unchanged (see V2ReviewView.tsx/app_v2_review_api.py) -- PublicNav renders no admin-only content of its own,
+// it is the identical component /markets already uses safely for a fully public route.
+const REAL_PUBLIC_NAV_ROUTE_PREFIXES = ["/markets", "/admin"];
 
 function matchesPrefix(pathname: string, prefixes: string[]): boolean {
   return prefixes.some((prefix) => (prefix === "/" ? pathname === "/" : pathname === prefix || pathname.startsWith(`${prefix}/`)));

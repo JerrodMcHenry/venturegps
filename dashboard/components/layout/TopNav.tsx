@@ -120,18 +120,22 @@ export default function TopNav() {
         {/* Logo/home affordance -- Part 2: "The logo/brand should link to
             /. Do not redesign / content yet." Deliberately the ONLY way
             to reach / from the shell -- Home is not one of the three
-            primary destinations. */}
+            primary destinations.
+            Milestone 1, Task 1 -- Unify Navigation: was a standalone "SI" /
+            "Startup Intelligence" wordmark, visually unrelated to the
+            VentureGPS brand PublicNav.tsx already established on "/" and
+            "/markets" -- exactly the "confusing appearance of two separate
+            products" this task exists to remove. Relabeled to the same
+            dot+wordmark treatment PublicNav.tsx uses, same target ("/"),
+            same position, same only-way-home role -- no route, no auth,
+            no layout structure changed, only the brand mark. */}
         <Link
           href="/"
           className="flex shrink-0 items-center gap-2.5 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          aria-label="SIE home"
+          aria-label="VentureGPS home"
         >
-          <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-sm">
-            SI
-          </span>
-          <span className="hidden text-base font-semibold text-text-primary sm:inline">
-            Startup Intelligence
-          </span>
+          <span aria-hidden="true" className="size-2 rounded-full bg-primary" />
+          <span className="text-base font-bold tracking-tight text-text-primary">VentureGPS</span>
         </Link>
 
         {/* Desktop primary navigation. Hidden below lg -- the same
