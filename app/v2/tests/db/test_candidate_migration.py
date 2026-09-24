@@ -146,8 +146,12 @@ def test_candidate_tables_are_labelled_untrusted_and_no_canonical_tables_exist(m
                      "financing_event_candidate", "financing_event_candidate_amount", "financing_event_candidate_date",
                      "financing_event", "financing_resolution_decision", "financing_event_stage", "financing_event_type",
                      "financing_event_verified_round_amount", "financing_event_date",
-                     "company_market_classification", "market", "taxonomy_version"}
+                     "company_market_classification", "market", "taxonomy_version",
+                     "collection_run"}
     # Increment 12 legitimately added market/taxonomy_version/company_market_classification.
+    # Increment 18.5 legitimately added collection_run -- operational job history, not evidence, a candidate,
+    # or a canonical fact; it carries no confidence/score/model/canonical/company_id/etc. column either (see
+    # the next test), so it does not weaken what this test actually guards against.
     for forbidden in ("claim", "evidence_link", "identifier_claim", "merge"):
         assert not any(forbidden == n or n.startswith(forbidden + "_") or n.endswith("_" + forbidden) for n in names), forbidden
 

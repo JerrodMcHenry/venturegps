@@ -39,6 +39,12 @@ source_table = Table(
     Column("is_active", Boolean, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    # Revision 0011: synthetic/test evidence marker. Default false; set only by
+    # app.v2.repositories.sources.mark_source_as_test under an explicit human Authority.
+    Column("is_test", Boolean, nullable=False, server_default=text("false"),
+           comment=("Synthetic/test evidence marker. Defaults false. Set ONLY by "
+                    "app.v2.repositories.sources.mark_source_as_test under an explicit human Authority -- "
+                    "never inferred, never reachable from the review API.")),
     UniqueConstraint("source_key"),
 )
 
@@ -389,4 +395,33 @@ company_market_classification_table = Table(
           postgresql_where=text("role = 'primary'")),
     comment=("Append-only, authoritative Company -> Market classification by a HUMAN (never AI), scoped to a "
              "taxonomy version. PRIMARY owns Capital attribution; SECONDARY never does."),
+)
+
+# Revision 0011: operational job history for a bounded collection run. Not evidence, not a candidate, not a
+# canonical fact. Mutable while status='running'; frozen (UPDATE and DELETE both refused) once terminal.
+collection_run_table = Table(
+    "collection_run",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("job_name", Text, nullable=False),
+    Column("trigger_type", Text, nullable=False),
+    Column("triggered_by", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("query", Text, nullable=False),
+    Column("max_filings", Integer, nullable=False),
+    Column("started_at", DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("completed_at", DateTime(timezone=True), nullable=True),
+    Column("lease_expires_at", DateTime(timezone=True), nullable=False),
+    Column("discovered_count", Integer, nullable=False, server_default=text("0")),
+    Column("collected_count", Integer, nullable=False, server_default=text("0")),
+    Column("duplicate_count", Integer, nullable=False, server_default=text("0")),
+    Column("failed_count", Integer, nullable=False, server_default=text("0")),
+    Column("candidate_count", Integer, nullable=False, server_default=text("0")),
+    Column("failure_detail", Text, nullable=True),
+    Column("result_detail", Text, nullable=True),
+    Index("uq_collection_run_one_active_per_job", "job_name", unique=True, postgresql_where=text("status = 'running'")),
+    Index("ix_collection_run_started_at", "started_at"),
+    Index("ix_collection_run_job_name_started_at", "job_name", "started_at"),
+    comment=("Operational job history for one bounded collection attempt (Increment 18.5). Not evidence, not a "
+             "candidate, not a canonical fact. Mutable while running; frozen once terminal."),
 )

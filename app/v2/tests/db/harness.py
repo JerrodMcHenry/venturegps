@@ -12,8 +12,32 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # What schema v2 contains at the current head (update with each revision that adds objects).
 # Tables/sequences only (relkind r/S); indexes are excluded by v2_objects().
-HEAD_REVISION = "0010"
+HEAD_REVISION = "0011"
 HEAD_V2_OBJECTS = [
+    ("alembic_version", "r"), ("collection_run", "r"), ("collection_run_id_seq", "S"),
+    ("company", "r"), ("company_candidate", "r"), ("company_candidate_id_seq", "S"),
+    ("company_candidate_identifier", "r"), ("company_candidate_identifier_id_seq", "S"),
+    ("company_identifier", "r"), ("company_identifier_id_seq", "S"),
+    ("company_market_classification", "r"), ("company_market_classification_id_seq", "S"),
+    ("company_name", "r"), ("company_name_id_seq", "S"),
+    ("financing_event", "r"), ("financing_event_candidate", "r"), ("financing_event_candidate_amount", "r"),
+    ("financing_event_candidate_amount_id_seq", "S"), ("financing_event_candidate_date", "r"),
+    ("financing_event_candidate_date_id_seq", "S"), ("financing_event_candidate_id_seq", "S"),
+    ("financing_event_date", "r"), ("financing_event_date_id_seq", "S"),
+    ("financing_event_stage", "r"), ("financing_event_stage_id_seq", "S"),
+    ("financing_event_type", "r"), ("financing_event_type_id_seq", "S"),
+    ("financing_event_verified_round_amount", "r"), ("financing_event_verified_round_amount_id_seq", "S"),
+    ("financing_resolution_decision", "r"), ("financing_resolution_decision_id_seq", "S"),
+    ("market", "r"), ("observation", "r"), ("observation_id_seq", "S"),
+    ("observation_sighting", "r"), ("observation_sighting_id_seq", "S"),
+    ("processing_attempt", "r"), ("processing_attempt_id_seq", "S"),
+    ("raw_payload", "r"), ("resolution_decision", "r"), ("resolution_decision_id_seq", "S"),
+    ("source", "r"), ("source_id_seq", "S"), ("taxonomy_version", "r"),
+]
+# What schema v2 contained through revision 0010, before 0011 added collection_run and source.is_test (is_test
+# is a column, not a new object here -- v2_objects() lists tables/sequences only). Revision 0010's own tests
+# (test_taxonomy_migration.py) use this, not HEAD_V2_OBJECTS, since 0010 is no longer head.
+REVISION_0010_V2_OBJECTS = [
     ("alembic_version", "r"), ("company", "r"), ("company_candidate", "r"), ("company_candidate_id_seq", "S"),
     ("company_candidate_identifier", "r"), ("company_candidate_identifier_id_seq", "S"),
     ("company_identifier", "r"), ("company_identifier_id_seq", "S"),

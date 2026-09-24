@@ -86,6 +86,7 @@ def test_exact_v2_source_schema(migrated_db):
         ("is_active", "boolean", "NO", "NO", ""),
         ("created_at", "timestamp with time zone", "NO", "NO", ""),
         ("updated_at", "timestamp with time zone", "NO", "NO", ""),
+        ("is_test", "boolean", "NO", "NO", ""),  # Revision 0011: synthetic/test evidence marker, default false
     ]
     assert rows(migrated_db, """
         SELECT conname, contype::text FROM pg_constraint

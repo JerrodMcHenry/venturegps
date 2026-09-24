@@ -8,7 +8,7 @@ test fails if any other module writes the canonical tables. Reads may be broad.
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.engine import Connection, Engine
 
 from app.v2.db.tables import company_candidate_identifier_table as ci
@@ -128,6 +128,58 @@ def list_pending_company_candidates(db: Engine | Connection, limit: int = 50, of
         ).scalars().all()
     from app.v2.repositories.company_candidates import get_company_candidate  # local import: avoids a module-load-order cycle
     return [found for i in ids if (found := get_company_candidate(db, i)) is not None]
+
+
+def list_company_candidates_for_review(
+    db: Engine | Connection, *, status: str = "pending", search: str | None = None,
+    include_test_sources: bool = False, limit: int = 50, offset: int = 0,
+) -> tuple[list[StoredCompanyCandidate], int]:
+    """Increment 18.5 -- the review queue, generalized on top of list_pending_company_candidates (which stays
+    exactly as it was, for existing callers): a status filter (pending/resolved/all), a free-text search over
+    the proposed name AND the source's own record identifier (e.g. an SEC accession number), and test-source
+    exclusion. Test-source exclusion is STRUCTURAL -- a join to the candidate's own Source row and a check of
+    its is_test column -- never a name-prefix match on the candidate itself, exactly as required: a synthetic
+    candidate proposing the name "Acme Robotics" is excluded because of where its evidence came from, not
+    because of what it says. Returns (page, total_matching_count) so a caller can paginate for real."""
+    if status not in ("pending", "resolved", "all"):
+        raise InvalidInputError("invalid_status_filter", "status must be one of: pending, resolved, all")
+    if type(limit) is not int or limit < 1 or limit > MAX_PENDING_LIST_LIMIT:
+        raise InvalidInputError("invalid_limit", f"limit must be 1-{MAX_PENDING_LIST_LIMIT}")
+    if type(offset) is not int or offset < 0:
+        raise InvalidInputError("invalid_offset", "offset must be 0 or a positive integer")
+
+    has_final_decision = (
+        select(decision.c.id)
+        .where(decision.c.candidate_id == cc.c.id, decision.c.decision_kind.in_([k.value for k in FINAL_DECISION_KINDS]))
+        .exists()
+    )
+    base = cc.join(pa, pa.c.id == cc.c.processing_attempt_id).join(obs, obs.c.id == pa.c.observation_id).join(src, src.c.id == obs.c.source_id)
+
+    conditions = []
+    if status == "pending":
+        conditions.append(~has_final_decision)
+    elif status == "resolved":
+        conditions.append(has_final_decision)
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        conditions.append(or_(cc.c.proposed_name.ilike(pattern), obs.c.source_record_identifier.ilike(pattern)))
+    if not include_test_sources:
+        conditions.append(src.c.is_test.is_(False))
+
+    id_query = select(cc.c.id).select_from(base)
+    count_query = select(func.count()).select_from(base)
+    for condition in conditions:
+        id_query = id_query.where(condition)
+        count_query = count_query.where(condition)
+    id_query = id_query.order_by(cc.c.created_at.desc(), cc.c.id.desc()).limit(limit).offset(offset)
+
+    with _connection(db) as connection:
+        ids = connection.execute(id_query).scalars().all()
+        total = connection.execute(count_query).scalar_one()
+
+    from app.v2.repositories.company_candidates import get_company_candidate  # local import: avoids a module-load-order cycle
+    found = [c for i in ids if (c := get_company_candidate(db, i)) is not None]
+    return found, total
 
 
 def lock_candidate_for_resolution(connection: Connection, candidate_id: int) -> bool:

@@ -26,6 +26,7 @@ Run with:
 import os
 import time
 from datetime import datetime, timezone
+from unittest.mock import patch
 from uuid import UUID
 
 os.environ.setdefault("V2_DATABASE_URL", "postgresql+psycopg2://postgres@127.0.0.1:54331/venturegps_v2_dev_1801")
@@ -54,15 +55,19 @@ from app.v2.domain.financing import (
 from app.v2.domain.observation import Observation
 from app.v2.domain.source import CollectionMethod, Source, SourceType
 from app.v2.domain.time import EventTime
+from app.v2.domain.collection import CollectionTriggerType
+from app.v2.domain.resolution import human_authority
 from app.v2.observations.hashing import build_raw_payload, compute_content_hash
 from app.v2.observations.media import sniff_media_type
+from app.v2.repositories.collection_runs import CollectionAlreadyRunningError, start_run
 from app.v2.repositories.company_candidates import store_company_candidates
 from app.v2.repositories.financing_event_candidates import persist_financing_event_candidates
 from app.v2.repositories.markets import register_market, register_taxonomy_version
 from app.v2.repositories.observations import store_observation
 from app.v2.repositories.processing_attempts import start_processing
 from app.v2.repositories.raw_payloads import store_raw_payload
-from app.v2.repositories.sources import register_source
+from app.v2.repositories.sources import mark_source_as_test, register_source
+from app.v2.tools import sec_form_d_collector
 
 TEST_ISSUER = "https://test-instance.clerk.accounts.dev"
 TEST_AZP = "http://localhost:3000"
@@ -290,7 +295,17 @@ def run_full_workflow() -> None:
 
         listing = client.get("/admin/v2-review/company-candidates", headers=headers)
         expect(listing.status_code == 200, f"list company candidates: {listing.status_code}: {listing.text}")
-        expect(any(c["id"] == candidate.id for c in listing.json()), "new candidate missing from the pending queue")
+        listing_body = listing.json()
+        expect(set(listing_body) == {"items", "total", "limit", "offset"}, f"unexpected list shape: {listing_body.keys()}")
+        expect(any(c["id"] == candidate.id for c in listing_body["items"]), "new candidate missing from the pending queue")
+        expect(listing_body["total"] >= 1, "total should count at least the new candidate")
+
+        # Increment 18.5: search finds it by name; a non-matching search does not.
+        found_by_search = client.get("/admin/v2-review/company-candidates", params={"search": company_name}, headers=headers)
+        expect(found_by_search.status_code == 200, f"search company candidates: {found_by_search.status_code}")
+        expect(any(c["id"] == candidate.id for c in found_by_search.json()["items"]), "search by exact name did not find the candidate")
+        not_found_by_search = client.get("/admin/v2-review/company-candidates", params={"search": "zzz_definitely_not_a_real_company_name_zzz"}, headers=headers)
+        expect(not any(c["id"] == candidate.id for c in not_found_by_search.json()["items"]), "search returned a non-matching candidate")
 
         detail = client.get(f"/admin/v2-review/company-candidates/{candidate.id}", headers=headers)
         expect(detail.status_code == 200, f"company candidate detail: {detail.status_code}: {detail.text}")
@@ -361,17 +376,21 @@ def run_full_workflow() -> None:
             finally:
                 connection.execute(text("ALTER TABLE v2.company_candidate ENABLE TRIGGER trg_company_candidate_append_only"))
         tampered_detail = client.get(f"/admin/v2-review/company-candidates/{tamper_candidate.id}", headers=headers)
-        expect(tampered_detail.status_code == 500, f"tampered evidence on read: expected 500, got {tampered_detail.status_code}: {tampered_detail.text}")
+        # Increment 18.5, Phase 4: a genuine integrity failure now gets its own safe, explicit classification
+        # (422 evidence_integrity_failed) instead of a generic 500 -- still never leaking the hash, byte span,
+        # or unverified content.
+        expect(tampered_detail.status_code == 422, f"tampered evidence on read: expected 422, got {tampered_detail.status_code}: {tampered_detail.text}")
+        expect(tampered_detail.json().get("detail") == "evidence_integrity_failed",
+               f"expected the safe evidence_integrity_failed classification, got {tampered_detail.json()}")
         expect("Traceback" not in tampered_detail.text and tamper_candidate.proposal.proposed_name not in tampered_detail.text,
                "tampered-evidence failure must not leak internals or unverified content")
         tampered_decide = client.post(f"/admin/v2-review/company-candidates/{tamper_candidate.id}/decide",
                                       json={"action": "create", "confirm": True}, headers=headers)
-        expect(tampered_decide.status_code == 500, f"deciding on tampered evidence: expected 500, got {tampered_decide.status_code}")
-        # and it must genuinely be blocked, not silently promoted despite the 500:
+        expect(tampered_decide.status_code == 422, f"deciding on tampered evidence: expected 422, got {tampered_decide.status_code}")
+        expect(tampered_decide.json().get("detail") == "evidence_integrity_failed", "decide on tampered evidence used the wrong error classification")
+        # and it must genuinely be blocked, not silently promoted despite the 422:
         still_pending = client.get(f"/admin/v2-review/company-candidates/{tamper_candidate.id}", headers=headers)
-        # the GET itself still fails loudly (tampered), which is itself proof no create_company_from_candidate
-        # response ever reached the client with a company_id -- tampered_decide.json() has none:
-        expect(tampered_decide.headers.get("content-type", "").startswith("application/json"), "unexpected tampered-decide response shape")
+        expect(still_pending.status_code == 422, "tampered candidate must still be blocked, not silently promoted")
 
         # ---- 5. financing candidate: company-canonical gate, evidence, facts, successful create_event ----
         financing_candidate, financing_attempt_id, financing_observation_id = _build_financing_candidate(
@@ -382,7 +401,7 @@ def run_full_workflow() -> None:
 
         financing_list = client.get("/admin/v2-review/financing-candidates", headers=headers)
         expect(financing_list.status_code == 200, f"list financing candidates: {financing_list.status_code}")
-        expect(any(c["id"] == financing_candidate.id for c in financing_list.json()), "financing candidate missing from queue")
+        expect(any(c["id"] == financing_candidate.id for c in financing_list.json()["items"]), "financing candidate missing from queue")
 
         financing_detail = client.get(f"/admin/v2-review/financing-candidates/{financing_candidate.id}", headers=headers)
         expect(financing_detail.status_code == 200, f"financing candidate detail: {financing_detail.status_code}: {financing_detail.text}")
@@ -423,6 +442,96 @@ def run_full_workflow() -> None:
         expect(len(company_detail.json()["classifications"]) == 1, "expected exactly one classification on the company")
 
 
+def run_collection_operations_workflow() -> None:
+    """Increment 18.5: test-source exclusion (structural, never by name prefix), collection job history, the
+    operations summary, and the manual trigger endpoint -- concurrency-refused and a mocked-network success."""
+    engine = get_engine()
+    marker = str(int(time.time() * 1000))
+    test_source_key = f"zztest_v2_review_synthetic_{marker}"
+
+    with _patched_auth():
+        admin_token = _make_token(sub=ADMIN_USER_ID)
+        headers = _headers(admin_token)
+
+        # ---- test-source exclusion is structural: a Source explicitly marked is_test, not a name match ----
+        register_source(engine, Source(source_key=test_source_key, name="zztest v2 review synthetic source",
+                                       source_type=SourceType.OTHER, collection_method=CollectionMethod.MANUAL_UPLOAD, is_active=True))
+        mark_source_as_test(engine, test_source_key, human_authority(f"admin:{ADMIN_USER_ID}"))
+        real_company_name = f"Zztest V2 Review Real Company {marker}"  # deliberately has NO "test"-looking name;
+        # what makes it excluded below is its SOURCE, not this string.
+        candidate, attempt_id, observation_id, _ = _build_company_candidate(engine, record_id=f"synthetic-{marker}", name=real_company_name)
+        # _build_company_candidate always uses SOURCE_KEY (the shared fixture source); rebuild this one under
+        # the freshly marked-test source instead by constructing the observation/candidate directly.
+        CREATED["attempt_ids"].append(attempt_id)
+        CREATED["observation_ids"].append(observation_id)
+        CREATED["candidate_ids"].append(candidate.id)
+
+        # Build a SECOND candidate whose evidence really does come from the is_test source.
+        synth_text = f"{real_company_name} synthetic is a company."
+        data = synth_text.encode("utf-8")
+        store_raw_payload(engine, data)
+        obs_obj = Observation(source_key=test_source_key, source_record_identifier=f"synthetic-rec-{marker}",
+                              observation_type="test_document", observed_time=datetime.now(timezone.utc),
+                              collection_version=PROCESSOR_VERSION, collector_id=ADMIN_USER_ID,
+                              content_hash=compute_content_hash(data), sniffed_media_type=sniff_media_type(data))
+        stored_obs = store_observation(engine, obs_obj).stored
+        synth_attempt = start_processing(engine, stored_obs.id, PROCESSOR_ID, PROCESSOR_VERSION)
+        CREATED["attempt_ids"].append(synth_attempt.id)
+        CREATED["observation_ids"].append(stored_obs.id)
+        needle = f"{real_company_name} synthetic"
+        start, end = synth_text.index(needle), synth_text.index(needle) + len(needle)
+        synth_proposal = CompanyCandidateProposal(proposed_name=needle, name_evidence=EvidenceLocator(byte_start=start, byte_end=end, evidence_hash=compute_content_hash(data[start:end])))
+        synth_result = store_company_candidates(engine, synth_attempt.id, [synth_proposal])
+        synth_candidate_id = synth_result.candidates[0].id
+        CREATED["candidate_ids"].append(synth_candidate_id)
+
+        default_listing = client.get("/admin/v2-review/company-candidates", params={"status": "all", "search": real_company_name}, headers=headers)
+        expect(default_listing.status_code == 200, f"default listing: {default_listing.status_code}")
+        default_ids = {c["id"] for c in default_listing.json()["items"]}
+        expect(candidate.id in default_ids, "the real candidate should appear in the default (test-excluded) listing")
+        expect(synth_candidate_id not in default_ids, "the synthetic-source candidate leaked into the default review queue")
+
+        inclusive_listing = client.get("/admin/v2-review/company-candidates",
+                                       params={"status": "all", "search": real_company_name, "include_test_sources": "true"}, headers=headers)
+        inclusive_ids = {c["id"] for c in inclusive_listing.json()["items"]}
+        expect(synth_candidate_id in inclusive_ids, "an explicit include_test_sources=true should still show synthetic-source candidates")
+
+        # ---- collection operations endpoints: unauthenticated/non-admin still rejected ----
+        for path in ("/admin/v2-review/collection-runs", "/admin/v2-review/collection-summary"):
+            unauth = client.get(path)
+            expect(unauth.status_code == 401, f"{path} unauthenticated: expected 401, got {unauth.status_code}")
+        unauth_trigger = client.post("/admin/v2-review/collection-runs/trigger", json={"query": "x", "confirm": True})
+        expect(unauth_trigger.status_code == 401, f"trigger unauthenticated: expected 401, got {unauth_trigger.status_code}")
+
+        # ---- collection summary / history: real reads, whatever job history already exists ----
+        summary = client.get("/admin/v2-review/collection-summary", headers=headers)
+        expect(summary.status_code == 200, f"collection summary: {summary.status_code}: {summary.text}")
+        expect(set(summary.json()) == {"pending_company_candidates", "pending_financing_candidates", "recent_runs"},
+               f"unexpected summary shape: {summary.json().keys()}")
+
+        # ---- manual trigger: refused (409) while a run for the same job_name is already active ----
+        job_name = f"zztest_v2_review_job_{marker}"
+        start_run(engine, job_name=job_name, trigger_type=CollectionTriggerType.MANUAL,
+                  triggered_by=f"admin:{ADMIN_USER_ID}", query="robotics", max_filings=5, lease_seconds=60)
+        blocked = client.post("/admin/v2-review/collection-runs/trigger",
+                              json={"query": "robotics", "job_name": job_name, "confirm": True}, headers=headers)
+        expect(blocked.status_code == 409, f"concurrent trigger: expected 409, got {blocked.status_code}: {blocked.text}")
+
+        # ---- manual trigger: mocked-network success, never a real SEC call in this automated test ----
+        other_job_name = f"zztest_v2_review_job2_{marker}"
+        with patch.object(sec_form_d_collector, "discover_form_d_filings", return_value=[]):
+            triggered = client.post("/admin/v2-review/collection-runs/trigger",
+                                    json={"query": "robotics", "job_name": other_job_name, "confirm": True}, headers=headers)
+        expect(triggered.status_code == 200, f"manual trigger: expected 200, got {triggered.status_code}: {triggered.text}")
+        triggered_body = triggered.json()
+        expect(triggered_body["status"] == "succeeded", f"expected succeeded, got {triggered_body['status']}")
+        expect(triggered_body["triggered_by"] == f"admin:{ADMIN_USER_ID}", "trigger did not record the real admin session as triggered_by")
+
+        history = client.get("/admin/v2-review/collection-runs", params={"job_name": other_job_name}, headers=headers)
+        expect(history.status_code == 200, f"collection run history: {history.status_code}")
+        expect(any(r["id"] == triggered_body["id"] for r in history.json()), "triggered run missing from its own job history")
+
+
 TESTS = [
     test_unauthenticated_requests_rejected,
     test_non_admin_authenticated_requests_rejected,
@@ -456,8 +565,16 @@ def main() -> None:
     finally:
         _report_created()
 
+    try:
+        run_collection_operations_workflow()
+        print("PASS  run_collection_operations_workflow (Increment 18.5: test-source exclusion, collection ops)")
+    except AssertionError as error:
+        print(f"FAIL  run_collection_operations_workflow\n      {error}")
+        failures.append("run_collection_operations_workflow")
+
+    total = len(TESTS) + 2
     print("-" * 72)
-    print(f"{len(TESTS) + 1 - len(failures)}/{len(TESTS) + 1} passed")
+    print(f"{total - len(failures)}/{total} passed")
 
     if failures:
         raise SystemExit(1)

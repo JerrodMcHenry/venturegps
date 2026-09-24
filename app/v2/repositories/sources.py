@@ -41,6 +41,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from app.v2.db.tables import source_table as t
 from app.v2.domain.errors import DomainError, InvalidInputError, InvariantViolationError
+from app.v2.domain.resolution import Authority, AuthorityKind
 from app.v2.domain.source import (
     CollectionMethod,
     Source,
@@ -83,6 +84,7 @@ def _to_stored(row) -> StoredSource:
                 collection_method=CollectionMethod(m["collection_method"]),
                 url=m["source_url"],
                 is_active=m["is_active"],
+                is_test=m["is_test"],
             ),
             recorded_time=m["created_at"],
             updated_time=m["updated_at"],
@@ -203,3 +205,22 @@ def deactivate_source(db: Engine | Connection, source_key: str) -> StoredSource:
 
 def reactivate_source(db: Engine | Connection, source_key: str) -> StoredSource:
     return _set_active(db, source_key, True)
+
+
+def mark_source_as_test(db: Engine | Connection, source_key: str, authority: Authority) -> StoredSource:
+    """Increment 18.5 -- the ONLY way a Source's is_test ever becomes True. Deliberately separate from
+    register_source (which never sets it -- new sources are always real by default) and from every other
+    function in this module: this is the one explicit, narrow, human-authority-gated administrative action
+    that reclassifies a source's evidence as synthetic/test, so ordinary review-queue reads can exclude it.
+
+    Never reachable from app/v2_review_api.py (no endpoint calls this) -- "cannot be arbitrarily changed
+    through public or ordinary review endpoints" is satisfied structurally, not by a permission check alone.
+    The only caller is the `mark-source-test` CLI command (app/v2/tools/cli.py), an explicit administrative
+    procedure a human runs locally and confirms, exactly like every other promotion/decision operation in V2.
+
+    Idempotent (marking an already-test source as test again is a no-op, not an error). There is deliberately
+    no unmark/reverse operation yet -- reversing a test classification is a separate, later decision."""
+    if not isinstance(authority, Authority) or authority.kind is not AuthorityKind.HUMAN:
+        raise InvalidInputError("invalid_authority", "marking a source as test requires a human authority")
+    validate_source_key(source_key)
+    return _update(db, source_key, {"is_test": True})

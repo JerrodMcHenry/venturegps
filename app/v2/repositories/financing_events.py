@@ -8,7 +8,7 @@ writes the canonical financing tables. Reads may be broad.
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy.engine import Connection, Engine
 
 from app.v2.db.tables import financing_event_candidate_amount_table as fca
@@ -124,6 +124,56 @@ def list_pending_financing_candidates(db: Engine | Connection, limit: int = 50, 
         ).scalars().all()
     from app.v2.repositories.financing_event_candidates import get_financing_event_candidate  # local import: avoids a load-order cycle
     return [found for i in ids if (found := get_financing_event_candidate(db, i)) is not None]
+
+
+def list_financing_candidates_for_review(
+    db: Engine | Connection, *, status: str = "pending", search: str | None = None,
+    include_test_sources: bool = False, limit: int = 50, offset: int = 0,
+) -> tuple[list[StoredFinancingEventCandidate], int]:
+    """Increment 18.5 -- the financing review queue, generalized exactly like
+    companies.list_company_candidates_for_review: status filter, free-text search (the source's own record
+    identifier, or a company_id substring), and STRUCTURAL test-source exclusion via a join to the candidate's
+    own Source -- never a name match (a financing candidate has no proposed name of its own to match anyway).
+    Returns (page, total_matching_count)."""
+    if status not in ("pending", "resolved", "all"):
+        raise InvalidInputError("invalid_status_filter", "status must be one of: pending, resolved, all")
+    if type(limit) is not int or limit < 1 or limit > MAX_PENDING_LIST_LIMIT:
+        raise InvalidInputError("invalid_limit", f"limit must be 1-{MAX_PENDING_LIST_LIMIT}")
+    if type(offset) is not int or offset < 0:
+        raise InvalidInputError("invalid_offset", "offset must be 0 or a positive integer")
+
+    has_final_decision = (
+        select(decision.c.id)
+        .where(decision.c.candidate_id == fcc.c.id, decision.c.decision_kind.in_([k.value for k in FINAL_FINANCING_DECISION_KINDS]))
+        .exists()
+    )
+    base = fcc.join(pa, pa.c.id == fcc.c.processing_attempt_id).join(obs, obs.c.id == pa.c.observation_id).join(src, src.c.id == obs.c.source_id)
+
+    conditions = []
+    if status == "pending":
+        conditions.append(~has_final_decision)
+    elif status == "resolved":
+        conditions.append(has_final_decision)
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        conditions.append(or_(obs.c.source_record_identifier.ilike(pattern), cast(fcc.c.company_id, Text).ilike(pattern)))
+    if not include_test_sources:
+        conditions.append(src.c.is_test.is_(False))
+
+    id_query = select(fcc.c.id).select_from(base)
+    count_query = select(func.count()).select_from(base)
+    for condition in conditions:
+        id_query = id_query.where(condition)
+        count_query = count_query.where(condition)
+    id_query = id_query.order_by(fcc.c.created_at.desc(), fcc.c.id.desc()).limit(limit).offset(offset)
+
+    with _connection(db) as connection:
+        ids = connection.execute(id_query).scalars().all()
+        total = connection.execute(count_query).scalar_one()
+
+    from app.v2.repositories.financing_event_candidates import get_financing_event_candidate  # local import: avoids a load-order cycle
+    found = [c for i in ids if (c := get_financing_event_candidate(db, i)) is not None]
+    return found, total
 
 
 def lock_financing_candidate_for_resolution(connection: Connection, candidate_id: int):

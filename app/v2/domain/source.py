@@ -104,7 +104,13 @@ SourceUrl = Annotated[str, AfterValidator(validate_source_url)]
 
 class Source(DomainModel):
     """An immutable description of a source. `is_active` is required (no implied
-    default); later persistence layers timestamps and ids on top of this."""
+    default); later persistence layers timestamps and ids on top of this.
+
+    is_test (Increment 18.5): defaults False so every EXISTING and every ordinarily-registered source
+    stays a real source with no code change at any existing call site. It is never set here or by
+    register_source -- the only way it ever becomes True is the separate, narrow, human-authority-gated
+    app.v2.repositories.sources.mark_source_as_test(), an explicit administrative action, never inferred
+    from a name and never reachable from the review API."""
 
     source_key: SourceKey
     name: SourceName
@@ -112,6 +118,7 @@ class Source(DomainModel):
     collection_method: CollectionMethod
     url: SourceUrl | None = None  # None: this source has no URL (unknown/not applicable)
     is_active: bool
+    is_test: bool = False
 
 
 class StoredSource(DomainModel):

@@ -93,7 +93,8 @@ def test_the_candidate_repository_writes_only_candidate_tables():
     assert imported_tables == {"company_candidate_identifier_table", "company_candidate_table", "observation_table", "processing_attempt_table"}
     from app.v2.db import tables  # noqa: F401 - registers every V2 table on the metadata
     from app.v2.db.metadata import metadata
-    assert sorted(metadata.tables) == ["v2.company", "v2.company_candidate", "v2.company_candidate_identifier",
+    assert sorted(metadata.tables) == ["v2.collection_run",  # Increment 18.5: operational job history, not a candidate table
+                                       "v2.company", "v2.company_candidate", "v2.company_candidate_identifier",
                                        "v2.company_identifier", "v2.company_market_classification", "v2.company_name",
                                        "v2.financing_event", "v2.financing_event_candidate", "v2.financing_event_candidate_amount",
                                        "v2.financing_event_candidate_date", "v2.financing_event_date", "v2.financing_event_stage",

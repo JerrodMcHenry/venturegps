@@ -234,8 +234,10 @@ def test_the_update_api_offers_no_way_to_change_immutable_fields():
 
 def test_repository_exposes_no_delete_operation():
     public = {n for n, v in vars(repo).items() if callable(v) and not n.startswith("_") and getattr(v, "__module__", "") == repo.__name__}
+    # Increment 18.5 intentionally added mark_source_as_test -- still no delete, still human-authority-gated.
     assert public == {"register_source", "get_source_by_id", "get_source_by_key", "list_sources",
-                      "update_source_metadata", "deactivate_source", "reactivate_source", "RegistrationResult"}
+                      "update_source_metadata", "deactivate_source", "reactivate_source", "RegistrationResult",
+                      "mark_source_as_test"}
     assert not any(word in name.lower() for name in public for word in ("delete", "remove", "drop", "purge", "truncate", "destroy"))
     source_text = inspect.getsource(repo).lower()
     assert "delete(" not in source_text and "delete from" not in source_text

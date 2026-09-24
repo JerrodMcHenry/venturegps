@@ -21,8 +21,11 @@ SECURITY, restated concretely (see docs/v2/INTERNAL_REVIEW_SECURITY.md for the f
     all, so there is nothing for a client to forge.
   - Evidence shown to a reviewer is RE-VERIFIED against the exact stored payload bytes on every single read
     (app.v2.candidates.evidence.verify_proposal / app.v2.candidates.financing_evidence.verify_financing_proposal)
-    -- never just trusted from the stored candidate row. If verification ever fails (e.g. the underlying payload
-    were somehow corrupted), the read fails loudly (500) rather than silently showing unverifiable text.
+    -- never just trusted from the stored candidate row. A genuine integrity failure (the stored evidence hash
+    or bounds no longer match, e.g. tampering or corruption) fails loudly with a dedicated, explicit
+    `evidence_integrity_failed` classification (422, Increment 18.5) rather than silently showing unverifiable
+    text or a generic 500; any other unexpected error still falls back to a generic 500. Neither ever leaks the
+    hash, the byte span, or any evidence content.
   - Duplicate/replay decision submissions are refused by the SAME database-enforced uniqueness Increment 18.2
     already has (uq_resolution_decision_one_final / uq_frd_one_final) -- CandidateAlreadyResolvedError /
     FinancingCandidateAlreadyResolvedError map to a clean 409, never a silent no-op and never a second decision.
@@ -44,20 +47,22 @@ from app.v2.candidates.financing_evidence import verify_financing_proposal
 from app.v2.classification.service import classify_company, list_classifications_for_company
 from app.v2.config import ConfigurationError
 from app.v2.db.engine import get_engine
+from app.v2.domain.collection import MAX_FILINGS_PER_RUN, CollectionTriggerType
 from app.v2.domain.errors import DomainError, InvalidInputError, InvariantViolationError, UnsupportedInputError
 from app.v2.domain.financing import FinancingDateKind
 from app.v2.domain.financing_resolution import FactSelection
 from app.v2.domain.resolution import Authority, human_authority
 from app.v2.domain.taxonomy import ClassificationRole
 from app.v2.financing_resolution import promotion as financing_promotion
+from app.v2.repositories.collection_runs import count_pending_review_candidates, list_collection_runs
 from app.v2.repositories.companies import (
     find_company_ids_by_identifier,
     get_candidate_resolution_state,
     get_company,
+    list_company_candidates_for_review,
     list_company_identifiers,
     list_company_names,
     list_decisions_for_candidate,
-    list_pending_company_candidates,
 )
 from app.v2.repositories.company_candidates import get_company_candidate
 from app.v2.repositories.errors import ConflictError, NotFoundError
@@ -65,8 +70,8 @@ from app.v2.repositories.financing_event_candidates import get_financing_event_c
 from app.v2.repositories.financing_events import (
     get_financing_candidate_resolution_state,
     list_decisions_for_financing_candidate,
+    list_financing_candidates_for_review,
     list_financing_events_for_company,
-    list_pending_financing_candidates,
 )
 from app.v2.repositories.markets import list_markets, list_taxonomy_versions
 from app.v2.repositories.observations import get_observation_by_id
@@ -210,6 +215,37 @@ def _domain_call(fn, *args, **kwargs):
         raise HTTPException(status_code=500, detail="An internal error occurred.") from None
 
 
+# Increment 18.5, Phase 4: evidence-integrity failures get their own safe, explicit classification instead of
+# a generic 500. These are exactly the two codes app.v2.candidates.evidence.verify_locator raises when the
+# stored byte span no longer matches its recorded hash or bounds (genuine tampering/corruption -- see
+# docs/v2/REVIEW_API_SECURITY.md's original tampering test), plus the equivalent payload-level check. Every
+# OTHER verification failure (a proposed value that never appeared in its evidence, a phrase/digit check
+# failing) is a different kind of problem -- not "this byte-exact evidence changed underneath us" -- and still
+# falls through to the generic _run/_domain_call handling below.
+EVIDENCE_INTEGRITY_ERROR_CODE = "evidence_integrity_failed"
+_EVIDENCE_INTEGRITY_CODES = frozenset({"evidence_hash_mismatch", "evidence_out_of_bounds", "payload_hash_mismatch"})
+
+
+def _verify_evidence(fn, *args, **kwargs) -> None:
+    """Wraps verify_proposal/verify_financing_proposal specifically. A hash/bounds mismatch -> 422 with the
+    safe, explicit `evidence_integrity_failed` code (never the hash, the byte span, or any evidence content).
+    Any other validation failure or unexpected error still goes through _run's existing generic handling."""
+    try:
+        fn(*args, **kwargs)
+    except (InvalidInputError, InvariantViolationError, UnsupportedInputError) as exc:
+        if exc.code in _EVIDENCE_INTEGRITY_CODES:
+            raise HTTPException(status_code=422, detail=EVIDENCE_INTEGRITY_ERROR_CODE) from None
+        capture_exception(exc)
+        raise HTTPException(status_code=500, detail="An internal error occurred.") from None
+    except HTTPException:
+        raise
+    except (OperationalError, DBAPIError):
+        raise HTTPException(status_code=503, detail=_SERVICE_UNAVAILABLE) from None
+    except Exception as exc:  # noqa: BLE001 - matches _run's own catch-all
+        capture_exception(exc)
+        raise HTTPException(status_code=500, detail="An internal error occurred.") from None
+
+
 def _decision_out(d) -> "DecisionOut":
     return DecisionOut(
         id=d.id, decision_kind=d.decision_kind.value,
@@ -235,6 +271,13 @@ class CompanyCandidateSummary(BaseModel):
     proposed_name: str
     created_at: str
     resolution_state: str
+
+
+class CompanyCandidatePage(BaseModel):
+    items: list[CompanyCandidateSummary]
+    total: int
+    limit: int
+    offset: int
 
 
 class ProposedIdentifierOut(BaseModel):
@@ -320,6 +363,13 @@ class FinancingCandidateSummary(BaseModel):
     company_id: str
     created_at: str
     resolution_state: str
+
+
+class FinancingCandidatePage(BaseModel):
+    items: list[FinancingCandidateSummary]
+    total: int
+    limit: int
+    offset: int
 
 
 class ProposedAmountOut(BaseModel):
@@ -440,11 +490,21 @@ class ClassifyRequest(BaseModel):
 
 # ================================================================== company candidates
 
-@router.get("/company-candidates", response_model=list[CompanyCandidateSummary])
-def list_company_candidates_endpoint(limit: int = 50, offset: int = 0, current_user: AuthenticatedUser = RequireAdmin):
+@router.get("/company-candidates", response_model=CompanyCandidatePage)
+def list_company_candidates_endpoint(
+    status: Literal["pending", "resolved", "all"] = "pending",
+    search: str | None = None,
+    include_test_sources: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: AuthenticatedUser = RequireAdmin,
+):
     engine = _engine_or_503()
-    candidates = _run(list_pending_company_candidates, engine, limit, offset)
-    return [
+    candidates, total = _domain_call(
+        list_company_candidates_for_review, engine, status=status, search=search,
+        include_test_sources=include_test_sources, limit=limit, offset=offset,
+    )
+    items = [
         CompanyCandidateSummary(
             id=c.id, processing_attempt_id=c.processing_attempt_id, candidate_ordinal=c.candidate_ordinal,
             proposed_name=c.proposal.proposed_name, created_at=c.created_at.isoformat(),
@@ -452,6 +512,7 @@ def list_company_candidates_endpoint(limit: int = 50, offset: int = 0, current_u
         )
         for c in candidates
     ]
+    return CompanyCandidatePage(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/company-candidates/{candidate_id}", response_model=CompanyCandidateDetail)
@@ -464,7 +525,7 @@ def get_company_candidate_detail(candidate_id: int, current_user: AuthenticatedU
     payload, media_type = _live_payload_and_media_type(engine, candidate.processing_attempt_id)
     # Re-verify the WHOLE proposal (name + every identifier) against the live payload bytes before showing or
     # trusting anything from the stored row -- catches evidence tampering rather than displaying unverifiable text.
-    _run(verify_proposal, candidate.proposal, payload, media_type, ordinal=candidate.candidate_ordinal)
+    _verify_evidence(verify_proposal, candidate.proposal, payload, media_type, ordinal=candidate.candidate_ordinal)
     data = payload.payload_bytes
 
     identifiers = [
@@ -501,7 +562,7 @@ def decide_company_candidate(candidate_id: int, body: DecideCompanyRequest, curr
     payload, media_type = _live_payload_and_media_type(engine, candidate.processing_attempt_id)
     # Re-verify again, right before acting on it: a decision is consequential, so it re-checks evidence
     # independently of whatever the reviewer last saw on the detail screen.
-    _run(verify_proposal, candidate.proposal, payload, media_type, ordinal=candidate.candidate_ordinal)
+    _verify_evidence(verify_proposal, candidate.proposal, payload, media_type, ordinal=candidate.candidate_ordinal)
 
     if body.action == "create":
         result = _domain_call(human_review.create_company_from_candidate, engine, candidate_id, authority)
@@ -521,11 +582,21 @@ def decide_company_candidate(candidate_id: int, body: DecideCompanyRequest, curr
 
 # ================================================================== financing candidates
 
-@router.get("/financing-candidates", response_model=list[FinancingCandidateSummary])
-def list_financing_candidates_endpoint(limit: int = 50, offset: int = 0, current_user: AuthenticatedUser = RequireAdmin):
+@router.get("/financing-candidates", response_model=FinancingCandidatePage)
+def list_financing_candidates_endpoint(
+    status: Literal["pending", "resolved", "all"] = "pending",
+    search: str | None = None,
+    include_test_sources: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: AuthenticatedUser = RequireAdmin,
+):
     engine = _engine_or_503()
-    candidates = _run(list_pending_financing_candidates, engine, limit, offset)
-    return [
+    candidates, total = _domain_call(
+        list_financing_candidates_for_review, engine, status=status, search=search,
+        include_test_sources=include_test_sources, limit=limit, offset=offset,
+    )
+    items = [
         FinancingCandidateSummary(
             id=c.id, processing_attempt_id=c.processing_attempt_id, candidate_ordinal=c.candidate_ordinal,
             company_id=str(c.proposal.company_id), created_at=c.created_at.isoformat(),
@@ -533,6 +604,7 @@ def list_financing_candidates_endpoint(limit: int = 50, offset: int = 0, current
         )
         for c in candidates
     ]
+    return FinancingCandidatePage(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/financing-candidates/{candidate_id}", response_model=FinancingCandidateDetail)
@@ -543,7 +615,7 @@ def get_financing_candidate_detail(candidate_id: int, current_user: Authenticate
         raise HTTPException(status_code=404, detail="candidate not found")
 
     payload, media_type = _live_payload_and_media_type(engine, candidate.processing_attempt_id)
-    _run(verify_financing_proposal, candidate.proposal, payload, media_type, ordinal=candidate.candidate_ordinal)
+    _verify_evidence(verify_financing_proposal, candidate.proposal, payload, media_type, ordinal=candidate.candidate_ordinal)
     data = payload.payload_bytes
     proposal = candidate.proposal
 
@@ -602,7 +674,7 @@ def decide_financing_candidate(candidate_id: int, body: DecideFinancingRequest, 
         raise HTTPException(status_code=409, detail="the candidate's company is not canonical; it cannot be reviewed")
 
     payload, media_type = _live_payload_and_media_type(engine, candidate.processing_attempt_id)
-    _run(verify_financing_proposal, candidate.proposal, payload, media_type, ordinal=candidate.candidate_ordinal)
+    _verify_evidence(verify_financing_proposal, candidate.proposal, payload, media_type, ordinal=candidate.candidate_ordinal)
 
     facts = FactSelection(stage=body.facts.stage, financing_type=body.facts.financing_type,
                           verified_round_amount=body.facts.verified_round_amount,
@@ -662,3 +734,99 @@ def classify_company_endpoint(company_id: UUID, body: ClassifyRequest, current_u
     result = _domain_call(classify_company, engine, company_id, body.market_id, body.taxonomy_version,
                           ClassificationRole(body.role), authority)
     return _classification_out(result.classification)
+
+
+# ================================================================== collection operations (Increment 18.5, Phase 5)
+#
+# Reuses the same bounded, lock-protected, job-history-tracked orchestration the `run-collection` CLI command
+# uses (app.v2.tools.scheduled_collection.run_bounded_collection) -- this file adds NO new collection logic,
+# only an admin-gated HTTP front door onto it. A manual trigger from here is indistinguishable, at the
+# orchestration layer, from one run through the CLI: same bound (<=25 filings), same single-active-run lock,
+# same "never promotes anything" guarantee, same job-history row.
+
+class CollectionRunOut(BaseModel):
+    id: int
+    job_name: str
+    trigger_type: str
+    triggered_by: str
+    status: str
+    query: str
+    max_filings: int
+    started_at: str
+    completed_at: str | None = None
+    discovered_count: int
+    collected_count: int
+    duplicate_count: int
+    failed_count: int
+    candidate_count: int
+    failure_detail: str | None = None
+
+
+def _collection_run_out(r) -> CollectionRunOut:
+    return CollectionRunOut(
+        id=r.id, job_name=r.job_name, trigger_type=r.trigger_type.value, triggered_by=r.triggered_by,
+        status=r.status.value, query=r.query, max_filings=r.max_filings, started_at=r.started_at.isoformat(),
+        completed_at=r.completed_at.isoformat() if r.completed_at else None,
+        discovered_count=r.discovered_count, collected_count=r.collected_count, duplicate_count=r.duplicate_count,
+        failed_count=r.failed_count, candidate_count=r.candidate_count, failure_detail=r.failure_detail,
+    )
+
+
+class CollectionOperationsSummary(BaseModel):
+    pending_company_candidates: int
+    pending_financing_candidates: int
+    recent_runs: list[CollectionRunOut]
+
+
+class TriggerCollectionRequest(BaseModel):
+    query: str
+    max_filings: int = MAX_FILINGS_PER_RUN
+    job_name: str = "sec_form_d"
+    confirm: bool = False
+
+    @model_validator(mode="after")
+    def _confirmed_and_bounded(self) -> "TriggerCollectionRequest":
+        if not self.confirm:
+            raise ValueError("confirm must be true to trigger a collection run")
+        if not 1 <= self.max_filings <= MAX_FILINGS_PER_RUN:
+            raise ValueError(f"max_filings must be 1-{MAX_FILINGS_PER_RUN}")
+        return self
+
+
+@router.get("/collection-runs", response_model=list[CollectionRunOut])
+def list_collection_runs_endpoint(job_name: str | None = None, limit: int = 20, current_user: AuthenticatedUser = RequireAdmin):
+    engine = _engine_or_503()
+    runs = _domain_call(list_collection_runs, engine, job_name=job_name, limit=limit)
+    return [_collection_run_out(r) for r in runs]
+
+
+@router.get("/collection-summary", response_model=CollectionOperationsSummary)
+def collection_summary_endpoint(current_user: AuthenticatedUser = RequireAdmin):
+    """The one view the operations UI needs on load: pending review backlog + recent run outcomes, in a
+    single round trip."""
+    engine = _engine_or_503()
+    counts = _run(count_pending_review_candidates, engine)
+    runs = _domain_call(list_collection_runs, engine, limit=10)
+    return CollectionOperationsSummary(
+        pending_company_candidates=counts["pending_company_candidates"],
+        pending_financing_candidates=counts["pending_financing_candidates"],
+        recent_runs=[_collection_run_out(r) for r in runs],
+    )
+
+
+@router.post("/collection-runs/trigger", response_model=CollectionRunOut)
+def trigger_collection_endpoint(body: TriggerCollectionRequest, current_user: AuthenticatedUser = RequireAdmin):
+    """Manual collection trigger. Admin-gated (RequireAdmin, same as every other route here), every input
+    validated server-side (query shape, max_filings bound -- TriggerCollectionRequest never trusts the client
+    beyond that), and refused with a clean 409 (never a second concurrent run, never a silent queue) if the
+    job_name's lock is already held -- the same database-enforced single-active-run guarantee `run-collection`
+    itself relies on, not a separate, weaker check here."""
+    engine = _engine_or_503()
+    from app.v2.tools.scheduled_collection import run_bounded_collection  # local import: matches cli.py's own lazy-import convention
+
+    run = _domain_call(
+        run_bounded_collection, engine, query=body.query, max_filings=body.max_filings,
+        trigger_type=CollectionTriggerType.MANUAL, triggered_by=f"admin:{current_user.user_id}",
+        job_name=body.job_name,
+    )
+    return _collection_run_out(run)

@@ -531,6 +531,92 @@ def cmd_verify(args, engine) -> None:
     _print({"market": {"id": str(market.id), "slug": market.slug, "display_name": market.display_name}, "metrics": metrics, "signal": signal})
 
 
+# ---------------------------------------------------------------- Increment 18.5: scheduled collection
+
+# "Collection must be disabled by default" / "Do not automatically enable scheduling in any environment":
+# enforced here, not just documented. run-collection refuses to do anything -- no network call, no lock
+# acquired, no run row created -- unless the caller explicitly opts in for THIS invocation, either with
+# --enabled on the command line (a human running it directly) or V2_COLLECTION_ENABLED=1 in the environment
+# (an external cron's own job definition, so the cron config itself is where "on" lives, not this code).
+COLLECTION_ENABLED_ENV = "V2_COLLECTION_ENABLED"
+
+
+def _collection_is_enabled(args) -> bool:
+    import os
+    return bool(args.enabled) or os.environ.get(COLLECTION_ENABLED_ENV) == "1"
+
+
+def cmd_run_collection(args, engine) -> None:
+    """One bounded collection run, start to finish, then exit -- this is an externally-triggered CLI command,
+    not a long-running scheduler (Increment 18.5's explicit decision: schedule it with an external cron
+    service, e.g. `*/30 * * * * v2-cli run-collection --database-url ... --query ... --enabled`)."""
+    if not _collection_is_enabled(args):
+        _print({"status": "disabled", "message": f"pass --enabled or set {COLLECTION_ENABLED_ENV}=1 to actually run a collection"})
+        return
+
+    from app.v2.domain.collection import CollectionTriggerType
+    from app.v2.tools.scheduled_collection import CollectionAlreadyRunningError, run_bounded_collection
+
+    trigger_type = CollectionTriggerType(args.trigger_type)
+    triggered_by = args.as_actor if trigger_type is CollectionTriggerType.MANUAL else "cli:scheduled"
+    if trigger_type is CollectionTriggerType.MANUAL and not triggered_by:
+        print("error: --as ACTOR_ID is required for --trigger-type manual", file=sys.stderr)
+        raise SystemExit(1)
+
+    try:
+        run = run_bounded_collection(
+            engine, query=args.query, max_filings=args.max_filings, trigger_type=trigger_type,
+            triggered_by=triggered_by, job_name=args.job_name, lease_seconds=args.lease_seconds, dry_run=args.dry_run,
+        )
+    except CollectionAlreadyRunningError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
+
+    _print({
+        "run_id": run.id, "job_name": run.job_name, "status": run.status.value, "query": run.query,
+        "discovered_count": run.discovered_count, "collected_count": run.collected_count,
+        "duplicate_count": run.duplicate_count, "failed_count": run.failed_count,
+        "candidate_count": run.candidate_count, "failure_detail": run.failure_detail,
+    })
+    if run.status.value in ("failed", "partial"):
+        raise SystemExit(1)
+
+
+def cmd_recover_collection_runs(args, engine) -> None:
+    """Explicit, standalone recovery: mark every 'running' row whose lease has expired as 'interrupted',
+    freeing job_name for a new run. run-collection already does this automatically before starting -- this
+    command exists so an operator can free a stuck lock (after a crash, a killed process, a lost machine)
+    without also starting a brand-new collection in the same breath."""
+    from app.v2.repositories.collection_runs import recover_interrupted_runs
+    recovered = recover_interrupted_runs(engine, job_name=args.job_name)
+    _print({"recovered": [{"id": r.id, "job_name": r.job_name, "started_at": r.started_at.isoformat()} for r in recovered]})
+
+
+def cmd_list_collection_runs(args, engine) -> None:
+    from app.v2.repositories.collection_runs import list_collection_runs
+    runs = list_collection_runs(engine, job_name=args.job_name, limit=args.limit)
+    _print([{
+        "id": r.id, "job_name": r.job_name, "trigger_type": r.trigger_type.value, "triggered_by": r.triggered_by,
+        "status": r.status.value, "query": r.query, "started_at": r.started_at.isoformat(),
+        "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+        "discovered_count": r.discovered_count, "collected_count": r.collected_count,
+        "duplicate_count": r.duplicate_count, "failed_count": r.failed_count, "candidate_count": r.candidate_count,
+        "failure_detail": r.failure_detail,
+    } for r in runs])
+
+
+def cmd_mark_source_test(args, engine) -> None:
+    """The explicit administrative procedure Increment 18.5 requires for reclassifying a Source's evidence as
+    synthetic/test: never automatic, never inferred from a name, never reachable from the review API -- this
+    CLI command, run by a human who names the source explicitly, is the only door."""
+    from app.v2.repositories.sources import mark_source_as_test
+    authority = human_authority(args.as_actor)
+    _confirm(f"About to mark source {args.source_key!r} as is_test=true, as {args.as_actor}. This affects which "
+             f"review queues show its candidates by default.", auto=args.confirm)
+    stored = mark_source_as_test(engine, args.source_key, authority)
+    _print({"source_key": stored.source.source_key, "is_test": stored.source.is_test})
+
+
 # ---------------------------------------------------------------- argparse wiring
 
 def build_parser() -> argparse.ArgumentParser:
@@ -644,6 +730,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--taxonomy-version", default=DEFAULT_TAXONOMY_VERSION)
     p.add_argument("--as-of", default=None, help="YYYY-MM-DD, defaults to today")
     p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("run-collection", help="one bounded SEC Form D collection run (discover + collect + extract), recorded as job history. "
+                                              "Disabled unless --enabled or V2_COLLECTION_ENABLED=1. Intended to be invoked by an external cron.")
+    p.add_argument("--query", required=True)
+    p.add_argument("--max-filings", type=int, default=25)
+    p.add_argument("--job-name", default="sec_form_d")
+    p.add_argument("--trigger-type", choices=["manual", "scheduled"], default="manual")
+    p.add_argument("--as", dest="as_actor", default=None, help='required for --trigger-type manual, e.g. "admin:jerrod"')
+    p.add_argument("--lease-seconds", type=int, default=900)
+    p.add_argument("--dry-run", action="store_true", help="discover only; no collection, no candidates, no network fetch of any filing")
+    p.add_argument("--enabled", action="store_true", help="explicit opt-in for this invocation (or set V2_COLLECTION_ENABLED=1)")
+    p.set_defaults(func=cmd_run_collection)
+
+    p = sub.add_parser("recover-collection-runs", help="mark every 'running' collection run whose lease has expired as 'interrupted', freeing its job_name lock")
+    p.add_argument("--job-name", default=None, help="limit recovery to one job_name; default recovers all")
+    p.set_defaults(func=cmd_recover_collection_runs)
+
+    p = sub.add_parser("list-collection-runs", help="recent collection job history")
+    p.add_argument("--job-name", default=None)
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(func=cmd_list_collection_runs)
+
+    p = sub.add_parser("mark-source-test", help="explicit administrative action: mark a Source's evidence as synthetic/test (is_test=true)")
+    p.add_argument("--source-key", required=True)
+    p.add_argument("--as", dest="as_actor", required=True)
+    p.add_argument("--confirm", action="store_true")
+    p.set_defaults(func=cmd_mark_source_test)
 
     return parser
 

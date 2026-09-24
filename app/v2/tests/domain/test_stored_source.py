@@ -25,7 +25,9 @@ def make_stored(**overrides):
 
 
 def test_the_accepted_source_model_is_unchanged():
-    assert set(Source.model_fields) == {"source_key", "name", "source_type", "collection_method", "url", "is_active"}
+    # Revision 0011 (Increment 18.5) intentionally added is_test: bool = False -- additive, defaulted, every
+    # existing call site unaffected. This closed-set assertion is updated to include it on purpose.
+    assert set(Source.model_fields) == {"source_key", "name", "source_type", "collection_method", "url", "is_active", "is_test"}
     assert "id" not in Source.model_fields and "created_at" not in Source.model_fields
 
 

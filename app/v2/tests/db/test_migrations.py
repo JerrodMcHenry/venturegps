@@ -17,6 +17,7 @@ from app.v2.tests.db.harness import (
     REVISION_0007_V2_OBJECTS,
     REVISION_0008_V2_OBJECTS,
     REVISION_0009_V2_OBJECTS,
+    REVISION_0010_V2_OBJECTS,
     make_alembic_config,
     scalar,
     v2_objects,
@@ -72,6 +73,9 @@ def test_upgrade_again_after_downgrade(clean_db, alembic_cfg):
 
 def test_downgrading_one_revision_at_a_time_ends_at_base(clean_db, alembic_cfg):
     command.upgrade(alembic_cfg(), "head")
+    command.downgrade(alembic_cfg(), "-1")                       # 0011 -> 0010: collection_run goes, source.is_test goes
+    assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0010"
+    assert v2_objects(clean_db) == REVISION_0010_V2_OBJECTS
     command.downgrade(alembic_cfg(), "-1")                       # 0010 -> 0009: market/taxonomy/classification go
     assert scalar(clean_db, "SELECT version_num FROM v2.alembic_version") == "0009"
     assert v2_objects(clean_db) == REVISION_0009_V2_OBJECTS

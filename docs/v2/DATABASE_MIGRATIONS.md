@@ -460,6 +460,37 @@ queries canonical data and hands it to the pure engine (`app.v2.domain.capital_m
 - **Downgrade** removes only these objects and **refuses** to run while any taxonomy version, market or
   classification exists.
 
+### Revision 0011: `v2.source.is_test` + `v2.collection_run` (scheduled collection & review-queue operations)
+
+Two independent, additive changes for Increment 18.5, bundled in one revision because both are small and both
+support the same operational goal (a reliable, bounded, observable SEC collection workflow with a clean review
+queue).
+
+- **`v2.source.is_test`** (new column, `BOOLEAN NOT NULL DEFAULT false`): marks a Source's evidence as synthetic/
+  test rather than real. Defaults false -- every existing row and every ordinarily-`register_source`d row stays
+  real, zero code change at any existing call site. The `v2.source_guard()` trigger function is replaced
+  (`CREATE OR REPLACE`, same signature) to treat `is_test` as mutable alongside `source_name`/`source_url`/
+  `is_active`. The ONLY application code path that ever sets it True is
+  `app.v2.repositories.sources.mark_source_as_test(db, source_key, authority)`, gated on a human `Authority`;
+  there is no rule authority for it and no HTTP endpoint calls it -- the sole caller is the `mark-source-test`
+  CLI command, an explicit administrative procedure. See "Marking a source as test" in
+  `docs/v2/RUNBOOK_18_5.md` for how to actually use it, including on an existing database whose synthetic
+  evidence predates this revision (never reclassified automatically by the migration itself).
+- **`v2.collection_run`**: an operational job-history record for one bounded collection attempt against the
+  EXISTING, unmodified collection pipeline (`app.v2.tools.sec_form_d_collector` + `app.v2.tools.cli`). Not
+  evidence, not a candidate, not a canonical fact. Mutable while `status='running'` (progress is written as it
+  happens); frozen (`UPDATE` and `DELETE` both refused by `v2.collection_run_guard()`) once it reaches any
+  terminal status (`succeeded | failed | partial | interrupted`). A partial unique index
+  (`uq_collection_run_one_active_per_job`, on `job_name` `WHERE status = 'running'`) is the single-active-run
+  lock "no overlapping collection runs" needs -- enforced by Postgres itself, so it holds across process
+  crashes and concurrent CLI/API invocations, not just within one Python process's memory. `max_filings` is
+  CHECKed to 1-25, matching `app.v2.tools.sec_form_d_collector.MAX_DISCOVERY_RESULTS` exactly (no separate
+  bound to drift out of sync). `lease_expires_at` + `app.v2.repositories.collection_runs.recover_interrupted_runs`
+  is the crash-recovery mechanism: a run whose lease passed without completing is moved to the terminal
+  `interrupted` status, never silently retried and never left "running" forever.
+- **Downgrade** removes only these objects and **refuses** to run while any `collection_run` row exists, or
+  while any source is marked `is_test`.
+
 ### Concurrency
 
 A PostgreSQL session-level advisory lock (`MIGRATION_LOCK_KEY`) is held for the whole

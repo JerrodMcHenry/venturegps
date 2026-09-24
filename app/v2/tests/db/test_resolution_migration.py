@@ -127,7 +127,7 @@ def test_earlier_revisions_are_unchanged_in_history():
     from alembic.script import ScriptDirectory
     from app.v2.tests.db.harness import make_alembic_config
     script = ScriptDirectory.from_config(make_alembic_config())
-    assert [r.revision for r in script.walk_revisions()] == ["0010", "0009", "0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
+    assert [r.revision for r in script.walk_revisions()] == ["0011", "0010", "0009", "0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
     assert script.get_revision("0007").down_revision == "0006"
 
 

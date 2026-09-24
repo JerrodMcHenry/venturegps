@@ -74,6 +74,33 @@ export type CompanyCandidateDetail = CompanyCandidateSummary & {
   identity_matches: IdentityMatch[];
 };
 
+export type CompanyCandidatePage = {
+  items: CompanyCandidateSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+// Increment 18.5: status/search/include_test_sources are shared by both candidate list endpoints.
+export type ReviewQueueFilters = {
+  status?: "pending" | "resolved" | "all";
+  search?: string;
+  includeTestSources?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+function queryStringFor(filters?: ReviewQueueFilters): string {
+  const query = new URLSearchParams();
+  if (filters?.status !== undefined) query.set("status", filters.status);
+  if (filters?.search) query.set("search", filters.search);
+  if (filters?.includeTestSources) query.set("include_test_sources", "true");
+  if (filters?.limit !== undefined) query.set("limit", String(filters.limit));
+  if (filters?.offset !== undefined) query.set("offset", String(filters.offset));
+  const qs = query.toString();
+  return qs ? `?${qs}` : "";
+}
+
 export type CompanyDecisionAction = "create" | "attach" | "reject" | "defer";
 
 export type DecisionResult = {
@@ -89,18 +116,11 @@ export type DecisionResult = {
   accepted_dates: string[];
 };
 
-export function listPendingCompanyCandidates(
+export function listCompanyCandidates(
   token: string,
-  params?: { limit?: number; offset?: number }
-): Promise<CompanyCandidateSummary[]> {
-  const query = new URLSearchParams();
-  if (params?.limit !== undefined) query.set("limit", String(params.limit));
-  if (params?.offset !== undefined) query.set("offset", String(params.offset));
-  const qs = query.toString();
-  return apiFetch<CompanyCandidateSummary[]>(
-    `${PREFIX}/company-candidates${qs ? `?${qs}` : ""}`,
-    { token }
-  );
+  filters?: ReviewQueueFilters
+): Promise<CompanyCandidatePage> {
+  return apiFetch<CompanyCandidatePage>(`${PREFIX}/company-candidates${queryStringFor(filters)}`, { token });
 }
 
 export function getCompanyCandidateDetail(
@@ -164,6 +184,13 @@ export type FinancingCandidateDetail = FinancingCandidateSummary & {
   existing_events: string[];
 };
 
+export type FinancingCandidatePage = {
+  items: FinancingCandidateSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export type FinancingDecisionAction = "create_event" | "attach_to_event" | "reject" | "defer";
 
 export type FactSelectionInput = {
@@ -173,18 +200,11 @@ export type FactSelectionInput = {
   dates?: Array<"first_sale_date" | "filing_date" | "announcement_date">;
 };
 
-export function listPendingFinancingCandidates(
+export function listFinancingCandidates(
   token: string,
-  params?: { limit?: number; offset?: number }
-): Promise<FinancingCandidateSummary[]> {
-  const query = new URLSearchParams();
-  if (params?.limit !== undefined) query.set("limit", String(params.limit));
-  if (params?.offset !== undefined) query.set("offset", String(params.offset));
-  const qs = query.toString();
-  return apiFetch<FinancingCandidateSummary[]>(
-    `${PREFIX}/financing-candidates${qs ? `?${qs}` : ""}`,
-    { token }
-  );
+  filters?: ReviewQueueFilters
+): Promise<FinancingCandidatePage> {
+  return apiFetch<FinancingCandidatePage>(`${PREFIX}/financing-candidates${queryStringFor(filters)}`, { token });
 }
 
 export function getFinancingCandidateDetail(
@@ -260,5 +280,63 @@ export function classifyCompany(
     method: "POST",
     token,
     body: { role: "primary", ...body, confirm: true },
+  });
+}
+
+// ---------------------------------------------------------------- collection operations (Increment 18.5)
+
+export type CollectionRunOut = {
+  id: number;
+  job_name: string;
+  trigger_type: string;
+  triggered_by: string;
+  status: "running" | "succeeded" | "failed" | "partial" | "interrupted";
+  query: string;
+  max_filings: number;
+  started_at: string;
+  completed_at: string | null;
+  discovered_count: number;
+  collected_count: number;
+  duplicate_count: number;
+  failed_count: number;
+  candidate_count: number;
+  failure_detail: string | null;
+};
+
+export type CollectionOperationsSummary = {
+  pending_company_candidates: number;
+  pending_financing_candidates: number;
+  recent_runs: CollectionRunOut[];
+};
+
+export function listCollectionRuns(
+  token: string,
+  params?: { jobName?: string; limit?: number }
+): Promise<CollectionRunOut[]> {
+  const query = new URLSearchParams();
+  if (params?.jobName) query.set("job_name", params.jobName);
+  if (params?.limit !== undefined) query.set("limit", String(params.limit));
+  const qs = query.toString();
+  return apiFetch<CollectionRunOut[]>(`${PREFIX}/collection-runs${qs ? `?${qs}` : ""}`, { token });
+}
+
+export function getCollectionSummary(token: string): Promise<CollectionOperationsSummary> {
+  return apiFetch<CollectionOperationsSummary>(`${PREFIX}/collection-summary`, { token });
+}
+
+// A manual trigger runs the real, bounded (<=25 filing) SEC collection pipeline synchronously within the
+// request -- there is no background job queue (Increment 18.5's own decision: no Celery/Redis). It can
+// legitimately take longer than a normal API call, so this gets a generous timeout rather than the default.
+const TRIGGER_TIMEOUT_MS = 120_000;
+
+export function triggerCollection(
+  token: string,
+  body: { query: string; max_filings?: number; job_name?: string }
+): Promise<CollectionRunOut> {
+  return apiFetch<CollectionRunOut>(`${PREFIX}/collection-runs/trigger`, {
+    method: "POST",
+    token,
+    timeoutMs: TRIGGER_TIMEOUT_MS,
+    body: { ...body, confirm: true },
   });
 }
