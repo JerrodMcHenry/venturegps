@@ -38,7 +38,8 @@ from pathlib import Path
 from app.v2.candidates.evidence import verify_proposal
 from app.v2.candidates.service import ProposerFailedError, persist_verified_candidates
 from app.v2.db.engine import make_engine
-from app.v2.domain.candidate import StoredCompanyCandidate
+from app.v2.domain.candidate import CompanyCandidateProposal, IdentifierType, ProposedIdentifier, StoredCompanyCandidate
+from app.v2.domain.errors import DomainError
 from app.v2.domain.financing import AmountSemantics, FinancingDateKind, FinancingEventCandidateProposal, StoredFinancingEventCandidate
 from app.v2.domain.financing_resolution import FactSelection, NO_FACTS
 from app.v2.domain.resolution import Authority, human_authority
@@ -125,13 +126,23 @@ SOURCE_SEC_FORM_D_AUTO = Source(
     source_type=SourceType.GOVERNMENT_REGULATORY, collection_method=CollectionMethod.HTTP_FETCH,
     url="https://www.sec.gov/Archives/edgar/", is_active=True,
 )
+# Increment 18.6c -- first-party company identity evidence (official sites, investor-relations pages, company-
+# issued announcements). SourceType.FIRST_PARTY_COMPANY already existed in the domain vocabulary (Source,
+# app/v2/domain/source.py) but was never registered or used until now -- this is the first source under it, not
+# a new type. Manual upload, like every other source registered here: the human decides what page to save and
+# ingest via the existing, unmodified `ingest` command; add-identity-candidate (below) then proposes identity
+# facts from it. Still no automated fetching of anything -- see that command's own docstring.
+SOURCE_FIRST_PARTY_COMPANY = Source(
+    source_key="first_party_company_page", name="Official company website or investor-relations page (manual upload)",
+    source_type=SourceType.FIRST_PARTY_COMPANY, collection_method=CollectionMethod.MANUAL_UPLOAD, url=None, is_active=True,
+)
 
 
 def cmd_bootstrap(args, engine) -> None:
     """Idempotent: registering an already-registered source/market/taxonomy version is a no-op (see each
     repository function's own duplicate-key handling), so this is always safe to re-run."""
     results = {}
-    for source in (SOURCE_SEC_FORM_D, SOURCE_SEC_FORM_D_AUTO, SOURCE_MEDIA_ANNOUNCEMENT):
+    for source in (SOURCE_SEC_FORM_D, SOURCE_SEC_FORM_D_AUTO, SOURCE_MEDIA_ANNOUNCEMENT, SOURCE_FIRST_PARTY_COMPANY):
         existing = get_source_by_key(engine, source.source_key)
         if existing is not None:
             results[source.source_key] = {"already_registered": True, "id": existing.id}
@@ -430,6 +441,78 @@ def cmd_add_announcement_candidate(args, engine) -> None:
     _print({"attempt_id": attempt.id, "candidates_created": result.created_count, "candidate_ids": [c.id for c in result.candidates]})
 
 
+# ---------------------------------------------------------------- Increment 18.6c: first-party identity candidates
+
+def cmd_add_identity_candidate(args, engine) -> None:
+    """A human-guided company-IDENTITY candidate from a first-party observation (official site, investor-
+    relations page, company-issued announcement) -- NOT automated extraction, the exact same discipline as
+    add-announcement-candidate (see manual_fact.py's own docstring): a human names the exact substring stating
+    the company's name, and a second exact substring stating its domain or website URL. Neither substring's
+    CONTENT is trusted at face value -- this function only locates and hashes what the human pointed at;
+    store_company_candidates (unchanged) then independently re-verifies both spans against the live payload,
+    confirms the proposed name and the proposed identifier value each literally appear in their own cited span
+    (app.v2.candidates.evidence.verify_proposal), and validates the identifier's shape (a malformed domain/URL
+    is refused by ProposedIdentifier's own model validator, before persistence is even attempted). A conflicting
+    existing identifier (already owned by a DIFFERENT canonical company) is refused later, at attach time, by
+    the existing, unmodified IdentifierConflictError path -- this command creates only an untrusted candidate;
+    it can never attach, merge, or create a canonical company itself.
+
+    Duplicate submission (running this command twice for the same observation) is handled exactly like every
+    other extractor in this codebase already handles it (see _collect_and_extract_one's own "already ingested
+    and extracted" case): reported back as a duplicate, pointing at the candidate(s) already proposed, never a
+    second identical candidate and never an unhandled exception."""
+    from app.v2.repositories.processing_attempts import get_latest_attempt
+    existing_attempt = get_latest_attempt(engine, args.observation_id, "manual_identity_entry")
+    if existing_attempt is not None and existing_attempt.status.value == "processed":
+        existing = list_company_candidates_for_observation(engine, args.observation_id)
+        _print({"status": "duplicate", "reason": "an identity candidate was already proposed for this observation",
+               "attempt_id": existing_attempt.id, "candidate_ids": [c.id for c in existing]})
+        return
+
+    attempt = start_processing(engine, args.observation_id, processor_id="manual_identity_entry",
+                               processor_version=make_version_id("manual_identity_entry", 1))
+    from app.v2.repositories.observations import get_observation_by_id
+    observation = get_observation_by_id(engine, args.observation_id)
+    payload = get_raw_payload(engine, observation.observation.content_hash, verify=True)
+    raw = payload.payload_bytes
+
+    name_find = args.name_find
+    name = args.name or name_find
+    name_occurrences = count_occurrences(raw, name_find)
+    identifier_occurrences = count_occurrences(raw, args.identifier_find)
+    print(f'"{name_find}" appears {name_occurrences} time(s) in this payload; using occurrence {args.name_occurrence}.')
+    print(f'"{args.identifier_find}" appears {identifier_occurrences} time(s) in this payload; using occurrence {args.identifier_occurrence}.')
+
+    try:
+        name_evidence = locate_evidence(raw, name_find, occurrence=args.name_occurrence)
+        identifier_evidence = locate_evidence(raw, args.identifier_find, occurrence=args.identifier_occurrence)
+        identifier = ProposedIdentifier(
+            identifier_type=IdentifierType(args.identifier_type), value=args.identifier_value, evidence=identifier_evidence,
+        )
+        proposal = CompanyCandidateProposal(proposed_name=name, name_evidence=name_evidence, identifiers=(identifier,))
+    except (FactNotFoundError, DomainError) as exc:
+        # DomainError's own .code is already a valid lowercase machine code by design (app/v2/domain/errors.py);
+        # FactNotFoundError is a plain Exception with no such attribute, hence the fallback.
+        detail_code = exc.code if isinstance(exc, DomainError) else "fact_not_found"
+        mark_failed(engine, attempt.id, reason_code="proposer_failed", detail_code=detail_code)
+        print(f"error: {exc}; attempt {attempt.id} marked failed", file=sys.stderr)
+        raise SystemExit(1) from None
+
+    from app.v2.repositories.company_candidates import store_company_candidates
+    try:
+        result = store_company_candidates(engine, attempt.id, [proposal])
+    except DomainError as exc:
+        mark_failed(engine, attempt.id, reason_code="proposal_rejected", detail_code=exc.code)
+        print(f"error: {exc}; attempt {attempt.id} marked failed", file=sys.stderr)
+        raise SystemExit(1) from None
+    mark_processed(engine, attempt.id)
+    _print({
+        "attempt_id": attempt.id, "candidates_created": result.created_count,
+        "candidate_ids": [c.id for c in result.candidates],
+        "identifiers_proposed": [{"type": i.identifier_type.value, "value": i.value} for c in result.candidates for i in c.proposal.identifiers],
+    })
+
+
 # ---------------------------------------------------------------- financing candidate inspection / decision
 
 def _print_financing_candidate(c: StoredFinancingEventCandidate) -> None:
@@ -697,6 +780,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--date-find", default=None)
     p.add_argument("--date-occurrence", type=int, default=0)
     p.set_defaults(func=cmd_add_announcement_candidate)
+
+    p = sub.add_parser("add-identity-candidate", help="human-guided company-identity candidate (name + domain/website) from a first-party observation")
+    p.add_argument("--observation-id", type=int, required=True)
+    p.add_argument("--name-find", required=True, help="exact substring stating the company's name")
+    p.add_argument("--name", default=None, help="the proposed name to store; defaults to --name-find verbatim")
+    p.add_argument("--name-occurrence", type=int, default=0)
+    p.add_argument("--identifier-type", required=True, choices=["domain", "website_url"])
+    p.add_argument("--identifier-value", required=True, help="the domain or full URL to propose")
+    p.add_argument("--identifier-find", required=True, help="exact substring stating that domain/URL")
+    p.add_argument("--identifier-occurrence", type=int, default=0)
+    p.set_defaults(func=cmd_add_identity_candidate)
 
     p = sub.add_parser("list-financing-candidates")
     p.add_argument("--observation-id", type=int, required=True)
