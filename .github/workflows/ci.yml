@@ -1,11 +1,19 @@
 name: CI
 
-# Portfolio-completion CI (VentureGPS Audit P0-1). Verifies VentureGPS V2 and
-# the Next.js frontend on every push to main and every pull request targeting
-# main. Deliberately does NOT run the legacy app/tests/* scripts -- those hit
-# the real local DATABASE_URL and are not database-isolated (see
-# docs/portfolio/VENTUREGPS_READINESS_AUDIT.md, area E); wiring them into CI
-# is out of scope for this milestone.
+# Portfolio-completion CI (VentureGPS Audit P0-1, extended by Portfolio
+# Release Task 1). Verifies VentureGPS V2, the legacy backend's core user
+# journey, and the Next.js frontend on every push to main and every pull
+# request targeting main.
+#
+# Portfolio Release Task 1: backend-legacy-core-journey below closes the gap
+# this file used to describe here ("Deliberately does NOT run the legacy
+# app/tests/* scripts"). Those tests DO all import app.database.db, which
+# reads DATABASE_URL directly from the process environment (no test-only
+# override exists in app/database/db.py, unlike V2's V2_TEST_DATABASE_URL) --
+# so the fix is the same shape as backend-v2 below: give this job its own
+# disposable Postgres service container and point DATABASE_URL at that
+# instead of a real database. See docs/portfolio/CI.md for the full list of
+# which app/tests/* files run here and which remain excluded, and why.
 
 on:
   push:
@@ -107,6 +115,132 @@ jobs:
         # env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u TAVILY_API_KEY
         # pytest") -- unset here is the same thing as explicitly unsetting.
         run: python -m pytest app/v2 -q
+
+  backend-legacy-core-journey:
+    name: Backend — Legacy core journey (app/tests)
+    runs-on: ubuntu-latest
+
+    # A throwaway PostgreSQL server for this job only, exactly like
+    # backend-v2's own service container below -- torn down with the runner
+    # when the job ends. Unlike backend-v2, no separate "create and attest a
+    # disposable database" step is needed: these legacy tests have no
+    # V2-style fail-closed disposable-database guard (that mechanism is
+    # V2-only, app/v2/tests/db/guard.py), they simply read DATABASE_URL
+    # directly -- so POSTGRES_DB below provisions the one and only database
+    # this job's DATABASE_URL ever points at, and the whole container (and
+    # every row ever written to it) is gone when the job ends either way.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: venturegps_legacy_ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The ONLY database this job's DATABASE_URL ever points at -- a fresh
+      # disposable container, never the real local/staging/production
+      # DATABASE_URL (which is never set anywhere in this job). Every test
+      # file below imports app.api at module load time, which runs the full
+      # additive, idempotent migration sequence (create_tables/add_*_columns,
+      # app/api.py) against this URL before any test function runs -- exactly
+      # what already happens against a real local DATABASE_URL when these
+      # files are run by hand (see each file's own docstring), just against
+      # a database nothing else on earth is using.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/venturegps_legacy_ci_test
+      # Syntactically valid but entirely fake -- NEVER real credentials, same
+      # placeholder pattern the frontend job below already uses for Clerk
+      # keys. Every test file below monkeypatches run_due_diligence,
+      # extract_text_from_website, and/or the OpenAI/Tavily clients'
+      # eventual call sites before any test function runs (see each file's
+      # own docstring: "no real LLM/Tavily calls") -- these two values exist
+      # only so OpenAI(api_key=...)/TavilyClient(api_key=...) construct
+      # without error at import time (app/ai/pillar_shared.py,
+      # app/ai/research_enrichment.py); no request is ever made with them.
+      OPENAI_API_KEY: sk-test-ci-placeholder-not-a-real-credential
+      TAVILY_API_KEY: tvly-test-ci-placeholder-not-a-real-credential
+      # Every authenticated test below issues its own locally-signed RS256
+      # JWTs and monkeypatches app.auth.CLERK_ISSUER/_jwks_client/
+      # _resolve_authorized_parties for the duration of each test (the same
+      # technique test_backend_authentication.py established) -- no real
+      # Clerk instance is ever contacted. This value only needs to exist so
+      # app.auth's own module-level `os.getenv("CLERK_ISSUER", "")` has a
+      # non-empty starting value; it is never the issuer any token is
+      # actually checked against.
+      #
+      # ADMIN_USER_IDS is deliberately left UNSET: test_security_hardening.py
+      # monkeypatches app.auth._resolve_admin_user_ids() directly instead of
+      # relying on this env var, so there is nothing for it to do here.
+      CLERK_ISSUER: https://test-instance.clerk.accounts.dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.5"
+          cache: pip
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      # One step per file (rather than one script running all seven) so a
+      # failure is attributed to the exact file that failed in the GitHub
+      # Actions UI, matching backend-v2's existing one-command-per-concern
+      # style. Order is arbitrary -- each `python -m app.tests.X` is its own
+      # process, so there is no cross-file state to sequence around; the
+      # only shared state is the Postgres container itself, which every file
+      # already tolerates by design (distinctive zztest_*/ZZTest-prefixed
+      # rows, cleaned up in a finally block even on failure -- see each
+      # file's own docstring).
+      #
+      # test_backend_authentication first: cheapest, fastest feedback on the
+      # auth gate every other authenticated file in this job also depends on.
+      - name: Authentication (app/tests/test_backend_authentication.py)
+        run: python -m app.tests.test_backend_authentication
+
+      - name: Unified analyze -- multi-source assembly (app/tests/test_analyze_unified.py)
+        run: python -m app.tests.test_analyze_unified
+
+      # Starts a real uvicorn server on 127.0.0.1:8099/8100 (see the file's
+      # own docstring for why a TestClient can't prove this property) and
+      # asserts on wall-clock timing (a <1.5s health-latency bound, a few
+      # seconds of sleep-based synchronization). This is the one file in
+      # this job with a genuine, pre-existing flakiness risk on a slow/
+      # contended CI runner -- not something this change introduces, and
+      # not modified here per this task's "minimum justified changes" scope
+      # (changing its timing assertions would be changing test behavior, not
+      # its environment). See docs/portfolio/CI.md for how to read a failure
+      # here if one ever occurs.
+      - name: Unified analyze -- concurrency (app/tests/test_analyze_unified_concurrency.py)
+        run: python -m app.tests.test_analyze_unified_concurrency
+
+      - name: Pitch deck / PDF ingestion (app/tests/test_pdf_ingestion.py)
+        run: python -m app.tests.test_pdf_ingestion
+
+      # The only file in this job that makes real outbound network calls:
+      # two requests to https://example.com/ (IANA's dedicated stable
+      # example-content domain), by the file's own explicit design -- see
+      # its own docstring ("the only way to prove the full fetch-and-pin
+      # path actually reaches a real public site end to end"). This is a
+      # small, non-paid, non-production network dependency on GitHub-hosted
+      # runners' default outbound internet access, not a call to any
+      # VentureGPS system; every other case in this file is fully offline.
+      - name: Website URL ingestion -- SSRF hardening (app/tests/test_website_url_security.py)
+        run: python -m app.tests.test_website_url_security
+
+      - name: Saved startups / watchlist (app/tests/test_saved_startups.py)
+        run: python -m app.tests.test_saved_startups
+
+      - name: Security hardening -- admin authorization (app/tests/test_security_hardening.py)
+        run: python -m app.tests.test_security_hardening
 
   frontend:
     name: Frontend — lint, typecheck, tests, build
