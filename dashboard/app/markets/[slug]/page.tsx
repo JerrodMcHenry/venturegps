@@ -1,4 +1,3 @@
-import { cache } from "react";
 import type { Metadata } from "next";
 
 import MarketHero from "@/components/markets/MarketHero.tsx";
@@ -7,51 +6,14 @@ import CapitalSignalExplore from "@/components/markets/CapitalSignalExplore.tsx"
 import MarketDiscoveryNav from "@/components/markets/MarketDiscoveryNav.tsx";
 import MarketNotAvailable from "@/components/markets/MarketNotAvailable.tsx";
 
-import { getCapitalSignal, getMarketBySlug } from "@/lib/api/v2/markets.ts";
-import { getConfiguredTaxonomyVersion } from "@/lib/api/v2/taxonomyVersion.ts";
+import { loadMarketPageData } from "./marketPageData.ts";
 import { absoluteUrl } from "@/lib/site.ts";
 import { DIRECTION_LABEL } from "@/lib/api/v2/signalLabels.ts";
 import { formatExactAmount } from "@/lib/api/v2/money.ts";
 
-import type { CapitalSignalResponse, MarketOut } from "@/types/v2/capital";
-
 type Props = {
   params: Promise<{ slug: string }>;
 };
-
-// A market's own record (slug/name) barely ever changes; its Capital Signal is safe to reuse across visitors for
-// a few minutes without misleadingly claiming real-time freshness -- the page always shows the response's own
-// `as_of` date rather than implying "live."
-const MARKET_REVALIDATE_SECONDS = 300;
-
-function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-type MarketPageData =
-  | { status: "unknown" }
-  | { status: "unavailable"; market: MarketOut }
-  | { status: "ok"; market: MarketOut; signal: CapitalSignalResponse };
-
-// Wrapped in React's `cache()` so generateMetadata and the page component -- both of which need the same
-// market+signal data -- trigger exactly one network round trip per request, not two (see Next's own
-// "memoizing data requests" guidance in node_modules/next/dist/docs).
-const loadMarketPageData = cache(async (slug: string): Promise<MarketPageData> => {
-  const market = await getMarketBySlug(slug, MARKET_REVALIDATE_SECONDS);
-  if (!market) return { status: "unknown" };
-
-  try {
-    const signal = await getCapitalSignal(
-      { marketId: market.id, taxonomyVersion: getConfiguredTaxonomyVersion(), asOf: todayIsoDate() },
-      MARKET_REVALIDATE_SECONDS
-    );
-    return { status: "ok", market, signal };
-  } catch {
-    // The market itself resolved fine -- any failure fetching its Capital Signal (taxonomy misconfiguration,
-    // database unavailable, a transient 5xx) is a service problem, not "this market doesn't exist."
-    return { status: "unavailable", market };
-  }
-});
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
@@ -68,7 +30,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       // `title.absolute` bypasses the root layout's "%s | Startup Intelligence Engine" template (Increment
       // 15.1, Part 1) -- this is a VentureGPS-branded public page, not a Startup Intelligence Engine one; the
       // legacy template must never leak into a VentureGPS tab title, OG title, or search-result title.
-      title: { absolute: `${data.market.display_name} — VentureGPS` },
+      //
+      // data.market is null when the market LOOKUP itself failed (we never learned its real display name) and
+      // non-null when only its Capital Signal failed (the market resolved fine) -- fall back to a generic title
+      // only in the first case, same as the existing "unknown" branch above already does.
+      title: { absolute: data.market ? `${data.market.display_name} — VentureGPS` : "VentureGPS" },
       alternates: { canonical: url },
     };
   }
