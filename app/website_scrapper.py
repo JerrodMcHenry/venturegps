@@ -16,16 +16,22 @@ an internal admin panel, etc. This module closes that off in layers:
    public, routable address -- private (RFC1918), loopback, link-local
    (which also covers the 169.254.169.254 cloud metadata address),
    multicast, reserved, unspecified, and IPv4-mapped-IPv6 wrappers around
-   any of the above are all rejected.
-3. The actual HTTP connection is pinned to that validated IP address
-   (rather than handing the hostname to the HTTP client and letting it
-   resolve DNS again on its own). This is what actually closes the DNS
+   any of the above are all rejected. Every surviving public address from
+   that ONE resolution (IPv4 preferred, bounded count) is a legal
+   candidate -- see _resolve_validated_ips().
+3. The actual HTTP connection is pinned to one validated IP address at a
+   time (rather than handing the hostname to the HTTP client and letting
+   it resolve DNS again on its own). This is what actually closes the DNS
    rebinding gap: a hostname whose DNS record returns a public IP at
    validation time and a private/internal IP moments later (at the time
    the HTTP client would normally connect) would otherwise sail through a
    naive "validate the URL, then fetch the URL" check. TLS certificate
    validation still checks against the real hostname (assert_hostname /
-   server_hostname below), so pinning the socket doesn't weaken it.
+   server_hostname below), so pinning the socket doesn't weaken it. If a
+   given candidate can't be CONNECTED to at all, _fetch_validated() falls
+   back to the next already-validated candidate from the same resolution
+   -- never a new, unvalidated address, and never in response to an HTTP
+   error or content rejection (see its own comment).
 4. Redirects are NOT auto-followed by the HTTP client. Each hop's target
    URL is independently re-validated and re-pinned via the same path as
    the original URL, up to a bounded number of hops -- an allowed URL
@@ -51,6 +57,12 @@ ALLOWED_SCHEMES = {"http", "https"}
 MAX_REDIRECTS = 5
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB -- generous for a marketing/product page's HTML
 REQUEST_TIMEOUT_SECONDS = 10
+# Bounded fallback (Portfolio Release -- IPv6/IPv4 address-selection fix):
+# a hostname's DNS answer is rarely more than a couple of A/AAAA records;
+# 4 is generous headroom while still bounding worst-case per-URL latency
+# if several resolved addresses are unreachable-but-slow-to-fail rather
+# than promptly refused (see _resolve_validated_ips()'s own docstring).
+MAX_ADDRESS_ATTEMPTS = 4
 _DISALLOWED_HOSTNAME_SUFFIXES = (".local",)
 _DISALLOWED_HOSTNAMES = {"localhost", "localhost.localdomain"}
 # Content-Types that are clearly not a webpage -- rejected up front rather
@@ -119,10 +131,31 @@ def _validate_scheme_and_hostname(url: str) -> str:
     return hostname
 
 
-def _resolve_validated_ip(hostname: str) -> str:
-    """DNS-resolves hostname and returns one address confirmed public.
-    Raises WebsiteFetchError if resolution fails or every resolved
-    address is private/internal."""
+def _resolve_validated_ips(hostname: str) -> list[str]:
+    """
+    DNS-resolves hostname and returns every distinct address confirmed
+    public -- IPv4 addresses first, each family kept in the order DNS
+    returned it, capped at MAX_ADDRESS_ATTEMPTS. Raises WebsiteFetchError
+    if resolution fails or every resolved address is private/internal.
+
+    Portfolio Release -- IPv6/IPv4 address-selection fix (GitHub Actions
+    run #5): the previous version collected addresses into a `set` and
+    returned an arbitrary one of them (Python's hash-randomized set
+    iteration order, not DNS preference or reachability). On a host that
+    resolves to both an IPv4 and an IPv6 address, that could -- and, in
+    CI, reproducibly did -- pick an address this process has no outbound
+    route to at all (GitHub-hosted runners have no IPv6 route), failing
+    the whole fetch even though a perfectly reachable IPv4 address was
+    also right there in the same DNS answer.
+    `dict.fromkeys(...)` dedupes while preserving getaddrinfo()'s own
+    answer order (a real, if implementation-dependent, ordering) instead
+    of discarding it into a hash-random set; the stable sort below then
+    moves every IPv4 address ahead of every IPv6 address without
+    reordering within either family. The caller (_fetch_validated) tries
+    these, in this order, one at a time, falling back to the next only on
+    a genuine connection failure -- see its own comment for why that is
+    safe and doesn't touch anything not already validated right here.
+    """
     try:
         addr_infos = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
@@ -130,7 +163,7 @@ def _resolve_validated_ip(hostname: str) -> str:
             "That website's address could not be resolved. Please check the URL."
         )
 
-    resolved_ips = {info[4][0] for info in addr_infos}
+    resolved_ips = list(dict.fromkeys(info[4][0] for info in addr_infos))
     public_ips = [ip for ip in resolved_ips if _is_public_ip(ip)]
 
     if not public_ips:
@@ -139,7 +172,9 @@ def _resolve_validated_ip(hostname: str) -> str:
             "private or internal network address."
         )
 
-    return public_ips[0]
+    public_ips.sort(key=lambda ip: isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address))
+
+    return public_ips[:MAX_ADDRESS_ATTEMPTS]
 
 
 def _read_bounded(response: urllib3.HTTPResponse, max_bytes: int) -> bytes:
@@ -161,7 +196,7 @@ def _read_bounded(response: urllib3.HTTPResponse, max_bytes: int) -> bytes:
 
 def _fetch_validated(url: str, redirects_remaining: int) -> bytes:
     hostname = _validate_scheme_and_hostname(url)
-    resolved_ip = _resolve_validated_ip(hostname)
+    resolved_ips = _resolve_validated_ips(hostname)
 
     parts = urlsplit(url)
     port = parts.port or (443 if parts.scheme == "https" else 80)
@@ -176,7 +211,10 @@ def _fetch_validated(url: str, redirects_remaining: int) -> bytes:
         # Pin the TCP connection to the pre-validated IP (host below)
         # while still validating the TLS certificate against the real
         # hostname -- this is the piece that closes the DNS-rebinding
-        # gap without weakening certificate verification.
+        # gap without weakening certificate verification. Computed once
+        # from the real hostname and reused unchanged for every candidate
+        # IP tried below -- which pinned address the socket happens to
+        # use never affects what the certificate is checked against.
         pool_kwargs.update(
             assert_hostname=hostname,
             server_hostname=hostname,
@@ -185,22 +223,51 @@ def _fetch_validated(url: str, redirects_remaining: int) -> bytes:
     else:
         pool_cls = urllib3.HTTPConnectionPool
 
-    pool = pool_cls(resolved_ip, port, **pool_kwargs)
+    # Bounded fallback (Portfolio Release -- IPv6/IPv4 address-selection
+    # fix): try each pre-validated, pre-filtered public candidate in turn
+    # (resolved_ips is already IPv4-first, capped at MAX_ADDRESS_ATTEMPTS
+    # -- see _resolve_validated_ips()), committing to the first one that
+    # actually connects. Every candidate already passed the exact same
+    # public-address check a single-candidate design would have applied;
+    # nothing new is validated, accepted, or resolved mid-loop, and
+    # urllib3 is only ever given an IP literal as `host` here -- never the
+    # hostname -- so it can never perform its own independent DNS
+    # resolution or connect anywhere outside this pre-approved list. Only
+    # a CONNECTION-level failure (TCP connect / TLS handshake / connect
+    # timeout -- urllib3.exceptions.HTTPError raised directly by
+    # pool.request() below) advances to the next candidate; once
+    # pool.request() returns a response at all, that candidate is final --
+    # an HTTP error status, a disallowed content type, an oversized body,
+    # or a bad redirect target are handled entirely below this loop and
+    # are never retried against a different address (those are decisions
+    # about what the reached server said, not about whether it was
+    # reachable).
+    pool = None
+    response = None
 
-    try:
+    for candidate_ip in resolved_ips:
+        candidate_pool = pool_cls(candidate_ip, port, **pool_kwargs)
+
         try:
-            response = pool.request(
+            response = candidate_pool.request(
                 "GET",
                 request_path,
                 headers={"User-Agent": "Mozilla/5.0", "Host": hostname},
                 preload_content=False,
                 redirect=False,
             )
+            pool = candidate_pool
+            break
         except urllib3.exceptions.HTTPError:
-            raise WebsiteFetchError(
-                "Could not reach that website. Please check the URL and try again."
-            )
+            candidate_pool.close()
+            continue
 
+    if pool is None or response is None:
+        raise WebsiteFetchError(
+            "Could not reach that website. Please check the URL and try again."
+        )
+
+    try:
         try:
             if response.status in (301, 302, 303, 307, 308):
                 location = response.headers.get("Location")
