@@ -242,6 +242,20 @@ jobs:
       - name: Security hardening -- admin authorization (app/tests/test_security_hardening.py)
         run: python -m app.tests.test_security_hardening
 
+      # Portfolio Release Task 2 -- AI Request Reliability
+      # (app/ai/pillar_shared.py::call_analysis_model()'s bounded retry-with-
+      # backoff policy). Fully offline, same as every other step above:
+      # client.chat.completions.create() is monkeypatched to canned openai
+      # SDK exceptions/responses, and time.sleep()/random.random() are also
+      # monkeypatched so no attempt is ever made against the real OpenAI API
+      # and no step ever actually waits out a backoff delay -- see the
+      # file's own docstring. OPENAI_API_KEY above is already the same
+      # non-real placeholder every other step in this job relies on for
+      # OpenAI(api_key=...) to construct at import time; nothing here needs
+      # it to be a real key.
+      - name: AI request reliability -- retry/backoff policy (app/tests/test_ai_request_reliability.py)
+        run: python -m app.tests.test_ai_request_reliability
+
   frontend:
     name: Frontend — lint, typecheck, tests, build
     runs-on: ubuntu-latest

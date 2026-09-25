@@ -1,11 +1,11 @@
 # Continuous Integration
 
 **Workflow:** `.github/workflows/ci.yml`
-**Added:** Audit P0-1 (`docs/portfolio/VENTUREGPS_READINESS_AUDIT.md`, §7) — before this, nothing in the repository ran automatically on push or pull request. **Extended:** Portfolio Release Task 1 — added `backend-legacy-core-journey` (below), covering the legacy backend's core user journey (unified analyze, auth, PDF/website ingestion, saved startups, admin authorization), which the original P0-1 workflow explicitly excluded.
+**Added:** Audit P0-1 (`docs/portfolio/VENTUREGPS_READINESS_AUDIT.md`, §7) — before this, nothing in the repository ran automatically on push or pull request. **Extended:** Portfolio Release Task 1 — added `backend-legacy-core-journey` (below), covering the legacy backend's core user journey (unified analyze, auth, PDF/website ingestion, saved startups, admin authorization), which the original P0-1 workflow explicitly excluded. **Extended again:** the IPv6/IPv4 address-selection fix added 7 tests to `test_website_url_security.py` (12 → 19) without adding a new file or CI step; Portfolio Release Task 2 added a new file and a new step, `test_ai_request_reliability.py` (AI request retry/backoff policy).
 
 **Status:**
-- `backend-v2` / `frontend`: **verified on GitHub.** Pushed as commit `55b38f2`; the resulting Actions run (`gh run view 36036368738`) succeeded end-to-end (see below for details, unchanged from before this task).
-- `backend-legacy-core-journey`: **verified locally only, not yet pushed.** Per this task's own constraints (no commit/push), this job has not run on GitHub Actions yet. All seven test files it runs were verified in this session against a fresh, local, disposable PostgreSQL 16 database using the exact same `DATABASE_URL`/`OPENAI_API_KEY`/`TAVILY_API_KEY`/`CLERK_ISSUER` values the workflow now sets — 98/98 individual tests passed across all seven files. See "Local verification results" below.
+- `backend-v2` / `frontend`: **verified on GitHub.** Pushed as commit `55b38f2`; the resulting Actions run (`gh run view 36036368738`) succeeded end-to-end (see below for details, unchanged since).
+- `backend-legacy-core-journey`: **verified locally only, not yet pushed.** Per each task's own constraints (no commit/push), this job has not run on GitHub Actions yet at its current, 8-file shape. All eight test files it now runs were verified in this session against a fresh, local, disposable PostgreSQL 16 database using the exact same `DATABASE_URL`/`OPENAI_API_KEY`/`TAVILY_API_KEY`/`CLERK_ISSUER` values the workflow sets — **112/112 individual tests passed** across all eight files. See "Local verification results" below.
 
 ## What runs, and when
 
@@ -14,12 +14,12 @@ Three independent jobs, all triggered on every push to `main` and every pull req
 | Job | What it verifies | Runtime (local validation) |
 |---|---|---|
 | `backend-v2` | The full VentureGPS V2 test suite (`python -m pytest app/v2 -q`) — architecture-boundary tests, pure domain/evidence tests, and every database-backed test, against a fresh, attested, disposable PostgreSQL database created for that run only | ~4m20s, 3,472 tests |
-| `backend-legacy-core-journey` | Seven `app/tests/*.py` script-style test files covering the legacy backend's core user journey (see table below), against a fresh disposable PostgreSQL 16 service container | ~1–2 min combined (local validation, seven sequential steps) |
+| `backend-legacy-core-journey` | Eight `app/tests/*.py` script-style test files covering the legacy backend's core user journey plus AI request reliability (see table below), against a fresh disposable PostgreSQL 16 service container | ~1–2 min combined (local validation, eight sequential steps) |
 | `frontend` | `npm run lint` (ESLint), `npx tsc --noEmit` (TypeScript), `npm test` (25 suites), `npm run build` (Next.js production build) | ~1–2 min combined |
 
 ### `backend-legacy-core-journey`: which tests run, and which remain excluded
 
-**Included (7 files, one CI step each, 98 individual tests):**
+**Included (8 files, one CI step each, 112 individual tests):**
 
 | File | Covers | Individual tests |
 |---|---|---|
@@ -27,9 +27,10 @@ Three independent jobs, all triggered on every push to `main` and every pull req
 | `test_analyze_unified.py` | `POST /analyze`'s multi-source assembly (website + pitch deck + text, any combination), input validation, size bounds, backward-compatible provenance | 12 |
 | `test_analyze_unified_concurrency.py` | Real uvicorn server, real concurrent HTTP requests: `/health` stays responsive during a slow `/analyze` call; the same-user concurrency lock (`analysis_runs` partial unique index) is race-safe under genuine concurrent load, not just correct sequentially | 2 |
 | `test_pdf_ingestion.py` | Pitch deck / PDF ingestion hardening: size cap, magic bytes, page cap, encrypted/corrupt/empty PDFs, `analysis_type` provenance threading | 15 |
-| `test_website_url_security.py` | Website ingestion SSRF hardening: scheme allow-listing, private/loopback/link-local/cloud-metadata-address rejection, DNS-rebinding-safe IP pinning, bounded redirects, oversized-response rejection | 12 |
+| `test_website_url_security.py` | Website ingestion SSRF hardening: scheme allow-listing, private/loopback/link-local/cloud-metadata-address rejection, DNS-rebinding-safe IP pinning, bounded redirects, oversized-response rejection, deterministic IPv4-preferred/bounded-fallback address selection | 19 |
 | `test_saved_startups.py` | Saved-startups/watchlist DB functions and `/me/saved-startups` endpoints: cross-user isolation, auth gating, idempotent save/unsave, no membership side effects | 19 |
 | `test_security_hardening.py` | Admin-only authorization on `GET/PUT/DELETE /analyses/*`, removed unauthenticated `/migrate/*` routes stay gone, migration helpers still run at startup, public routes stay public | 24 |
+| `test_ai_request_reliability.py` | `app/ai/pillar_shared.py::call_analysis_model()`'s bounded retry policy: first-attempt success, transient-failure-then-success, retry exhaustion, permanent failures never retried, exact exponential-backoff-with-jitter values, retry count never exceeds the configured bound (see `docs/portfolio/AI_REQUEST_RELIABILITY.md`) | 7 |
 
 **Deliberately still excluded (54 remaining files under `app/tests/`):** everything covering Idea Lab/Build, Investor Workspace, Founder Workspace (actions/evidence/missions/reanalysis), Venture financials/hiring/scenarios/graduation/history/share, Fundraising Readiness, Pitch Deck Coach, SIE v2/SPS v3 methodology and calibration, Discovery/Compare, Product Analytics, Observability, Startup Claims/Membership/Entity-Migration, and the legacy `test_v2_review_api.py`. These are real, working test files — this task's scope was specifically the core user journey the read-only audit named (unified analysis, auth, PDF/website ingestion, saved startups, security hardening), not the full `app/tests/` directory. Wiring the rest in is the same mechanical pattern (verify DB/env assumptions, add a step) and can be done incrementally; not attempted here per the task's own scope. Run any of them locally, individually, exactly as before: `python -m app.tests.<name>`.
 
@@ -50,7 +51,7 @@ Migrations are **not** a separate CI step. Each database-backed test applies mig
 
 CI never touches, and never has credentials for, `venturegps_v2_dev_1801` (local dev) or any preview/production database.
 
-`backend-legacy-core-journey` provisions its own separate, similarly throwaway PostgreSQL 16 service container — a different container from `backend-v2`'s, each job gets its own, neither can see the other's. There is no V2-style fail-closed guard for legacy tests (`app/v2/tests/db/guard.py` is V2-only), because there's nothing to guard against here in CI: `DATABASE_URL` is set to exactly one value for the whole job — `postgresql://postgres:postgres@localhost:5432/venturegps_legacy_ci_test`, the service container's own database — and nothing else is ever a candidate. Every one of the seven test files imports `app.api` at module load, which runs legacy's full additive migration sequence (`create_tables`/`add_*_columns`, `app/api.py`) against that URL before any test function runs; this is the same thing that already happens the first time any of these files is run against a real local `DATABASE_URL`, just against a database that exists for one job run and nothing else. The container (and every row in it) is discarded with the runner when the job ends.
+`backend-legacy-core-journey` provisions its own separate, similarly throwaway PostgreSQL 16 service container — a different container from `backend-v2`'s, each job gets its own, neither can see the other's. There is no V2-style fail-closed guard for legacy tests (`app/v2/tests/db/guard.py` is V2-only), because there's nothing to guard against here in CI: `DATABASE_URL` is set to exactly one value for the whole job — `postgresql://postgres:postgres@localhost:5432/venturegps_legacy_ci_test`, the service container's own database — and nothing else is ever a candidate. Seven of the eight test files import `app.api` at module load, which runs legacy's full additive migration sequence (`create_tables`/`add_*_columns`, `app/api.py`) against that URL before any test function runs; this is the same thing that already happens the first time any of these files is run against a real local `DATABASE_URL`, just against a database that exists for one job run and nothing else. (`test_ai_request_reliability.py` is the one exception — it only imports `app.ai.pillar_shared`, never `app.api`/`app.database.db`, and needs no database at all; `DATABASE_URL` is simply unused for that one step, harmlessly.) The container (and every row in it) is discarded with the runner when the job ends.
 
 ## Reproducing the checks locally
 
@@ -90,6 +91,7 @@ python -m app.tests.test_pdf_ingestion
 python -m app.tests.test_website_url_security
 python -m app.tests.test_saved_startups
 python -m app.tests.test_security_hardening
+python -m app.tests.test_ai_request_reliability
 ```
 
 This is exactly the sequence used for this task's own local verification (see "Local verification results" below) — substitute your local Postgres role for a bare `createdb`/connection string if your setup needs one (e.g. `createdb -U postgres venturegps_legacy_ci_test`).
@@ -123,9 +125,9 @@ CI sets exactly these environment variables; none are real credentials and none 
 
 `ADMIN_USER_IDS` is never set in `backend-legacy-core-journey`: `test_security_hardening.py` monkeypatches `app.auth._resolve_admin_user_ids()` directly, so there's nothing for the env var to do. No `ANTHROPIC_API_KEY`, real `DATABASE_URL`, real `CLERK_ISSUER`, or `CLERK_AUTHORIZED_PARTIES` is ever set, read, or needed by any job.
 
-## Local verification results (this task)
+## Local verification results (cumulative, most recent run)
 
-All seven files were run against a fresh local disposable PostgreSQL 16 database (`createdb venturegps_legacy_ci_test`, dropped afterward), with `DATABASE_URL`/`OPENAI_API_KEY`/`TAVILY_API_KEY`/`CLERK_ISSUER` set to the exact values the workflow now sets (see the "Reproducing the checks locally" command block above) — the same commands and environment `backend-legacy-core-journey` runs, just outside GitHub Actions:
+All eight files were run against a fresh local disposable PostgreSQL 16 database (`createdb venturegps_legacy_ci_test`, dropped afterward), with `DATABASE_URL`/`OPENAI_API_KEY`/`TAVILY_API_KEY`/`CLERK_ISSUER` set to the exact values the workflow now sets (see the "Reproducing the checks locally" command block above) — the same commands and environment `backend-legacy-core-journey` runs, just outside GitHub Actions:
 
 | File | Result |
 |---|---|
@@ -133,10 +135,13 @@ All seven files were run against a fresh local disposable PostgreSQL 16 database
 | `test_analyze_unified.py` | 12/12 passed |
 | `test_analyze_unified_concurrency.py` | 2/2 passed |
 | `test_pdf_ingestion.py` | 15/15 passed |
-| `test_website_url_security.py` | 12/12 passed |
+| `test_website_url_security.py` | 19/19 passed |
 | `test_saved_startups.py` | 19/19 passed |
 | `test_security_hardening.py` | 24/24 passed |
-| **Total** | **98/98 passed** |
+| `test_ai_request_reliability.py` | 7/7 passed |
+| **Total** | **112/112 passed** |
+
+`test_ai_request_reliability.py` is fully offline like every other step in this job: `client.chat.completions.create()` is monkeypatched to canned `openai` SDK exceptions/responses, and `time.sleep()`/`random.random()` are also monkeypatched, so no real OpenAI request is ever made and no step actually waits out a backoff delay — the whole file completes in well under a second despite exercising backoff delays of up to several seconds on paper. See `docs/portfolio/AI_REQUEST_RELIABILITY.md` for the retry policy itself.
 
 The first run of each file prints its own migration output (`... table created successfully`, idempotent `ALTER TABLE ... ADD COLUMN` calls) as `app.api` builds the schema fresh against the empty disposable database — expected, not a failure, and the same output you'd see the first time any of these files runs against any brand-new `DATABASE_URL`. `test_analyze_unified_concurrency.py` also prints two Python tracebacks mid-run — these are the test's own intentional fake pipeline failures (`RuntimeError("intentional fake failure -- only call count/status matter here")`), asserted on by the test itself, not errors.
 
@@ -155,5 +160,6 @@ The first run of each file prints its own migration output (`... table created s
 - **`backend-legacy-core-journey` fails at any of the seven named steps** — the step name says which file failed; reproduce with the exact `python -m app.tests.<name>` command from "Reproducing the checks locally" above, against your own disposable database.
 - **`backend-legacy-core-journey` fails only in "Unified analyze -- concurrency"**, and specifically on the health-latency assertion (not a status-code/call-count one) — likely runner contention, not a regression; see "Unresolved / worth knowing" above.
 - **`backend-legacy-core-journey` fails only in "Website URL ingestion -- SSRF hardening"**, on one of the two real-fetch tests (`test_valid_public_https_url_is_fetched`/`test_valid_public_http_url_is_fetched`) — the IPv4-first fix above means this should no longer happen from IPv6 unreachability specifically; if it recurs, it's more likely a genuine transient outbound-network or `example.com` availability issue than a code regression (every other case in that file, including the new fallback-logic tests, is fully offline and deterministic).
+- **`backend-legacy-core-journey` fails only in "AI request reliability -- retry/backoff policy"** — this step is fully offline and deterministic (no real OpenAI request, no real sleep), so a failure here means a real behavior change, not flakiness: reproduce with `python -m app.tests.test_ai_request_reliability` locally (no database needed for this one file — it never imports `app.api`/`app.database.db`) and read which of the 7 scenarios failed (first-attempt success, transient-then-success, retry exhaustion, permanent-not-retried, exact backoff values, bounded-attempt-count, or the classification table). See `docs/portfolio/AI_REQUEST_RELIABILITY.md`.
 - **`frontend` fails at lint/typecheck/test** — reproduce with the exact same command locally (see above); no CI-specific environment is involved in these three steps.
 - **`frontend` fails at `npm run build`** — if the failure mentions Clerk/publishable key, confirm the workflow's placeholder env vars are still set correctly (see table above) — this is a build-time compatibility check, never a real-account issue. Any other build failure reproduces identically with `npm ci && npm run build` locally using the same placeholder values.
