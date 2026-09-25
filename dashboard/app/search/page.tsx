@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
 
 import PageHeader from "@/components/layout/PageHeader";
 
@@ -12,10 +13,16 @@ import DiscoveryView from "./DiscoveryView";
 // filter state from the URL via useSearchParams(), a Client Component
 // hook -- Next's own docs recommend wrapping the component that calls it
 // in <Suspense>, so a route that could otherwise be static isn't forced
-// fully client-rendered up to the root (same reasoning as the /analyze,
-// /saved server-wrapper split, for a different underlying reason: no auth
-// gate here -- discovery is public).
-export default function SearchPage() {
+// fully client-rendered up to the root.
+//
+// Portfolio Release Task 3B -- Secure Analysis Visibility: Discovery is no
+// longer public (approved decision -- no public scores-only exception).
+// auth.protect() is the same real, resource-based, server-side gate used
+// throughout this app; GET /discover on the backend enforces its own auth
+// independently either way.
+export default async function SearchPage() {
+  await auth.protect();
+
   return (
     <>
       <PageHeader

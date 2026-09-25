@@ -118,13 +118,19 @@ def _ensure_test_users() -> None:
             connection.execute(text("INSERT INTO users (id) VALUES (:id) ON CONFLICT (id) DO NOTHING"), {"id": user_id})
 
 
-def _make_disposable_analysis(name_suffix: str) -> int:
+def _make_disposable_analysis(name_suffix: str, submitted_by_user_id: str | None = None) -> int:
     """
     A real, disposable analysis row -- never one of the important dev
     demonstration rows (Linear/Ramp/Retool etc.) reused across every
     prior phase's live walkthroughs. Created fresh per test and deleted
     in _cleanup(), so mutation/deletion tests below can safely exercise
     the real PUT/DELETE code paths without risking real data.
+
+    Portfolio Release Task 3B: submitted_by_user_id defaults to None (a
+    historical NULL-owner row -- admin-only/member-only visibility, same
+    default as before this task) and is plumbed straight through to
+    save_analysis()'s own new parameter for tests that need a specific
+    submitter to exercise the new visibility rule end to end.
     """
     from app.ai.sie_v2_methodology import METHODOLOGY_VERSION
 
@@ -143,6 +149,7 @@ def _make_disposable_analysis(name_suffix: str) -> int:
         traction_score=None, financial_score=None, overall_score=None, recommendation=None,
         readiness_score=None, readiness_summary=None,
         methodology=methodology,
+        submitted_by_user_id=submitted_by_user_id,
     )
     get_or_create_startup(company_name)  # keeps startup backfill/canonical tables consistent, unused otherwise
     return analysis_id
@@ -419,14 +426,29 @@ def test_admin_delete_analysis_allowed() -> None:
 # --- /analyses/search stays public (regression guard) -------------------------
 
 
-def test_analyses_search_remains_public() -> None:
+def test_analyses_search_now_requires_auth() -> None:
     """
-    The one /analyses* route that IS still used by the frontend
-    (GET /search) and was deliberately left untouched -- proves the
-    admin-gating above didn't overreach onto it.
+    Portfolio Release Task 3B -- Secure Analysis Visibility: /analyses/search
+    used to be the one deliberately-public /analyses* route; it now scopes
+    results to the caller's own authorized analyses (approved decision),
+    so it requires the same auth as /rankings/discover/compare, not the
+    RequireAdmin gate the rest of /analyses/* uses.
     """
-    response = client.get("/analyses/search", params={"query": "a"})
-    expect(response.status_code == 200, f"Expected /analyses/search to remain public, got {response.status_code}")
+    with _patched_auth():
+        anonymous_response = client.get("/analyses/search", params={"query": "a"})
+        expect(
+            anonymous_response.status_code == 401,
+            f"Expected anonymous /analyses/search to require auth, got {anonymous_response.status_code}",
+        )
+
+        authenticated_response = client.get(
+            "/analyses/search", params={"query": "a"}, headers=_auth_headers(NORMAL_USER)
+        )
+        expect(
+            authenticated_response.status_code == 200,
+            f"Expected an authenticated (non-admin) caller to reach /analyses/search, "
+            f"got {authenticated_response.status_code}: {authenticated_response.text}",
+        )
 
 
 # --- /migrate/* routes removed -------------------------------------------------
@@ -490,37 +512,80 @@ def test_migration_helper_functions_still_run_at_startup() -> None:
 # --- Public intelligence surfaces remain untouched -----------------------------
 
 
-def test_public_startup_profile_remains_public() -> None:
+# Portfolio Release Task 3B -- Secure Analysis Visibility supersedes every
+# "remains public" test below: none of these endpoints are public anymore
+# (approved decision -- no public scores-only exception). Each rewritten
+# test proves BOTH halves: anonymous access is rejected, and an admin (the
+# authorization class this file already has a fixture for) can still
+# reach the same data -- complementing test_saved_startups.py's own
+# coverage of the SUBMITTER's access to the same routes.
+
+
+def test_startup_profile_now_requires_auth_admin_can_access() -> None:
     _ensure_test_users()
-    analysis_id = _make_disposable_analysis("PublicProfileCheck")
+    _make_disposable_analysis("PublicProfileCheck", submitted_by_user_id=ADMIN_USER)
     try:
-        response = client.get(f"/startup/{TEST_PREFIX} PublicProfileCheck")
-        expect(response.status_code == 200, f"Expected public Startup Profile to remain accessible, got {response.status_code}")
+        with _patched_auth():
+            anonymous_response = client.get(f"/startup/{TEST_PREFIX} PublicProfileCheck")
+            expect(
+                anonymous_response.status_code == 401,
+                f"Expected anonymous Startup Profile access to require auth, got {anonymous_response.status_code}",
+            )
+
+            admin_response = client.get(
+                f"/startup/{TEST_PREFIX} PublicProfileCheck", headers=_auth_headers(ADMIN_USER)
+            )
+            expect(admin_response.status_code == 200, f"Expected admin access to succeed, got {admin_response.status_code}")
     finally:
         _cleanup()
 
 
-def test_public_rankings_remains_public() -> None:
-    response = client.get("/rankings")
-    expect(response.status_code == 200, f"Expected /rankings to remain public, got {response.status_code}")
+def test_rankings_now_requires_auth() -> None:
+    with _patched_auth():
+        anonymous_response = client.get("/rankings")
+        expect(anonymous_response.status_code == 401, f"Expected /rankings to require auth, got {anonymous_response.status_code}")
+
+        authenticated_response = client.get("/rankings", headers=_auth_headers(NORMAL_USER))
+        expect(authenticated_response.status_code == 200, f"Expected an authenticated caller to reach /rankings, got {authenticated_response.status_code}")
 
 
-def test_public_discovery_remains_public() -> None:
-    response = client.get("/discover")
-    expect(response.status_code == 200, f"Expected /discover to remain public, got {response.status_code}")
+def test_discovery_now_requires_auth() -> None:
+    with _patched_auth():
+        anonymous_response = client.get("/discover")
+        expect(anonymous_response.status_code == 401, f"Expected /discover to require auth, got {anonymous_response.status_code}")
+
+        authenticated_response = client.get("/discover", headers=_auth_headers(NORMAL_USER))
+        expect(authenticated_response.status_code == 200, f"Expected an authenticated caller to reach /discover, got {authenticated_response.status_code}")
 
 
-def test_public_compare_remains_public() -> None:
-    response = client.get("/compare", params={"startups": "1,2"})
-    expect(response.status_code in (200, 400), f"Expected /compare to remain reachable without auth, got {response.status_code}")
+def test_compare_now_requires_auth() -> None:
+    with _patched_auth():
+        anonymous_response = client.get("/compare", params={"startups": "1,2"})
+        expect(anonymous_response.status_code == 401, f"Expected /compare to require auth, got {anonymous_response.status_code}")
+
+        authenticated_response = client.get("/compare", params={"startups": "1,2"}, headers=_auth_headers(NORMAL_USER))
+        expect(
+            authenticated_response.status_code in (200, 400),
+            f"Expected an authenticated caller to reach /compare (200 or a clean 400 for unresolvable ids), "
+            f"got {authenticated_response.status_code}",
+        )
 
 
-def test_sps_history_remains_public() -> None:
+def test_sps_history_now_requires_auth_admin_can_access() -> None:
     _ensure_test_users()
-    analysis_id = _make_disposable_analysis("SpsHistoryCheck")
+    _make_disposable_analysis("SpsHistoryCheck", submitted_by_user_id=ADMIN_USER)
     try:
-        response = client.get(f"/startup/{TEST_PREFIX} SpsHistoryCheck/sps-history")
-        expect(response.status_code == 200, f"Expected SPS history to remain public, got {response.status_code}")
+        with _patched_auth():
+            anonymous_response = client.get(f"/startup/{TEST_PREFIX} SpsHistoryCheck/sps-history")
+            expect(
+                anonymous_response.status_code == 401,
+                f"Expected anonymous SPS history access to require auth, got {anonymous_response.status_code}",
+            )
+
+            admin_response = client.get(
+                f"/startup/{TEST_PREFIX} SpsHistoryCheck/sps-history", headers=_auth_headers(ADMIN_USER)
+            )
+            expect(admin_response.status_code == 200, f"Expected admin access to succeed, got {admin_response.status_code}")
     finally:
         _cleanup()
 
@@ -541,15 +606,15 @@ TESTS = [
     test_signed_out_delete_analysis_denied_and_does_not_delete,
     test_normal_user_delete_analysis_denied_and_does_not_delete,
     test_admin_delete_analysis_allowed,
-    test_analyses_search_remains_public,
+    test_analyses_search_now_requires_auth,
     test_migrate_routes_no_longer_registered,
     test_migrate_paths_return_404_regardless_of_auth,
     test_migration_helper_functions_still_run_at_startup,
-    test_public_startup_profile_remains_public,
-    test_public_rankings_remains_public,
-    test_public_discovery_remains_public,
-    test_public_compare_remains_public,
-    test_sps_history_remains_public,
+    test_startup_profile_now_requires_auth_admin_can_access,
+    test_rankings_now_requires_auth,
+    test_discovery_now_requires_auth,
+    test_compare_now_requires_auth,
+    test_sps_history_now_requires_auth_admin_can_access,
 ]
 
 

@@ -115,12 +115,23 @@ def _auth_headers(user_id: str) -> dict:
 # --- Test data helpers ------------------------------------------------------
 
 
-def _save_test_analysis(company_name: str, stage: str = "Seed", methodology: dict | None = None) -> int:
+def _save_test_analysis(
+    company_name: str,
+    stage: str = "Seed",
+    methodology: dict | None = None,
+    submitted_by_user_id: str | None = None,
+) -> int:
     """Minimal save_analysis() call -- mirrors test_startup_write_path.py's
     own helper, with `stage` added (needed here since
     get_saved_startups_for_user() surfaces it) and `methodology` exposed
     so callers can create a canonical (methodology_version-matching) row
-    on demand."""
+    on demand.
+
+    Portfolio Release Task 3B: submitted_by_user_id defaults to None (a
+    "historical NULL-owner" row, same as before this task -- the default
+    for tests not specifically about ownership/visibility), and is
+    plumbed straight through to save_analysis()'s own new parameter for
+    tests that need a specific submitter."""
     return save_analysis(
         company_text=f"Test company text for {company_name}",
         summary="s",
@@ -149,6 +160,7 @@ def _save_test_analysis(company_name: str, stage: str = "Seed", methodology: dic
         readiness_score=None,
         readiness_summary=None,
         methodology=methodology,
+        submitted_by_user_id=submitted_by_user_id,
     )
 
 
@@ -159,11 +171,15 @@ def _canonical_methodology(sps: float) -> dict:
     }
 
 
-def _make_canonical_test_startup(name_suffix: str, sps: float = 50.0) -> tuple[str, int]:
+def _make_canonical_test_startup(
+    name_suffix: str, sps: float = 50.0, submitted_by_user_id: str | None = None
+) -> tuple[str, int]:
     """Creates one canonical analysis for a fresh ZZTest company and
     returns (company_name, startup_id)."""
     company_name = f"{TEST_PREFIX} {name_suffix}"
-    _save_test_analysis(company_name, methodology=_canonical_methodology(sps))
+    _save_test_analysis(
+        company_name, methodology=_canonical_methodology(sps), submitted_by_user_id=submitted_by_user_id
+    )
     startup_id = get_or_create_startup(company_name)
     return company_name, startup_id
 
@@ -300,9 +316,20 @@ def test_unsaving_twice_is_safe() -> None:
 
 
 def test_user_can_list_their_saved_startups() -> None:
+    """
+    Portfolio Release Task 3B: the analysis is attributed to USER_A
+    (submitted_by_user_id=USER_A) -- representing "I analyzed my own
+    company, then saved it too" -- so USER_A is authorized to see its
+    score via the visibility rule, same as before this task's fix. See
+    test_saving_a_startup_does_not_grant_access_to_another_users_private_analysis
+    below for the complementary case: saving alone, with no other
+    relationship to the analysis, does NOT grant this.
+    """
     _ensure_test_users()
     try:
-        company_name, startup_id = _make_canonical_test_startup("List Basic", sps=61.5)
+        company_name, startup_id = _make_canonical_test_startup(
+            "List Basic", sps=61.5, submitted_by_user_id=USER_A
+        )
         save_startup_for_user(USER_A, startup_id)
 
         entries = get_saved_startups_for_user(USER_A)
@@ -311,6 +338,39 @@ def test_user_can_list_their_saved_startups() -> None:
         expect(len(matching) == 1, "Expected the saved startup to appear exactly once in the list")
         expect(matching[0]["company_name"] == company_name, "Wrong company_name in list entry")
         expect(matching[0]["overall_score"] == 61.5, f"Wrong overall_score: {matching[0]['overall_score']!r}")
+    finally:
+        _cleanup()
+
+
+def test_saving_a_startup_does_not_grant_access_to_another_users_private_analysis() -> None:
+    """
+    Portfolio Release Task 3B, approved decision item 5: saving/bookmarking
+    a startup must NOT grant report access. USER_B saves a startup that
+    only USER_A (the submitter, with no relationship to USER_B) has
+    analyzed -- USER_B's list must still show the bookmark (it's their
+    own, real saved_startups row) but with null intelligence fields, never
+    USER_A's private score/industry/stage.
+    """
+    _ensure_test_users()
+    try:
+        _, startup_id = _make_canonical_test_startup(
+            "Bookmark Not Access", sps=88.0, submitted_by_user_id=USER_A
+        )
+        save_startup_for_user(USER_B, startup_id)
+
+        entries = get_saved_startups_for_user(USER_B)
+        matching = [e for e in entries if e["startup_id"] == startup_id]
+
+        expect(len(matching) == 1, "Expected USER_B's own bookmark to still appear in their list")
+        expect(
+            matching[0]["overall_score"] is None,
+            f"Expected no visible score for an analysis USER_B is not authorized to see, "
+            f"got {matching[0]['overall_score']!r}",
+        )
+        expect(
+            matching[0]["industry"] is None and matching[0]["stage"] is None,
+            f"Expected no visible industry/stage either, got {matching[0]!r}",
+        )
     finally:
         _cleanup()
 
@@ -509,10 +569,19 @@ def test_saved_startup_resolves_latest_canonical_analysis_after_newer_one() -> N
     never at a specific analysis_id -- so when a NEWER canonical analysis
     is created for the same startup after it was saved, the watchlist
     must immediately reflect the new intelligence, not the score that was
-    current at save time."""
+    current at save time.
+
+    Portfolio Release Task 3B: both analyses are attributed to USER_A (the
+    same user doing the listing) so this test continues to verify "latest
+    wins," unaffected by the new visibility rule -- see
+    test_saving_a_startup_does_not_grant_access_to_another_users_private_analysis
+    for the visibility rule's own dedicated coverage.
+    """
     _ensure_test_users()
     try:
-        company_name, startup_id = _make_canonical_test_startup("Latest Wins", sps=40.0)
+        company_name, startup_id = _make_canonical_test_startup(
+            "Latest Wins", sps=40.0, submitted_by_user_id=USER_A
+        )
         save_startup_for_user(USER_A, startup_id)
 
         entries = get_saved_startups_for_user(USER_A)
@@ -522,7 +591,7 @@ def test_saved_startup_resolves_latest_canonical_analysis_after_newer_one() -> N
         # A newer canonical analysis for the SAME company_name resolves to
         # the SAME startup_id (get_or_create_startup()'s own dedup rule) --
         # never a second, competing startups row.
-        _save_test_analysis(company_name, methodology=_canonical_methodology(95.0))
+        _save_test_analysis(company_name, methodology=_canonical_methodology(95.0), submitted_by_user_id=USER_A)
         new_startup_id = get_or_create_startup(company_name)
         expect(new_startup_id == startup_id, "A repeat analysis must resolve to the SAME startup_id")
 
@@ -550,20 +619,42 @@ def test_saved_startup_resolves_latest_canonical_analysis_after_newer_one() -> N
 # --- 16-17: public routes remain public -------------------------------------
 
 
-def test_public_startup_profile_remains_accessible_without_auth() -> None:
-    company_name, _ = _make_canonical_test_startup("Public Profile")
+def test_startup_profile_requires_auth_and_owner_can_access_their_own() -> None:
+    """
+    Portfolio Release Task 3B -- Secure Analysis Visibility supersedes the
+    old "public startup profile" behavior this test used to assert. Now:
+    anonymous access is rejected (401), and the analysis's own submitter
+    (a real, verified caller) can still reach their own report -- proving
+    the fix doesn't just lock everyone out, it correctly recognizes an
+    authorized owner end to end through the real route.
+    """
+    _ensure_test_users()
+    company_name, _ = _make_canonical_test_startup("Public Profile", submitted_by_user_id=USER_A)
     try:
-        response = client.get(f"/startup/{company_name}")
+        anonymous_response = client.get(f"/startup/{company_name}")
         expect(
-            response.status_code != 401,
-            f"Public Startup Profile must not require auth, got {response.status_code}",
+            anonymous_response.status_code == 401,
+            f"Expected anonymous access to require auth (401), got {anonymous_response.status_code}",
         )
-        expect(response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}")
+
+        with _patched_auth():
+            owner_response = client.get(f"/startup/{company_name}", headers=_auth_headers(USER_A))
+            expect(
+                owner_response.status_code == 200,
+                f"Expected the submitter to reach their own report, got {owner_response.status_code}: {owner_response.text}",
+            )
     finally:
         _cleanup()
 
 
-def test_rankings_search_dashboard_remain_public() -> None:
+def test_rankings_search_dashboard_now_require_auth() -> None:
+    """
+    Portfolio Release Task 3B: these endpoints now return per-user-
+    authorized analysis content (approved decision -- no public
+    scores-only exception), so an anonymous caller must be rejected. See
+    test_backend_authentication.py's own
+    test_analysis_content_endpoints_require_auth for the fuller list.
+    """
     checks = [
         ("GET", "/rankings", {}),
         ("GET", "/analytics", {}),
@@ -573,8 +664,8 @@ def test_rankings_search_dashboard_remain_public() -> None:
     for method, path, params in checks:
         response = client.request(method, path, params=params)
         expect(
-            response.status_code != 401,
-            f"Public endpoint {path} must not require auth, got {response.status_code}",
+            response.status_code == 401,
+            f"Expected {path} to require auth (401), got {response.status_code}",
         )
 
 
@@ -585,6 +676,7 @@ TESTS = [
     test_authenticated_user_can_unsave,
     test_unsaving_twice_is_safe,
     test_user_can_list_their_saved_startups,
+    test_saving_a_startup_does_not_grant_access_to_another_users_private_analysis,
     test_user_a_list_never_includes_user_b_saved_startup,
     test_user_a_cannot_remove_user_b_saved_startup,
     test_api_cross_user_isolation_end_to_end,
@@ -596,8 +688,8 @@ TESTS = [
     test_saving_creates_zero_startup_memberships,
     test_saved_startups_table_stores_no_intelligence_fields,
     test_saved_startup_resolves_latest_canonical_analysis_after_newer_one,
-    test_public_startup_profile_remains_accessible_without_auth,
-    test_rankings_search_dashboard_remain_public,
+    test_startup_profile_requires_auth_and_owner_can_access_their_own,
+    test_rankings_search_dashboard_now_require_auth,
 ]
 
 

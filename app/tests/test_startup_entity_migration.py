@@ -48,6 +48,14 @@ from app.database.db import (
 )
 
 TEST_PREFIX = "ZZTest Migration"
+# Portfolio Release Task 3B -- Secure Analysis Visibility: get_rankings()/
+# get_analytics()/search_analyses()/get_startup_by_name()/get_sps_history()
+# now require a viewer to scope by. This file's own job is schema/migration
+# correctness -- not the authorization feature itself (dedicated coverage
+# in test_analysis_visibility.py) -- so every call below goes through this
+# fixed admin bypass, unaffected by the new, orthogonal authorization
+# dimension.
+_ADMIN = "__task3b_sanity_admin__"
 
 
 def expect(condition: bool, message: str) -> None:
@@ -434,16 +442,16 @@ def test_existing_canonical_surfaces_unchanged() -> None:
     then again after inserting an unrelated (non-canonical, methodology
     IS NULL) test row -- and confirms the results are unaffected, since a
     non-canonical test row must never leak into canonical output."""
-    rankings_before = get_rankings()
-    analytics_before = get_analytics()
+    rankings_before = get_rankings(_ADMIN, True)
+    analytics_before = get_analytics(_ADMIN, True)
 
     ids = [_insert_test_analysis(f"{TEST_PREFIX} Parity", offset_seconds=0)]
 
     try:
-        rankings_after = get_rankings()
-        analytics_after = get_analytics()
-        search_result = search_analyses(TEST_PREFIX)
-        profile = get_startup_by_name(f"{TEST_PREFIX} Parity")
+        rankings_after = get_rankings(_ADMIN, True)
+        analytics_after = get_analytics(_ADMIN, True)
+        search_result = search_analyses(TEST_PREFIX, _ADMIN, True)
+        profile = get_startup_by_name(f"{TEST_PREFIX} Parity", _ADMIN, True)
 
         expect(
             rankings_before == rankings_after,
@@ -487,7 +495,7 @@ def test_company_with_no_analysis_returns_honest_profile_not_none() -> None:
         ).scalar()
 
     try:
-        profile = get_startup_by_name(canonical_name)
+        profile = get_startup_by_name(canonical_name, _ADMIN, True)
 
         expect(profile is not None, "Expected an honest profile dict, not None, for an existing startups row")
         expect(
@@ -517,7 +525,7 @@ def test_company_with_analysis_still_reports_has_analysis_true() -> None:
     ids = [_insert_test_analysis(f"{TEST_PREFIX} HasAnalysis", offset_seconds=0, methodology={"startup_intelligence_score": 42})]
 
     try:
-        profile = get_startup_by_name(f"{TEST_PREFIX} HasAnalysis")
+        profile = get_startup_by_name(f"{TEST_PREFIX} HasAnalysis", _ADMIN, True)
 
         expect(profile is not None, "Expected a profile for a company with a real analysis")
         expect(profile["has_analysis"] is True, f"Expected has_analysis=True, got {profile.get('has_analysis')}")
@@ -530,7 +538,7 @@ def test_truly_nonexistent_company_still_returns_none() -> None:
     """A company with neither an analysis nor a startups row must still
     404 (return None) -- the Section 6 fallback only ever recognizes a
     company that genuinely exists in the startups table."""
-    profile = get_startup_by_name(f"{TEST_PREFIX} Never Created Anywhere")
+    profile = get_startup_by_name(f"{TEST_PREFIX} Never Created Anywhere", _ADMIN, True)
     expect(profile is None, "Expected None for a company that was never created via any path")
 
 

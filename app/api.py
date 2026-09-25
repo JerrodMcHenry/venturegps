@@ -30,6 +30,7 @@ from app.database.db import (create_tables,
                          get_sps_history,
                          create_startups_table,
                          add_startup_id_column,
+                         add_analysis_submitted_by_column,
                          create_users_table,
                          create_startup_memberships_table,
                          create_saved_startups_table,
@@ -219,7 +220,7 @@ from app.ai.idea_structuring import structure_idea, IdeaStructuringError
 from app.models.pitch_deck_coach import PitchDeckReviewResponse, PitchDeckReviewSummary
 from app.ai.pitch_deck_coaching import generate_pitch_deck_review, PitchDeckCoachingError
 from app.workflows.due_diligence_workflow import run_due_diligence, assemble_multi_source_text
-from app.auth import AuthenticatedUser, RequireAuth, RequireAdmin, RequireStartupMember, require_startup_member
+from app.auth import AuthenticatedUser, RequireAuth, RequireAdmin, RequireStartupMember, require_startup_member, is_admin
 from app.ai.sie_v2_methodology import METHODOLOGY_VERSION
 from app.ai.vps_scoring import compute_vps
 from app.ai.vps_guidance import generate_guidance
@@ -289,6 +290,11 @@ create_score_history_table()
 create_startups_table()
 add_startup_id_column()
 create_users_table()
+# Portfolio Release Task 3B -- must run after create_users_table() (its FK
+# target) and can run any time after that; placed here, immediately after,
+# rather than at the end of this migration sequence, so it's obvious the
+# dependency is satisfied by construction, not by call-order coincidence.
+add_analysis_submitted_by_column()
 create_startup_memberships_table()
 create_saved_startups_table()
 backfill_startup_ids()
@@ -528,9 +534,15 @@ def health_check():
 def get_saved_analyses(current_user: AuthenticatedUser = RequireAdmin):
     return get_analyses()
 
+# Portfolio Release Task 3B: scoped to the caller's own authorized
+# analyses (approved decision) -- previously fully public, and previously
+# able to full-text-match against company_text/summary/etc. of every
+# analysis on the platform (a narrow existence-probing risk the read-only
+# audit flagged). Now RequireAuth; search_analyses() applies the same
+# visibility clause as every other scoped read above.
 @app.get("/analyses/search")
-def search_saved_analyses(query: str):
-    return search_analyses(query)
+def search_saved_analyses(query: str, current_user: AuthenticatedUser = RequireAuth):
+    return search_analyses(query, current_user.user_id, is_admin(current_user.user_id))
 
 @app.get("/analyses/{analysis_id}")
 def get_saved_analysis(analysis_id: int, current_user: AuthenticatedUser = RequireAdmin):
@@ -557,9 +569,19 @@ def download_analysis_pdf(analysis_id: int, current_user: AuthenticatedUser = Re
         filename=pdf_path.split("/")[-1],
     )
 
+# Portfolio Release Task 3B -- Secure Analysis Visibility. get_analytics()
+# depends on get_rankings(), which is now viewer-scoped (see that
+# function's own comment) -- RequireAuth here is what makes a real
+# viewer_user_id/viewer_is_admin available to pass through. Audited but
+# deliberately left untouched by this task: /analytics/industries and
+# /analytics/sps-v3 (below) return only platform-wide COUNTS with no
+# per-company name, score, or narrative text attached -- a materially
+# different, lower-risk category than the named-in-scope endpoints
+# (rankings/discovery/comparison/search/history all return per-company,
+# identifiable results). Revisit separately if that judgment changes.
 @app.get("/analytics")
-def analytics():
-    return get_analytics()
+def analytics(current_user: AuthenticatedUser = RequireAuth):
+    return get_analytics(current_user.user_id, is_admin(current_user.user_id))
 
 @app.get("/analytics/industries")
 def industry_analytics():
@@ -573,26 +595,32 @@ def industry_analytics():
 def sps_v3_analytics():
     return get_sps_v3_analytics()
 
+# Portfolio Release Task 3B: Rankings is now scoped to the caller's own
+# authorized analyses (approved decision -- no public scores-only
+# exception), so it requires a verified identity to scope by.
 @app.get("/rankings")
-def rankings():
-    return get_rankings()
+def rankings(current_user: AuthenticatedUser = RequireAuth):
+    return get_rankings(current_user.user_id, is_admin(current_user.user_id))
 
 
 # ---------------------------------------------------------------------------
-# Startup Discovery V1. Public (no RequireAuth) -- exploring the canonical
-# startup universe is intelligence, same as Rankings/Search/Startup
-# Profile, not a paid action. Every filter is optional; Query(...) bounds
-# below are the "invalid filters fail cleanly" layer (a 422 before any SQL
-# ever runs), on top of app/database/db.py's own defensive clamping.
-# Distinct from Rankings on purpose -- Rankings is "the canonical
-# leaderboard" (unfiltered, full population); Discovery is "help me find
-# startups matching my criteria" (filtered, sorted, paginated). Both read
-# the exact same canonical population; neither is a second definition of
-# it. See discover_startups()'s own docstring in app/database/db.py.
+# Startup Discovery V1. Portfolio Release Task 3B: now RequireAuth --
+# exploring the canonical startup universe is scoped to THIS caller's own
+# authorized analyses (approved decision -- no public scores-only
+# exception), same as Rankings/Search/Startup Profile. Every filter is
+# optional; Query(...) bounds below are the "invalid filters fail cleanly"
+# layer (a 422 before any SQL ever runs), on top of app/database/db.py's
+# own defensive clamping. Distinct from Rankings on purpose -- Rankings is
+# "the canonical leaderboard" (unfiltered, full authorized population);
+# Discovery is "help me find startups matching my criteria" (filtered,
+# sorted, paginated). Both read the exact same authorized population;
+# neither is a second definition of it. See discover_startups()'s own
+# docstring in app/database/db.py.
 # ---------------------------------------------------------------------------
 
 @app.get("/discover", response_model=DiscoveryResponse)
 def discover(
+    current_user: AuthenticatedUser = RequireAuth,
     query: str | None = Query(None, max_length=200),
     industry: str | None = Query(None, max_length=200),
     stage: str | None = Query(None, max_length=200),
@@ -623,10 +651,14 @@ def discover(
         min_traction=min_traction,
         min_financial_health=min_financial_health,
     )
+    viewer_user_id = current_user.user_id
+    viewer_is_admin = is_admin(current_user.user_id)
 
     try:
-        results = discover_startups(sort=sort, limit=limit, offset=offset, **filters)
-        total = count_discover_startups(**filters)
+        results = discover_startups(
+            viewer_user_id, viewer_is_admin, sort=sort, limit=limit, offset=offset, **filters
+        )
+        total = count_discover_startups(viewer_user_id, viewer_is_admin, **filters)
     except Exception as _exc:
         traceback.print_exc()
         capture_exception(_exc)
@@ -639,9 +671,9 @@ def discover(
 
 
 @app.get("/discover/filter-options", response_model=DiscoveryFilterOptions)
-def discover_filter_options():
+def discover_filter_options(current_user: AuthenticatedUser = RequireAuth):
     try:
-        return get_discovery_filter_options()
+        return get_discovery_filter_options(current_user.user_id, is_admin(current_user.user_id))
     except Exception as _exc:
         traceback.print_exc()
         capture_exception(_exc)
@@ -652,13 +684,17 @@ def discover_filter_options():
 
 
 # ---------------------------------------------------------------------------
-# Compare Startups V1. Public (no RequireAuth) -- comparing canonical
-# intelligence is the same kind of public intelligence as Rankings/Search/
-# Startup Profile, not a paid or personalized action. Reuses
+# Compare Startups V1. Portfolio Release Task 3B: now RequireAuth --
+# comparing intelligence is scoped to startups this caller is authorized
+# to see (approved decision -- no public scores-only exception). Reuses
 # get_startups_for_comparison()'s canonical startup_id resolution (see its
 # own docstring in app/database/db.py) -- this endpoint's own job is only
 # input parsing/bounding and slimming the full methodology JSONB down to
-# ComparisonStartup's fields.
+# ComparisonStartup's fields. Passing explicit startup_id values that the
+# caller is NOT authorized for is exactly the "explicit IDs must not
+# bypass authorization" case -- get_startups_for_comparison() handles it
+# by resolving those ids to nothing (same shape as an invalid id), not a
+# distinguishing error.
 # ---------------------------------------------------------------------------
 
 def _build_comparison_pillar(pillar_key: str, methodology: dict) -> ComparisonPillar:
@@ -725,7 +761,10 @@ def _build_comparison_startup(row: dict) -> ComparisonStartup:
 
 
 @app.get("/compare", response_model=ComparisonResponse)
-def compare(startups: str = Query(..., min_length=1, max_length=200)):
+def compare(
+    startups: str = Query(..., min_length=1, max_length=200),
+    current_user: AuthenticatedUser = RequireAuth,
+):
     # Deliberately permissive parsing -- a malformed/non-numeric token is
     # dropped, not a 422, matching Part 5's "invalid IDs fail gracefully".
     # Only "fewer than MIN_COMPARISON_STARTUPS well-formed ids" is a hard
@@ -754,7 +793,9 @@ def compare(startups: str = Query(..., min_length=1, max_length=200)):
     bounded_ids = deduped_ids[:MAX_COMPARISON_STARTUPS]
 
     try:
-        rows = get_startups_for_comparison(bounded_ids)
+        rows = get_startups_for_comparison(
+            bounded_ids, current_user.user_id, is_admin(current_user.user_id)
+        )
         resolved_ids = {row["startup_id"] for row in rows}
         missing_ids = [id_ for id_ in bounded_ids if id_ not in resolved_ids]
         comparison_startups = [_build_comparison_startup(row) for row in rows]
@@ -769,28 +810,41 @@ def compare(startups: str = Query(..., min_length=1, max_length=200)):
     return ComparisonResponse(startups=comparison_startups, missing_startup_ids=missing_ids)
 
 
+# Portfolio Release Task 3B: the four routes below are scoped to the
+# caller's own authorized analyses (approved decision), same as
+# Rankings/Discovery/Compare/Search above.
 @app.get("/score-history/{company_name}")
-def score_history(company_name: str):
-    return get_score_history(company_name)
+def score_history(company_name: str, current_user: AuthenticatedUser = RequireAuth):
+    return get_score_history(company_name, current_user.user_id, is_admin(current_user.user_id))
 
 @app.get("/startup-trends/{company_name}")
-def startup_trends(company_name: str):
-    return get_startup_trends(company_name)
+def startup_trends(company_name: str, current_user: AuthenticatedUser = RequireAuth):
+    return get_startup_trends(company_name, current_user.user_id, is_admin(current_user.user_id))
 
 @app.get("/top-startups")
-def top_startups(limit: int = 10):
-    return get_top_startups(limit)
+def top_startups(limit: int = 10, current_user: AuthenticatedUser = RequireAuth):
+    return get_top_startups(current_user.user_id, is_admin(current_user.user_id), limit)
 
 @app.get("/top-improving-startups")
-def top_improving_startups(limit: int = 10):
-    return get_top_improving_startups(limit)
+def top_improving_startups(limit: int = 10, current_user: AuthenticatedUser = RequireAuth):
+    return get_top_improving_startups(current_user.user_id, is_admin(current_user.user_id), limit)
 
+# Portfolio Release Task 3B -- Secure Analysis Visibility. Was fully
+# public (no auth at all); confirmed by the read-only audit as the
+# headline leak vector (a signed-in user's uploaded pitch deck could end
+# up quoted, verbatim, in methodology.*.score_breakdown.subscores[].evidence,
+# returned here to anyone, no login required). Now RequireAuth, and
+# get_startup_by_name() itself applies the visibility rule (submitter,
+# approved member, or admin) before returning anything -- an unauthorized
+# but signed-in caller gets the exact same 404 as "this company was never
+# analyzed," never a distinguishing 403 that would confirm a private
+# analysis exists.
 @app.get(
     "/startup/{company_name}",
     response_model=StartupProfileResponse,
 )
-def get_startup_profile(company_name: str):
-    startup = get_startup_by_name(company_name)
+def get_startup_profile(company_name: str, current_user: AuthenticatedUser = RequireAuth):
+    startup = get_startup_by_name(company_name, current_user.user_id, is_admin(current_user.user_id))
 
     if startup is None:
         raise HTTPException(
@@ -804,8 +858,8 @@ def get_startup_profile(company_name: str):
     return StartupProfileResponse(**startup)
 
 @app.get("/startup/{company_name}/sps-history")
-def get_startup_sps_history(company_name: str):
-    return get_sps_history(company_name)
+def get_startup_sps_history(company_name: str, current_user: AuthenticatedUser = RequireAuth):
+    return get_sps_history(company_name, current_user.user_id, is_admin(current_user.user_id))
 
 
 # ---------------------------------------------------------------------------
@@ -887,7 +941,7 @@ def unsave_my_startup(
 def get_investor_workspace(
     current_user: AuthenticatedUser = RequireAuth,
 ):
-    rows = get_watchlist_startups_for_user(current_user.user_id)
+    rows = get_watchlist_startups_for_user(current_user.user_id, is_admin(current_user.user_id))
     assessment = assess_investor_workspace(rows)
 
     return InvestorWorkspaceResponse(
@@ -4421,6 +4475,12 @@ def analyze_unified(
                 # get_or_create_startup() and attach directly to this exact
                 # authorized canonical startup instead.
                 startup_id=startup_id,
+                # Portfolio Release Task 3B: every analysis this route
+                # creates is attributed to the verified caller -- this
+                # route is RequireAuth-gated, so current_user always exists
+                # by the time this line runs, for both a normal and a
+                # founder-targeted (startup_id is not None) submission.
+                submitted_by_user_id=current_user.user_id,
             )
         except Exception as _exc:
             # Distinct from the pipeline failure above on purpose, same as

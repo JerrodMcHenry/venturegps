@@ -344,19 +344,53 @@ def test_repeated_authenticated_requests_reuse_same_users_row() -> None:
 
 
 def test_public_endpoints_require_no_auth() -> None:
+    # Portfolio Release Task 3B -- Secure Analysis Visibility: /analytics,
+    # /rankings, and /analyses/search moved OUT of this list -- they now
+    # return per-user-authorized analysis content (scores, summaries) and
+    # correctly require auth (see test_analysis_content_endpoints_require_auth
+    # below for their own coverage). Only genuinely content-free endpoints
+    # remain here.
     with _patched_auth():
         checks = [
             ("GET", "/health", {}),
             ("GET", "/version", {}),
-            ("GET", "/analytics", {}),
-            ("GET", "/rankings", {}),
-            ("GET", "/analyses/search", {"query": "a"}),
         ]
         for method, path, params in checks:
             response = client.request(method, path, params=params)
             expect(
                 response.status_code != 401,
                 f"Public endpoint {path} must not require auth, got {response.status_code}",
+            )
+
+
+def test_analysis_content_endpoints_require_auth() -> None:
+    """
+    Portfolio Release Task 3B -- Secure Analysis Visibility: every endpoint
+    that can return analysis content (scores, summaries, evidence-derived
+    text) or aggregate it across analyses now requires a verified,
+    authenticated caller -- a missing/invalid token gets the same 401 the
+    paid /analyze endpoint already used, not a silent public response.
+    """
+    with _patched_auth():
+        checks = [
+            ("GET", "/analytics", {}),
+            ("GET", "/rankings", {}),
+            ("GET", "/analyses/search", {"query": "a"}),
+            ("GET", "/discover", {}),
+            ("GET", "/discover/filter-options", {}),
+            ("GET", "/compare", {"startups": "1,2"}),
+            ("GET", "/score-history/ZZTest Co", {}),
+            ("GET", "/startup-trends/ZZTest Co", {}),
+            ("GET", "/top-startups", {}),
+            ("GET", "/top-improving-startups", {}),
+            ("GET", "/startup/ZZTest Co", {}),
+            ("GET", "/startup/ZZTest Co/sps-history", {}),
+        ]
+        for method, path, params in checks:
+            response = client.request(method, path, params=params)
+            expect(
+                response.status_code == 401,
+                f"Expected {path} to require auth (401) with no token, got {response.status_code}",
             )
 
 
@@ -395,6 +429,7 @@ TESTS = [
     test_first_valid_request_creates_one_users_row,
     test_repeated_authenticated_requests_reuse_same_users_row,
     test_public_endpoints_require_no_auth,
+    test_analysis_content_endpoints_require_auth,
     test_failure_responses_never_leak_token_or_internals,
 ]
 

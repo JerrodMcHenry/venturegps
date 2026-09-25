@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 import app.api as api
+from app.auth import AuthenticatedUser, get_current_user
 from app.ai.sie_v2_methodology import METHODOLOGY_VERSION
 from app.database.db import (
     MAX_DISCOVERY_LIMIT,
@@ -44,6 +45,24 @@ TEST_MODEL_A = "ZZTest Discovery ModelA"
 TEST_MODEL_B = "ZZTest Discovery ModelB"
 
 TEST_USER = "zztest_discovery_user"
+# Portfolio Release Task 3B -- Secure Analysis Visibility: discover_startups()/
+# count_discover_startups()/get_rankings() now require a viewer to scope by.
+# This file's own job is discovery's QUERY logic (filters/sorting/pagination/
+# dedup) -- not the authorization feature itself, which has its own dedicated
+# coverage in test_analysis_visibility.py and test_security_hardening.py's
+# test_discovery_now_requires_auth. Every call below goes through an ADMIN
+# viewer (viewer_is_admin=True bypasses the visibility filter entirely) so
+# every existing assertion here keeps testing exactly what it always tested,
+# unaffected by the new, orthogonal authorization dimension.
+TEST_VIEWER = "zztest_discovery_admin_viewer"
+
+
+def _discover(**kwargs):
+    return discover_startups(TEST_VIEWER, True, **kwargs)
+
+
+def _count(**kwargs):
+    return count_discover_startups(TEST_VIEWER, True, **kwargs)
 
 
 def expect(condition: bool, message: str) -> None:
@@ -185,13 +204,13 @@ def _names(rows: list[dict]) -> list[str]:
 
 
 def test_discovery_returns_latest_canonical_startup_once() -> None:
-    rows = discover_startups(query=f"{TEST_PREFIX} Repeat")
+    rows = _discover(query=f"{TEST_PREFIX} Repeat")
     expect(len(rows) == 1, f"Expected exactly one row for a twice-analyzed startup, got {len(rows)}")
     expect(rows[0]["overall_score"] == 95.0, f"Expected the NEWER score (95.0), got {rows[0]['overall_score']!r}")
 
 
 def test_old_analyses_do_not_create_duplicates() -> None:
-    count = count_discover_startups(query=f"{TEST_PREFIX} Repeat")
+    count = _count(query=f"{TEST_PREFIX} Repeat")
     expect(count == 1, f"Expected count=1 for a twice-analyzed startup, got {count}")
 
 
@@ -199,7 +218,7 @@ def test_old_analyses_do_not_create_duplicates() -> None:
 
 
 def test_legacy_analyses_are_excluded() -> None:
-    rows = discover_startups(query=f"{TEST_PREFIX} Legacy")
+    rows = _discover(query=f"{TEST_PREFIX} Legacy")
     expect(len(rows) == 0, f"A non-canonical (methodology_version 1.0) analysis must never appear, got {rows}")
 
 
@@ -207,7 +226,7 @@ def test_legacy_analyses_are_excluded() -> None:
 
 
 def test_text_query_filter() -> None:
-    rows = discover_startups(query=f"{TEST_PREFIX} Alpha")
+    rows = _discover(query=f"{TEST_PREFIX} Alpha")
     expect(_names(rows) == [f"{TEST_PREFIX} Alpha"], f"Unexpected match set: {_names(rows)}")
 
 
@@ -216,7 +235,7 @@ def test_industry_filter() -> None:
     # but it's non-canonical -- version "1.0" -- so it must still be
     # excluded here regardless of industry, same as
     # test_legacy_analyses_are_excluded already confirms directly).
-    rows = discover_startups(industry=TEST_INDUSTRY_A, query=TEST_PREFIX)
+    rows = _discover(industry=TEST_INDUSTRY_A, query=TEST_PREFIX)
     names = set(_names(rows))
     expect(
         names == {f"{TEST_PREFIX} Alpha", f"{TEST_PREFIX} Gamma", f"{TEST_PREFIX} Repeat"},
@@ -225,12 +244,12 @@ def test_industry_filter() -> None:
 
 
 def test_stage_filter() -> None:
-    rows = discover_startups(stage=TEST_STAGE_B, query=TEST_PREFIX)
+    rows = _discover(stage=TEST_STAGE_B, query=TEST_PREFIX)
     expect(_names(rows) == [f"{TEST_PREFIX} Gamma"], f"Expected only Gamma for StageB, got {_names(rows)}")
 
 
 def test_business_model_filter() -> None:
-    rows = discover_startups(business_model=TEST_MODEL_B, query=TEST_PREFIX)
+    rows = _discover(business_model=TEST_MODEL_B, query=TEST_PREFIX)
     expect(_names(rows) == [f"{TEST_PREFIX} Beta"], f"Expected only Beta for ModelB, got {_names(rows)}")
 
 
@@ -245,7 +264,7 @@ def test_business_model_filter() -> None:
 
 
 def test_min_sps_filter() -> None:
-    rows = discover_startups(min_sps=60, query=TEST_PREFIX)
+    rows = _discover(min_sps=60, query=TEST_PREFIX)
     names = set(_names(rows)) & {f"{TEST_PREFIX} Alpha", f"{TEST_PREFIX} Beta", f"{TEST_PREFIX} Gamma"}
     expect(
         names == {f"{TEST_PREFIX} Alpha", f"{TEST_PREFIX} Gamma"},
@@ -254,7 +273,7 @@ def test_min_sps_filter() -> None:
 
 
 def test_max_sps_filter() -> None:
-    rows = discover_startups(max_sps=60, query=TEST_PREFIX)
+    rows = _discover(max_sps=60, query=TEST_PREFIX)
     names = set(_names(rows)) & {f"{TEST_PREFIX} Alpha", f"{TEST_PREFIX} Beta", f"{TEST_PREFIX} Gamma"}
     expect(names == {f"{TEST_PREFIX} Beta"}, f"max_sps=60 should include only Beta(50); got {names}")
 
@@ -262,7 +281,7 @@ def test_max_sps_filter() -> None:
 def test_combined_filters() -> None:
     # IndustryA AND SPS >= 80: Alpha(90) and Repeat(95, its latest score)
     # both qualify; Gamma(70) and IndustryB's Beta do not.
-    rows = discover_startups(industry=TEST_INDUSTRY_A, min_sps=80, query=TEST_PREFIX)
+    rows = _discover(industry=TEST_INDUSTRY_A, min_sps=80, query=TEST_PREFIX)
     names = set(_names(rows))
     expect(
         names == {f"{TEST_PREFIX} Alpha", f"{TEST_PREFIX} Repeat"},
@@ -274,7 +293,7 @@ def test_combined_filters() -> None:
 
 
 def test_unavailable_pillar_never_matches_minimum() -> None:
-    rows = discover_startups(min_team=1.0, query=f"{TEST_PREFIX} Gamma")
+    rows = _discover(min_team=1.0, query=f"{TEST_PREFIX} Gamma")
     expect(
         len(rows) == 0,
         f"Gamma's team pillar is Unavailable (NULL) -- it must never satisfy ANY min_team, even 1.0; got {rows}",
@@ -299,7 +318,7 @@ def test_each_pillar_minimum_filter() -> None:
     ]
 
     for label, kwargs in pillar_kwargs:
-        rows = discover_startups(query=TEST_PREFIX, **kwargs)
+        rows = _discover(query=TEST_PREFIX, **kwargs)
         names = set(_names(rows)) & {f"{TEST_PREFIX} Alpha", f"{TEST_PREFIX} Beta"}
         expect(
             names == {f"{TEST_PREFIX} Alpha"},
@@ -313,7 +332,7 @@ def test_each_pillar_minimum_filter() -> None:
 def test_sorting_sps_descending() -> None:
     # Within IndustryA: Repeat resolves to its newer analysis (SPS 95),
     # Alpha is 90, Gamma is 70 -- descending order is Repeat, Alpha, Gamma.
-    rows = discover_startups(
+    rows = _discover(
         query=TEST_PREFIX, industry=TEST_INDUSTRY_A, sort="sps_desc"
     )
     names = _names(rows)
@@ -324,7 +343,7 @@ def test_sorting_sps_descending() -> None:
 
 
 def test_sorting_sps_ascending() -> None:
-    rows = discover_startups(
+    rows = _discover(
         query=TEST_PREFIX, industry=TEST_INDUSTRY_A, sort="sps_asc"
     )
     names = _names(rows)
@@ -335,7 +354,7 @@ def test_sorting_sps_ascending() -> None:
 
 
 def test_sorting_newest() -> None:
-    rows = discover_startups(query=TEST_PREFIX, sort="newest")
+    rows = _discover(query=TEST_PREFIX, sort="newest")
     # The Repeat startup's newest analysis (SPS 95) was saved last of all
     # seeded rows -- it must sort first under "newest".
     expect(
@@ -348,33 +367,65 @@ def test_sorting_newest() -> None:
 
 
 def test_invalid_numeric_bounds_fail_cleanly_api_layer() -> None:
-    response = client.get("/discover", params={"min_sps": 200})
-    expect(response.status_code == 422, f"Expected 422 for out-of-range min_sps, got {response.status_code}")
+    """
+    Portfolio Release Task 3B: /discover now resolves RequireAuth before
+    Query(...) validation, so an unauthenticated request gets 401 before
+    it ever reaches the invalid-param check this test is actually about --
+    a real, meaningful interaction (auth is checked first), not a reason
+    to weaken this test. A minimal, LOCALLY SCOPED get_current_user()
+    override (restored in `finally`, matching the pattern
+    test_analyze_unified.py's own setup_module()/teardown_module() use at
+    the whole-module level) supplies just enough of a real identity to
+    reach the 422 check -- this file otherwise has no JWT-mocking harness
+    of its own, and doesn't need one for its own actual job (discovery's
+    query logic, not auth plumbing).
+    """
+    api.app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(user_id=TEST_VIEWER)
+    try:
+        response = client.get("/discover", params={"min_sps": 200})
+        expect(response.status_code == 422, f"Expected 422 for out-of-range min_sps, got {response.status_code}")
 
-    response = client.get("/discover", params={"sort": "not_a_real_sort"})
-    expect(response.status_code == 422, f"Expected 422 for an invalid sort value, got {response.status_code}")
+        response = client.get("/discover", params={"sort": "not_a_real_sort"})
+        expect(response.status_code == 422, f"Expected 422 for an invalid sort value, got {response.status_code}")
+    finally:
+        api.app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_limit_is_bounded() -> None:
-    rows = discover_startups(limit=999_999)
+    rows = _discover(limit=999_999)
     expect(
         len(rows) <= MAX_DISCOVERY_LIMIT,
         f"discover_startups() must clamp limit to MAX_DISCOVERY_LIMIT, got {len(rows)} rows",
     )
 
-    response = client.get("/discover", params={"limit": 999_999})
-    expect(response.status_code == 422, f"Expected 422 for an out-of-bounds limit, got {response.status_code}")
+    # See test_invalid_numeric_bounds_fail_cleanly_api_layer's own comment
+    # for why a real (if fake-identity) authenticated request is needed to
+    # reach this 422 check at all now.
+    api.app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(user_id=TEST_VIEWER)
+    try:
+        response = client.get("/discover", params={"limit": 999_999})
+        expect(response.status_code == 422, f"Expected 422 for an out-of-bounds limit, got {response.status_code}")
+    finally:
+        api.app.dependency_overrides.pop(get_current_user, None)
 
 
-# --- 18: discovery endpoint is public ---------------------------------------
+# --- 18: discovery endpoint now requires auth --------------------------------
 
 
-def test_discovery_endpoint_is_public() -> None:
+def test_discovery_endpoint_now_requires_auth() -> None:
+    """
+    Portfolio Release Task 3B -- Secure Analysis Visibility: /discover and
+    /discover/filter-options are no longer public (approved decision -- no
+    public scores-only exception). Just the anonymous-rejection half here
+    -- the authenticated-success half, through the real route with a real
+    token, is test_security_hardening.py's test_discovery_now_requires_auth;
+    this file's own job is discovery's query logic, not auth plumbing.
+    """
     response = client.get("/discover")
-    expect(response.status_code == 200, f"Expected 200 with no auth, got {response.status_code}")
+    expect(response.status_code == 401, f"Expected 401 with no auth, got {response.status_code}")
 
     response = client.get("/discover/filter-options")
-    expect(response.status_code == 200, f"Expected 200 with no auth, got {response.status_code}")
+    expect(response.status_code == 401, f"Expected 401 with no auth, got {response.status_code}")
 
 
 # --- 19: saved-startup behavior remains user-isolated -----------------------
@@ -412,7 +463,7 @@ def test_rankings_behavior_remains_unchanged() -> None:
     there too, with the SAME resolved (latest, 95.0) score Discovery
     resolves -- proving Discovery didn't fork a second definition of
     "current startup"."""
-    rankings = get_rankings()
+    rankings = get_rankings(TEST_VIEWER, True)
     matching = [row for row in rankings if row["company_name"] == f"{TEST_PREFIX} Repeat"]
 
     expect(len(matching) == 1, f"Expected the test startup to appear exactly once in Rankings, got {len(matching)}")
@@ -440,7 +491,7 @@ TESTS = [
     test_sorting_newest,
     test_invalid_numeric_bounds_fail_cleanly_api_layer,
     test_limit_is_bounded,
-    test_discovery_endpoint_is_public,
+    test_discovery_endpoint_now_requires_auth,
     test_saved_startup_behavior_remains_user_isolated,
     test_rankings_behavior_remains_unchanged,
 ]

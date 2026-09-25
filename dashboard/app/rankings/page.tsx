@@ -1,97 +1,17 @@
-"use client";
+import { auth } from "@clerk/nextjs/server";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import RankingsView from "./RankingsView";
 
-import PageHeader from "@/components/layout/PageHeader";
-import RankingsTable from "@/components/rankings/RankingsTable";
-import ErrorMessage from "@/components/ui/ErrorMessage";
-import Skeleton from "@/components/ui/Skeleton";
+// Portfolio Release Task 3B -- Secure Analysis Visibility: Rankings is no
+// longer public (approved decision -- no public scores-only exception).
+// Same server-wrapper auth pattern as app/analyze/page.tsx: auth.protect()
+// is the real, resource-based, server-side gate, redirecting a signed-out
+// visitor to /sign-in itself. This protects the FRONTEND route only --
+// GET /rankings on the backend enforces its own auth independently (see
+// app/auth.py's RequireAuth), so a direct API call without a token still
+// can't reach the data either way.
+export default async function RankingsPage() {
+  await auth.protect();
 
-import { getRankings } from "@/lib/api";
-
-import type { RankingEntry } from "@/types";
-
-export default function RankingsPage() {
-  const [rankings, setRankings] = useState<RankingEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadRankings() {
-      try {
-        setIsLoading(true);
-        setError(null);
-
-        const data = await getRankings();
-
-        if (isMounted) {
-          setRankings(data);
-        }
-      } catch (error) {
-        console.error("Failed to load rankings:", error);
-
-        if (isMounted) {
-          setError("The rankings could not be loaded.");
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    loadRankings();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  return (
-    <>
-      <PageHeader
-        title="Rankings"
-        subtitle="See how real startups compare — and what's driving their scores."
-        action={
-          <Link
-            href="/search"
-            className="text-sm font-semibold text-primary hover:text-primary-hover"
-          >
-            Advanced search &amp; compare →
-          </Link>
-        }
-      />
-
-      {isLoading ? (
-        // Phase 10.11, Part 8/12: Design System V2's own Skeleton --
-        // this was still the pre-migration hardcoded slate-800/900
-        // (dark-only) box, invisible on a light background.
-        <Skeleton className="h-96 w-full" />
-      ) : error ? (
-        <ErrorMessage>
-          <h2 className="font-semibold text-danger">Unable to load rankings</h2>
-          <p className="mt-2 text-sm text-danger/80">{error}</p>
-        </ErrorMessage>
-      ) : (
-        <>
-          <RankingsTable rankings={rankings} />
-
-          {/* Phase 10.11, Part 19: a restrained contextual bridge back
-              into Build -- Explore should inspire builders, not only
-              serve investors. Existing route only. */}
-          {rankings.length > 0 ? (
-            <p className="mt-6 text-center text-sm text-text-secondary">
-              Inspired by what you see?{" "}
-              <Link href="/idea-lab" className="font-semibold text-primary hover:text-primary-hover">
-                Build your own idea →
-              </Link>
-            </p>
-          ) : null}
-        </>
-      )}
-    </>
-  );
+  return <RankingsView />;
 }

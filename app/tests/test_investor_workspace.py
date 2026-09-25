@@ -134,10 +134,29 @@ def _canonical_methodology(sps: float, pillar_scores: dict | None = None) -> dic
     return methodology
 
 
-def _make_analyzed_startup(name_suffix: str, analyses: list[dict]) -> int:
+def _make_analyzed_startup(name_suffix: str, analyses: list[dict], submitted_by_user_id: str | None = USER_A) -> int:
     """
     Creates a startup with one or more canonical analyses, oldest first.
     Each dict in `analyses` is {"sps": float, "pillars": {...}}.
+
+    Portfolio Release Task 3B -- Secure Analysis Visibility: defaults to
+    USER_A as submitter, since USER_A is this file's overwhelmingly common
+    workspace-viewing user and watching (saving) a startup no longer
+    grants visibility into its analysis content on its own (approved
+    decision, item 5 -- get_watchlist_startups_for_user() had the exact
+    same gap get_saved_startups_for_user() did, now closed the same way).
+    This is a genuine, real product consequence worth being explicit
+    about, not just a test-fixture nuisance: Investor Workspace's original
+    premise -- watching OTHER founders' already-submitted analyses -- is
+    now, correctly, only possible for an analysis's submitter or an
+    approved startup member; an unrelated investor watching a startup they
+    have no other relationship to now sees the watchlist entry with no
+    visible intelligence (latest/previous both None), exactly like the
+    "zero analyses yet" case already handled before this task. See
+    test_watching_without_authorization_shows_no_intelligence below for
+    dedicated coverage of that exact case; every other test in this file
+    passes submitted_by_user_id=USER_A precisely to keep testing SPS-delta
+    computation/ordering/pillar logic, not authorization.
     """
     company_name = f"{TEST_PREFIX} {name_suffix}"
 
@@ -151,6 +170,7 @@ def _make_analyzed_startup(name_suffix: str, analyses: list[dict]) -> int:
             traction_score=None, financial_score=None, overall_score=None, recommendation=None,
             readiness_score=None, readiness_summary=None,
             methodology=_canonical_methodology(entry["sps"], entry.get("pillars")),
+            submitted_by_user_id=submitted_by_user_id,
         )
         # save_analysis persists created_at as now() -- tests that need a
         # deterministic ordering between two analyses rely on real
@@ -241,6 +261,47 @@ def test_another_users_saved_startup_never_leaks() -> None:
         names = [w["company_name"] for w in response.json()["watched_startups"]]
         expect(f"{TEST_PREFIX} NeverLeaks" not in names, "User B must never see User A's saved startup")
         expect(response.json()["overview"]["watched_count"] == 0, "User B's watchlist must be empty")
+    finally:
+        _cleanup()
+
+
+def test_watching_without_authorization_shows_no_intelligence() -> None:
+    """
+    Portfolio Release Task 3B -- Secure Analysis Visibility, approved
+    decision item 5: watching (saving) a startup does not, on its own,
+    grant visibility into its analysis content. USER_B watches a startup
+    only USER_A (the submitter, with no relationship to USER_B) has
+    analyzed -- the watchlist entry must still appear (USER_B's own real
+    saved_startups row), but with no visible SPS/intelligence, never
+    USER_A's private methodology. This is the dedicated regression test
+    for the get_watchlist_startups_for_user() gap this task closed
+    (previously: NO visibility filter at all on the underlying analysis
+    content, only on the watchlist row itself).
+    """
+    _ensure_test_users()
+    startup_id = _make_analyzed_startup("NotAuthorized", [{"sps": 77.0}], submitted_by_user_id=USER_A)
+    try:
+        save_startup_for_user(USER_B, startup_id)
+        with _patched_auth():
+            response = client.get("/investor/workspace", headers=_auth_headers(USER_B))
+
+        body = response.json()
+        watched = next(w for w in body["watched_startups"] if w["startup_id"] == startup_id)
+
+        expect(watched is not None, "USER_B's own watchlist entry must still appear")
+        expect(
+            watched["has_canonical_analysis"] is False,
+            f"Expected has_canonical_analysis=False for an analysis USER_B is not authorized to see, "
+            f"got {watched['has_canonical_analysis']!r}",
+        )
+        expect(
+            watched["current_sps"] is None,
+            f"Expected no visible current_sps, got {watched['current_sps']!r}",
+        )
+        expect(
+            watched["previous_sps"] is None,
+            f"Expected no visible previous_sps either, got {watched['previous_sps']!r}",
+        )
     finally:
         _cleanup()
 
@@ -517,10 +578,16 @@ def test_comparison_continues_to_use_canonical_startup_id() -> None:
         with _patched_auth():
             workspace = client.get("/investor/workspace", headers=_auth_headers(USER_A)).json()
 
-        ids_in_workspace = {w["startup_id"] for w in workspace["watched_startups"]}
-        expect({startup_a, startup_b} <= ids_in_workspace, "Both watched startup_ids must be present")
+            ids_in_workspace = {w["startup_id"] for w in workspace["watched_startups"]}
+            expect({startup_a, startup_b} <= ids_in_workspace, "Both watched startup_ids must be present")
 
-        response = client.get("/compare", params={"startups": f"{startup_a},{startup_b}"})
+            # Portfolio Release Task 3B: /compare now requires auth
+            # (approved decision) -- USER_A is the submitter of both
+            # analyses (see _make_analyzed_startup's own default), so is
+            # authorized to compare them.
+            response = client.get(
+                "/compare", params={"startups": f"{startup_a},{startup_b}"}, headers=_auth_headers(USER_A)
+            )
         expect(response.status_code == 200, f"Expected 200: {response.text}")
         resolved_ids = {row["startup_id"] for row in response.json()["startups"]}
         expect({startup_a, startup_b} <= resolved_ids, "Compare must resolve the exact same canonical startup_ids Investor Workspace uses")
@@ -633,6 +700,9 @@ def test_sps_history_remains_unchanged() -> None:
 
 
 def test_rankings_remain_unchanged() -> None:
+    # Portfolio Release Task 3B: /rankings now requires auth (approved
+    # decision) -- USER_A is the submitter (see _make_analyzed_startup's
+    # own default), so is authorized to see it in Rankings.
     _ensure_test_users()
     startup_id = _make_analyzed_startup("NoRankingsChange", [{"sps": 55.0}])
     company_name = f"{TEST_PREFIX} NoRankingsChange"
@@ -640,7 +710,8 @@ def test_rankings_remain_unchanged() -> None:
         save_startup_for_user(USER_A, startup_id)
 
         def _score():
-            rows = client.get("/rankings").json()
+            with _patched_auth():
+                rows = client.get("/rankings", headers=_auth_headers(USER_A)).json()
             matches = [r for r in rows if r.get("company_name") == company_name]
             return matches[0]["overall_score"] if matches else None
 
@@ -654,6 +725,8 @@ def test_rankings_remain_unchanged() -> None:
 
 
 def test_discovery_remains_unchanged() -> None:
+    # Portfolio Release Task 3B: /discover now requires auth (approved
+    # decision) -- USER_A is the submitter, so is authorized to see it.
     _ensure_test_users()
     startup_id = _make_analyzed_startup("NoDiscoveryChange", [{"sps": 55.0}])
     company_name = f"{TEST_PREFIX} NoDiscoveryChange"
@@ -661,7 +734,10 @@ def test_discovery_remains_unchanged() -> None:
         save_startup_for_user(USER_A, startup_id)
 
         def _score():
-            rows = client.get("/discover", params={"query": company_name}).json()["results"]
+            with _patched_auth():
+                rows = client.get(
+                    "/discover", params={"query": company_name}, headers=_auth_headers(USER_A)
+                ).json()["results"]
             matches = [r for r in rows if r.get("company_name") == company_name]
             return matches[0]["overall_score"] if matches else None
 
@@ -760,6 +836,7 @@ TESTS = [
     test_zero_saved_startups_returns_honest_empty_result,
     test_only_current_users_saved_startups_returned,
     test_another_users_saved_startup_never_leaks,
+    test_watching_without_authorization_shows_no_intelligence,
     test_current_sps_resolves_from_latest_canonical_analysis,
     test_single_analysis_has_no_fake_delta,
     test_multiple_analyses_gets_correct_sps_delta,

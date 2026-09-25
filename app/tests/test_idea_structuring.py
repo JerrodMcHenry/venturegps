@@ -488,8 +488,12 @@ def test_canonical_population_unaffected_by_structuring_calls() -> None:
     with engine.begin() as connection:
         before_startups = connection.execute(text("SELECT COUNT(*) FROM startups")).scalar()
         before_analyses = connection.execute(text("SELECT COUNT(*) FROM analyses")).scalar()
-    before_rankings = len(get_rankings())
-    before_discovery = len(discover_startups())
+    # Portfolio Release Task 3B: get_rankings()/discover_startups() now
+    # require a viewer to scope by -- an admin bypass here so this
+    # population-count sanity check keeps seeing the full population,
+    # unaffected by the new, orthogonal authorization feature.
+    before_rankings = len(get_rankings("__task3b_sanity_admin__", True))
+    before_discovery = len(discover_startups("__task3b_sanity_admin__", True))
 
     fake = _minimal_fake_response()
     with _patched_llm(fake), _patched_auth():
@@ -502,8 +506,8 @@ def test_canonical_population_unaffected_by_structuring_calls() -> None:
 
     expect(after_startups == before_startups, "startups count must be unaffected by idea structuring")
     expect(after_analyses == before_analyses, "analyses count must be unaffected by idea structuring")
-    expect(len(get_rankings()) == before_rankings, "Rankings population must be unaffected")
-    expect(len(discover_startups()) == before_discovery, "Discovery population must be unaffected")
+    expect(len(get_rankings("__task3b_sanity_admin__", True)) == before_rankings, "Rankings population must be unaffected")
+    expect(len(discover_startups("__task3b_sanity_admin__", True)) == before_discovery, "Discovery population must be unaffected")
 
 
 TESTS = [

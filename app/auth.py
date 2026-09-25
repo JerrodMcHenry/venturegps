@@ -194,6 +194,22 @@ def _resolve_admin_user_ids() -> list[str]:
     return [user_id.strip() for user_id in raw.split(",") if user_id.strip()]
 
 
+def is_admin(user_id: str) -> bool:
+    """
+    Portfolio Release Task 3B -- Secure Analysis Visibility. A plain
+    boolean check, reusing _resolve_admin_user_ids() exactly as
+    require_admin() does -- for routes that are RequireAuth-gated (any
+    signed-in user may call them) but need to know, in addition, whether
+    THIS signed-in caller happens to be an admin, as one of several ways
+    to be authorized to see an analysis (see
+    app/database/db.py's _analysis_visibility_clause()). Never a
+    dependency itself -- require_admin()/RequireAdmin remain the only way
+    to REQUIRE admin status; this only lets an already-authenticated
+    caller be granted extra visibility if they also happen to have it.
+    """
+    return user_id in _resolve_admin_user_ids()
+
+
 def require_admin(current_user: AuthenticatedUser = RequireAuth) -> AuthenticatedUser:
     """
     FastAPI dependency: reuses get_current_user() for JWT verification

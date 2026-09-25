@@ -123,7 +123,7 @@ def _canonical_methodology(sps: float = 70.0) -> dict:
     }
 
 
-def _make_analyzed_startup(name_suffix: str) -> int:
+def _make_analyzed_startup(name_suffix: str, submitted_by_user_id: str | None = None, sps: float = 70.0) -> int:
     company_name = f"{TEST_PREFIX} {name_suffix}"
     save_analysis(
         company_text=f"Test company text for {company_name}",
@@ -133,7 +133,8 @@ def _make_analyzed_startup(name_suffix: str) -> int:
         market_score=None, team_score=None, product_score=None, competition_score=None,
         traction_score=None, financial_score=None, overall_score=None, recommendation=None,
         readiness_score=None, readiness_summary=None,
-        methodology=_canonical_methodology(),
+        methodology=_canonical_methodology(sps),
+        submitted_by_user_id=submitted_by_user_id,
     )
     return get_or_create_startup(company_name)
 
@@ -384,6 +385,81 @@ def test_multiple_users_each_see_only_their_own_startup() -> None:
         _cleanup()
 
 
+# --- 9b-9d: final security review -- membership is not a general grant ------
+#
+# Found and fixed during the Task 3B pre-commit security review:
+# get_founder_startup_workspace() picked the latest analysis for a
+# startup_id by RequireStartupMember-verified membership alone, with no
+# reference to submitted_by_user_id at all -- so an approved member could
+# read a *different* member's privately-submitted analysis of the same
+# startup, the exact cross-user confidentiality bug
+# _analysis_visibility_clause() was tightened to prevent everywhere else.
+# These tests cover the two members sharing one startup_memberships-
+# gated startup, which the earlier single-owner tests above never
+# exercised (their fixtures only ever created NULL-owner analyses).
+
+
+def test_approved_member_cannot_read_another_members_private_analysis() -> None:
+    _ensure_test_users()
+    startup_id = _make_analyzed_startup("SharedPrivate", submitted_by_user_id=USER_A, sps=91.0)
+    try:
+        _grant_membership(USER_A, startup_id)
+        _grant_membership(USER_B, startup_id)  # also approved -- not the submitter
+
+        with _patched_auth():
+            response = client.get(f"/founder/startups/{startup_id}", headers=_auth_headers(USER_B))
+        expect(response.status_code == 200, f"Expected 200 (workspace still resolves): {response.text}")
+
+        body = response.json()
+        expect(
+            body["methodology"] is None,
+            "An approved member who did not submit the analysis must not see another member's private "
+            f"analysis content -- got methodology={body['methodology']!r}",
+        )
+        expect(body["sps_history"] == [], "The other member's private analysis must not appear in sps_history either")
+    finally:
+        _cleanup()
+
+
+def test_submitting_founder_still_sees_their_own_report_via_workspace() -> None:
+    _ensure_test_users()
+    startup_id = _make_analyzed_startup("SubmitterAccess", submitted_by_user_id=USER_A, sps=91.0)
+    try:
+        _grant_membership(USER_A, startup_id)
+
+        with _patched_auth():
+            response = client.get(f"/founder/startups/{startup_id}", headers=_auth_headers(USER_A))
+        expect(response.status_code == 200, f"Expected 200: {response.text}")
+
+        body = response.json()
+        expect(body["methodology"] is not None, "The submitter must still see their own just-submitted report")
+        expect(body["methodology"]["startup_intelligence_score"] == 91.0, "The submitter's real score must be returned")
+        expect(len(body["sps_history"]) == 1, "The submitter's own analysis must appear in their own sps_history")
+    finally:
+        _cleanup()
+
+
+def test_approved_member_still_sees_historical_null_owner_analysis() -> None:
+    """Preserving existing founder access: a member who did NOT submit a
+    historical (pre-migration, NULL-owner) analysis must still see it --
+    only a real, different submitter blocks visibility, not membership
+    itself."""
+    _ensure_test_users()
+    startup_id = _make_analyzed_startup("HistoricalStillVisible", submitted_by_user_id=None, sps=55.0)
+    try:
+        _grant_membership(USER_B, startup_id)  # never submitted anything
+
+        with _patched_auth():
+            response = client.get(f"/founder/startups/{startup_id}", headers=_auth_headers(USER_B))
+        expect(response.status_code == 200, f"Expected 200: {response.text}")
+
+        body = response.json()
+        expect(body["methodology"] is not None, "A historical NULL-owner analysis must remain visible to an approved member")
+        expect(body["methodology"]["startup_intelligence_score"] == 55.0, "The historical score must be returned")
+    finally:
+        _cleanup()
+
+
 def test_unanalyzed_startup_never_fabricates_intelligence() -> None:
     _ensure_test_users()
     startup_id = _make_unanalyzed_startup("NeverAnalyzed")
@@ -434,6 +510,9 @@ TESTS = [
     test_saved_startup_does_not_authorize_workspace,
     test_modeled_venture_does_not_authorize_workspace,
     test_multiple_users_each_see_only_their_own_startup,
+    test_approved_member_cannot_read_another_members_private_analysis,
+    test_submitting_founder_still_sees_their_own_report_via_workspace,
+    test_approved_member_still_sees_historical_null_owner_analysis,
     test_unanalyzed_startup_never_fabricates_intelligence,
     test_workspace_access_creates_no_membership_side_effects,
 ]

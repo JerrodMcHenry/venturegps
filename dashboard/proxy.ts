@@ -43,7 +43,27 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 // enforcement is app/investor/page.tsx's own auth.protect() PLUS the
 // backend's RequireAuth (not RequireStartupMember -- Investor Workspace
 // is personal, not membership-gated).
-const isProtectedRoute = createRouteMatcher(["/analyze(.*)", "/saved(.*)", "/idea-lab(.*)", "/founder(.*)", "/investor(.*)"]);
+//
+// Portfolio Release Task 3B -- Secure Analysis Visibility: /startup,
+// /rankings, /search, /compare added -- all four were public until this
+// task (approved decision: no public scores-only exception). Same UX-only
+// redirect; real enforcement is each page's own auth.protect() PLUS the
+// backend's own independent auth + the submitter/approved-member/admin
+// visibility rule (app/auth.py, app/database/db.py's
+// _analysis_visibility_clause()) -- this route-matcher redirect has no
+// bearing on WHICH analyses a signed-in user may see, only on whether
+// these routes are reachable at all while signed out.
+const isProtectedRoute = createRouteMatcher([
+  "/analyze(.*)",
+  "/saved(.*)",
+  "/idea-lab(.*)",
+  "/founder(.*)",
+  "/investor(.*)",
+  "/startup(.*)",
+  "/rankings(.*)",
+  "/search(.*)",
+  "/compare(.*)",
+]);
 
 export default clerkMiddleware(async (auth, req) => {
   if (isProtectedRoute(req)) {

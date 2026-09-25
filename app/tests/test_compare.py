@@ -20,6 +20,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 import app.api as api
+import app.auth as auth
+from app.auth import AuthenticatedUser, get_current_user
 from app.ai.sie_v2_methodology import METHODOLOGY_VERSION
 from app.database.db import (
     MAX_COMPARISON_STARTUPS,
@@ -31,6 +33,54 @@ from app.database.db import (
 )
 
 TEST_PREFIX = "ZZTest Compare"
+# Portfolio Release Task 3B -- Secure Analysis Visibility:
+# get_startups_for_comparison()/get_rankings() now require a viewer to
+# scope by. This file's own job is comparison's dedup/ordering/pillar-
+# preservation logic -- not the authorization feature itself, which has
+# its own dedicated coverage in test_analysis_visibility.py and
+# test_security_hardening.py's test_compare_now_requires_auth. Every
+# DB-layer call below goes through an ADMIN viewer (bypasses the
+# visibility filter entirely) so existing assertions keep testing exactly
+# what they always tested. The API-layer (client.get("/compare", ...))
+# tests instead use a scoped get_current_user() override (see main()) for
+# the same reason test_discovery.py's own two API-layer tests do.
+TEST_VIEWER = "zztest_compare_admin_viewer"
+
+
+def _compare(ids: list[int]) -> list[dict]:
+    return get_startups_for_comparison(ids, TEST_VIEWER, True)
+
+
+class _authenticated_as_viewer:
+    """Scoped get_current_user() override for the API-layer (client.get)
+    tests below -- restored on exit even on failure, same shape as
+    test_discovery.py's own two inline overrides, pulled into a small
+    reusable context manager here since more call sites need it in this
+    file.
+
+    Also patches app.auth._resolve_admin_user_ids() so TEST_VIEWER is
+    recognized as an admin through the REAL is_admin() call app.api.compare()
+    makes -- overriding get_current_user() alone is not enough: this
+    file's own _compare() DB-layer helper passes viewer_is_admin=True as a
+    literal, but the real HTTP route resolves admin status for real (the
+    same real ADMIN_USER_IDS-backed check every other authenticated route
+    uses), and this test environment has no real ADMIN_USER_IDS set.
+    Without this, TEST_VIEWER would be a genuine non-admin with no
+    submitted analyses and no memberships -- correctly seeing nothing,
+    which would make these tests fail for the RIGHT reason (the
+    authorization fix working) while trying to test something else
+    (comparison's own dedup/bounding/shape logic)."""
+
+    def __enter__(self) -> "_authenticated_as_viewer":
+        self._orig_resolve_admins = auth._resolve_admin_user_ids
+        api.app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(user_id=TEST_VIEWER)
+        auth._resolve_admin_user_ids = lambda: [TEST_VIEWER]
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        api.app.dependency_overrides.pop(get_current_user, None)
+        auth._resolve_admin_user_ids = self._orig_resolve_admins
+        return False
 
 
 def expect(condition: bool, message: str) -> None:
@@ -162,7 +212,7 @@ def _cleanup() -> None:
 def test_compare_two_valid_canonical_startups() -> None:
     ids = _seed_two()
     try:
-        rows = get_startups_for_comparison(ids)
+        rows = _compare(ids)
         expect(len(rows) == 2, f"Expected 2 rows, got {len(rows)}")
     finally:
         _cleanup()
@@ -175,7 +225,7 @@ def test_compare_four_valid_startups() -> None:
         _save(name, _methodology(80.0))
         ids.append(get_or_create_startup(name))
     try:
-        rows = get_startups_for_comparison(ids)
+        rows = _compare(ids)
         expect(len(rows) == 4, f"Expected 4 rows, got {len(rows)}")
     finally:
         _cleanup()
@@ -184,7 +234,8 @@ def test_compare_four_valid_startups() -> None:
 def test_one_startup_produces_useful_response_api_layer() -> None:
     ids = _seed_two()
     try:
-        response = client.get("/compare", params={"startups": str(ids[0])})
+        with _authenticated_as_viewer():
+            response = client.get("/compare", params={"startups": str(ids[0])})
         expect(response.status_code == 400, f"Expected 400 for a single id, got {response.status_code}")
         expect(
             "at least" in response.json()["detail"].lower(),
@@ -201,7 +252,8 @@ def test_more_than_four_startups_bounded_api_layer() -> None:
         _save(name, _methodology(80.0))
         ids.append(get_or_create_startup(name))
     try:
-        response = client.get("/compare", params={"startups": ",".join(str(i) for i in ids)})
+        with _authenticated_as_viewer():
+            response = client.get("/compare", params={"startups": ",".join(str(i) for i in ids)})
         expect(response.status_code == 200, f"Expected 200 (bounded, not rejected), got {response.status_code}")
         body = response.json()
         expect(
@@ -218,7 +270,7 @@ def test_more_than_four_startups_bounded_api_layer() -> None:
 def test_duplicate_ids_deduplicated_safely() -> None:
     ids = _seed_two()
     try:
-        rows = get_startups_for_comparison([ids[0], ids[1], ids[0]])
+        rows = _compare([ids[0], ids[1], ids[0]])
         expect(len(rows) == 2, f"Expected exactly 2 rows after dedup, got {len(rows)}")
     finally:
         _cleanup()
@@ -227,10 +279,11 @@ def test_duplicate_ids_deduplicated_safely() -> None:
 def test_invalid_startup_id_handled_cleanly() -> None:
     ids = _seed_two()
     try:
-        rows = get_startups_for_comparison([ids[0], 999_999_999, ids[1]])
+        rows = _compare([ids[0], 999_999_999, ids[1]])
         expect(len(rows) == 2, f"Expected the 2 valid rows, invalid id silently dropped; got {len(rows)}")
 
-        response = client.get("/compare", params={"startups": f"{ids[0]},999999999,{ids[1]}"})
+        with _authenticated_as_viewer():
+            response = client.get("/compare", params={"startups": f"{ids[0]},999999999,{ids[1]}"})
         expect(response.status_code == 200, f"Expected 200, got {response.status_code}")
         expect(
             response.json()["missing_startup_ids"] == [999999999],
@@ -245,7 +298,7 @@ def test_legacy_analysis_excluded() -> None:
     _save(name, _methodology(99.0, version="1.0"))
     startup_id = get_or_create_startup(name)
     try:
-        rows = get_startups_for_comparison([startup_id])
+        rows = _compare([startup_id])
         expect(len(rows) == 0, f"A non-canonical analysis must never resolve; got {rows}")
     finally:
         _cleanup()
@@ -257,7 +310,7 @@ def test_latest_canonical_analysis_selected() -> None:
     startup_id = get_or_create_startup(name)
     _save(name, _methodology(95.0))
     try:
-        rows = get_startups_for_comparison([startup_id])
+        rows = _compare([startup_id])
         expect(len(rows) == 1, f"Expected exactly one row, got {len(rows)}")
         expect(
             rows[0]["methodology"]["startup_intelligence_score"] == 95.0,
@@ -274,7 +327,7 @@ def test_startup_returned_once() -> None:
     _save(name, _methodology(60.0))
     _save(name, _methodology(70.0))
     try:
-        rows = get_startups_for_comparison([startup_id])
+        rows = _compare([startup_id])
         matching = [r for r in rows if r["startup_id"] == startup_id]
         expect(len(matching) == 1, f"A startup with 3 analyses must appear exactly once, got {len(matching)}")
     finally:
@@ -287,7 +340,8 @@ def test_startup_returned_once() -> None:
 def test_pillar_scores_preserved() -> None:
     ids = _seed_two()
     try:
-        response = client.get("/compare", params={"startups": f"{ids[0]},{ids[1]}"})
+        with _authenticated_as_viewer():
+            response = client.get("/compare", params={"startups": f"{ids[0]},{ids[1]}"})
         body = response.json()
         alpha = next(s for s in body["startups"] if s["startup_id"] == ids[0])
         expect(alpha["market"]["score"] == 9.0, f"Expected Alpha's market score 9.0, got {alpha['market']['score']!r}")
@@ -317,7 +371,8 @@ def test_unavailable_pillar_and_dimension_remain_unavailable() -> None:
     startup_id = get_or_create_startup(name)
     ids = _seed_two()
     try:
-        response = client.get("/compare", params={"startups": f"{startup_id},{ids[0]}"})
+        with _authenticated_as_viewer():
+            response = client.get("/compare", params={"startups": f"{startup_id},{ids[0]}"})
         body = response.json()
         target = next(s for s in body["startups"] if s["startup_id"] == startup_id)
 
@@ -342,10 +397,10 @@ def test_sps_matches_rankings() -> None:
     _save(name, _methodology(66.6))
     startup_id = get_or_create_startup(name)
     try:
-        rows = get_startups_for_comparison([startup_id])
+        rows = _compare([startup_id])
         compare_sps = rows[0]["methodology"]["startup_intelligence_score"]
 
-        rankings = get_rankings()
+        rankings = get_rankings(TEST_VIEWER, True)
         ranking_row = next(r for r in rankings if r["company_name"] == name)
 
         expect(
@@ -356,14 +411,32 @@ def test_sps_matches_rankings() -> None:
         _cleanup()
 
 
-# --- 13: public endpoint -----------------------------------------------------
+# --- 13: endpoint now requires auth ------------------------------------------
 
 
-def test_compare_endpoint_is_public() -> None:
+def test_compare_endpoint_now_requires_auth() -> None:
+    """
+    Portfolio Release Task 3B -- Secure Analysis Visibility: /compare is no
+    longer public (approved decision -- no public scores-only exception,
+    and explicit startup ids must not bypass authorization). Anonymous
+    access is rejected; an authenticated caller can still compare startups
+    they're authorized to see (here, via the admin-equivalent TEST_VIEWER,
+    same as every other API-layer test in this file).
+    """
     ids = _seed_two()
     try:
-        response = client.get("/compare", params={"startups": f"{ids[0]},{ids[1]}"})
-        expect(response.status_code == 200, f"Expected 200 with no auth, got {response.status_code}")
+        anonymous_response = client.get("/compare", params={"startups": f"{ids[0]},{ids[1]}"})
+        expect(
+            anonymous_response.status_code == 401,
+            f"Expected anonymous /compare access to require auth, got {anonymous_response.status_code}",
+        )
+
+        with _authenticated_as_viewer():
+            authenticated_response = client.get("/compare", params={"startups": f"{ids[0]},{ids[1]}"})
+        expect(
+            authenticated_response.status_code == 200,
+            f"Expected an authenticated caller to reach /compare, got {authenticated_response.status_code}",
+        )
     finally:
         _cleanup()
 
@@ -375,7 +448,7 @@ def test_input_order_preserved() -> None:
     ids = _seed_two()  # [Alpha, Beta]
     reversed_ids = [ids[1], ids[0]]
     try:
-        rows = get_startups_for_comparison(reversed_ids)
+        rows = _compare(reversed_ids)
         expect(
             [r["startup_id"] for r in rows] == reversed_ids,
             f"Expected order {reversed_ids}, got {[r['startup_id'] for r in rows]}",
@@ -384,16 +457,24 @@ def test_input_order_preserved() -> None:
         _cleanup()
 
 
-# --- 15: no auth/user dependency ---------------------------------------------
+# --- 15: auth dependency present ----------------------------------------------
 
 
-def test_no_auth_dependency_introduced() -> None:
+def test_auth_dependency_present() -> None:
+    """
+    Portfolio Release Task 3B supersedes this test's original assertion
+    ("GET /compare must never depend on RequireAuth -- it's public
+    intelligence") -- that product decision changed (approved decision:
+    no public scores-only exception). Flipped to confirm the dependency
+    IS now present, as a structural regression guard against it silently
+    being removed again later.
+    """
     import inspect
 
     signature = inspect.signature(api.compare)
     expect(
-        "current_user" not in signature.parameters,
-        "GET /compare must never depend on RequireAuth -- it's public intelligence",
+        "current_user" in signature.parameters,
+        "GET /compare must depend on RequireAuth -- comparison is scoped to the caller's own authorized analyses",
     )
 
 
@@ -420,9 +501,9 @@ TESTS = [
     test_pillar_scores_preserved,
     test_unavailable_pillar_and_dimension_remain_unavailable,
     test_sps_matches_rankings,
-    test_compare_endpoint_is_public,
+    test_compare_endpoint_now_requires_auth,
     test_input_order_preserved,
-    test_no_auth_dependency_introduced,
+    test_auth_dependency_present,
 ]
 
 

@@ -91,6 +91,20 @@ const FEEDBACK_MAILTO =
 // destinations themselves changed (same routes, same auth); this menu's
 // only remaining job is genuinely account-scoped actions Clerk itself
 // doesn't already provide a home for.
+// Milestone 1, Task 1 -- Unify Navigation, correction: an "Evidence review" -> /admin/v2-review link was
+// briefly added here, shown unconditionally to every signed-in user. That was wrong: this menu has no way to
+// tell an admin from any other signed-in user before the click, so showing it to everyone advertised an
+// admin-only tool to non-admins as if it were theirs to use. The fix is not to gate the link on some
+// client-side admin check -- there is no trusted, server-verified admin capability exposed to the frontend to
+// gate it on. ADMIN_USER_IDS is explicitly backend-only (app/auth.py: "Never exposed to the frontend... no
+// endpoint returns its value") and no /me-style endpoint or Clerk claim mirrors it. Inferring admin status
+// from anything the client already has (email address, Clerk publicMetadata, etc.) would duplicate the
+// backend's own authorization rule in a second, unsynchronized place -- worse than not showing a link at all.
+// Introducing a new backend endpoint just to answer "am I admin" is also out of scope for this task. So: no
+// link here for now. Admins reach /admin/v2-review directly by URL, same as before this menu entry ever
+// existed; the page's own auth.protect() (app/admin/v2-review/page.tsx) and the backend's RequireAdmin on
+// every /admin/v2-review/* call (app/v2_review_api.py) are both completely unchanged and remain the only real
+// boundary. Revisit once a trusted, server-verified "is this user an admin" signal actually exists.
 export default function PersonalMenu() {
   return (
     <UserButton appearance={{ elements: { userButtonAvatarBox: "size-9" } }}>

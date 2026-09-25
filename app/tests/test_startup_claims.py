@@ -726,14 +726,35 @@ def test_claim_lifecycle_never_modifies_analyses_or_sps() -> None:
         _cleanup()
 
 
-# --- 32: public intelligence remains public ---------------------------------
+# --- 32: intelligence endpoints now require auth -----------------------------
 
 
-def test_public_intelligence_endpoints_remain_public() -> None:
-    expect(client.get("/rankings").status_code == 200, "/rankings must remain public")
-    expect(client.get("/discover").status_code == 200, "/discover must remain public")
-    expect(len(get_rankings()) >= 0, "get_rankings() must still run")
-    expect(len(discover_startups()) >= 0, "discover_startups() must still run")
+def test_intelligence_endpoints_now_require_auth() -> None:
+    """
+    Portfolio Release Task 3B -- Secure Analysis Visibility supersedes this
+    test's original "remain public" assertion (approved decision: no
+    public scores-only exception). /rankings and /discover now require
+    auth; an authenticated admin (this file's own existing fixture) can
+    still reach them.
+    """
+    _ensure_test_users()
+    with _patched_auth():
+        expect(client.get("/rankings").status_code == 401, "/rankings must require auth")
+        expect(client.get("/discover").status_code == 401, "/discover must require auth")
+
+        expect(
+            client.get("/rankings", headers=_auth_headers(ADMIN_USER)).status_code == 200,
+            "An authenticated caller must still reach /rankings",
+        )
+        expect(
+            client.get("/discover", headers=_auth_headers(ADMIN_USER)).status_code == 200,
+            "An authenticated caller must still reach /discover",
+        )
+
+    # DB-layer: admin bypass, same reasoning as this file's other
+    # unrelated-to-authorization sanity checks.
+    expect(len(get_rankings("__task3b_sanity_admin__", True)) >= 0, "get_rankings() must still run")
+    expect(len(discover_startups("__task3b_sanity_admin__", True)) >= 0, "discover_startups() must still run")
 
 
 # --- Phase 32A -- Trust-State Consistency ------------------------------------
@@ -961,7 +982,7 @@ TESTS = [
     test_approval_race_cannot_create_duplicate_memberships,
     test_claim_submission_never_modifies_saved_startups,
     test_claim_lifecycle_never_modifies_analyses_or_sps,
-    test_public_intelligence_endpoints_remain_public,
+    test_intelligence_endpoints_now_require_auth,
     test_graduation_relationship_exposes_venture_graduation,
     test_reviewed_claim_exposes_manual_review,
     test_founder_managed_never_reads_as_manual_review,

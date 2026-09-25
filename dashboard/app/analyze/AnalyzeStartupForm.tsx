@@ -662,6 +662,22 @@ export default function AnalyzeStartupForm() {
             SIE combines everything you give it into one analysis.
           </p>
 
+          {/* Portfolio Release Task 3B -- Secure Analysis Visibility.
+              Analyses are now private by default (approved decision):
+              GET /startup/{name} and every intelligence surface (Rankings,
+              Discovery, Search, Compare, history) are scoped server-side
+              to the submitter, an approved startup member, or an admin --
+              never anyone else, signed in or not. This replaces the
+              earlier, now-inaccurate assumption that a submitted analysis
+              becomes a public URL; it's the opposite by default. See
+              app/database/db.py::_analysis_visibility_clause() for the
+              enforced rule this disclosure describes. */}
+          <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-text-secondary">
+            <span className="font-semibold text-text-primary">Private by default.</span>{" "}
+            Only you can see this analysis, unless you later claim the startup and add other
+            approved members -- including anything from an uploaded pitch deck.
+          </p>
+
           {error ? (
             <ErrorMessage
               action={

@@ -2,10 +2,11 @@ import type { DiscoveryFilterOptions, DiscoveryFilters, DiscoveryResponse } from
 
 import { apiFetch } from "./client";
 
-// Startup Discovery V1. Both endpoints are public -- no token option here,
-// unlike lib/api/savedStartups.ts -- exploring the canonical startup
-// universe is intelligence, same as Rankings/Search/Startup Profile, not a
-// paid or personalized action.
+// Portfolio Release Task 3B -- Secure Analysis Visibility: both endpoints
+// now require auth and return only the caller's own authorized analyses
+// (approved decision -- no public scores-only exception). `token` is
+// required, not optional, on both -- there is no public/unauthenticated
+// way to call either endpoint anymore.
 
 function buildDiscoveryQueryString(filters: DiscoveryFilters): string {
   const params = new URLSearchParams();
@@ -23,13 +24,15 @@ function buildDiscoveryQueryString(filters: DiscoveryFilters): string {
 }
 
 export function discoverStartups(
-  filters: DiscoveryFilters = {}
+  filters: DiscoveryFilters = {},
+  token: string | null
 ): Promise<DiscoveryResponse> {
   return apiFetch<DiscoveryResponse>(
-    `/discover${buildDiscoveryQueryString(filters)}`
+    `/discover${buildDiscoveryQueryString(filters)}`,
+    { token }
   );
 }
 
-export function getDiscoveryFilterOptions(): Promise<DiscoveryFilterOptions> {
-  return apiFetch<DiscoveryFilterOptions>("/discover/filter-options");
+export function getDiscoveryFilterOptions(token: string | null): Promise<DiscoveryFilterOptions> {
+  return apiFetch<DiscoveryFilterOptions>("/discover/filter-options", { token });
 }

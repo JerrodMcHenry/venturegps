@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
 
 import { getSPSHistory, getStartupProfile } from "@/lib/api";
 
@@ -43,10 +44,11 @@ function decodeCompanyNameParam(id: string): string {
 }
 
 async function loadStartupProfile(
-  id: string
+  id: string,
+  token: string | null
 ): Promise<StartupProfileResponse | null> {
   try {
-    return await getStartupProfile(id);
+    return await getStartupProfile(id, token);
   } catch (error) {
     if (isNotFoundError(error)) {
       return null;
@@ -59,15 +61,35 @@ async function loadStartupProfile(
 // SPS History is supplementary to the profile, not core to it — any
 // failure here (network hiccup, etc.) degrades to an empty history rather
 // than breaking the page.
-async function loadSPSHistory(id: string): Promise<SPSHistoryPoint[]> {
+async function loadSPSHistory(id: string, token: string | null): Promise<SPSHistoryPoint[]> {
   try {
-    return await getSPSHistory(id);
+    return await getSPSHistory(id, token);
   } catch {
     return [];
   }
 }
 
 export default async function StartupProfilePage({ params }: Props) {
+  // Portfolio Release Task 3B -- Secure Analysis Visibility: this route was
+  // fully public (no auth at all) -- confirmed by the read-only audit as
+  // the headline leak vector (a signed-in user's uploaded pitch deck could
+  // end up quoted, verbatim, in methodology evidence, returned here to
+  // anyone, no login required). auth.protect() is the real, resource-based,
+  // server-side gate (redirects a signed-out visitor to /sign-in itself);
+  // GET /startup/{name} on the backend enforces its own auth AND the real
+  // submitter/member/admin visibility rule independently (app/auth.py,
+  // app/database/db.py's _analysis_visibility_clause()) -- this page-level
+  // check alone cannot and does not decide who may see which analysis.
+  //
+  // This stays a Server Component (unlike Founder Workspace's client-side
+  // useAuth().getToken() pattern, which exists because that page has its
+  // own separate interactive-client reasons) -- Clerk's own server-side
+  // auth().getToken() is the correct, idiomatic way for a Server Component
+  // to obtain a token to forward to an external API call.
+  await auth.protect();
+  const { getToken } = await auth();
+  const token = await getToken();
+
   const { id } = await params;
   const companyName = decodeCompanyNameParam(id);
 
@@ -78,8 +100,8 @@ export default async function StartupProfilePage({ params }: Props) {
   // SPS-history request it didn't need -- a small, one-time cost on a
   // rare path, in exchange for materially faster loads on the common one.
   const [startup, history] = await Promise.all([
-    loadStartupProfile(companyName),
-    loadSPSHistory(companyName),
+    loadStartupProfile(companyName, token),
+    loadSPSHistory(companyName, token),
   ]);
 
   if (!startup) {

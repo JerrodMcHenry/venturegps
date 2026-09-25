@@ -763,13 +763,18 @@ def test_missions_never_appear_in_rankings_or_discovery() -> None:
             venture = _create_venture(USER_A, name=venture_name)
             _create_mission(venture["id"], USER_A, title="Ranked mission check")
 
-        rankings = get_rankings()
+        # Portfolio Release Task 3B: get_rankings()/discover_startups() now
+        # require a viewer to scope by -- passed here as an admin bypass
+        # ("__task3b_sanity_admin__", True) purely so this population-
+        # isolation check keeps seeing the full population, unaffected by
+        # the new, orthogonal authorization feature this test isn't about.
+        rankings = get_rankings("__task3b_sanity_admin__", True)
         expect(
             all(row["company_name"] != venture_name for row in rankings),
             "A venture with missions must still never appear in Rankings",
         )
 
-        discovery = discover_startups()
+        discovery = discover_startups("__task3b_sanity_admin__", True)
         expect(
             all(row["company_name"] != venture_name for row in discovery),
             "A venture with missions must still never appear in Discovery",

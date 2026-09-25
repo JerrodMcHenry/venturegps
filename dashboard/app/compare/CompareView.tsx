@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 
 import BaseCard from "@/components/ui/BaseCard";
 import ComparisonHeader from "@/components/compare/ComparisonHeader";
@@ -57,6 +58,11 @@ export default function CompareView() {
   const [startups, setStartups] = useState<ComparisonStartup[]>([]);
   const [missingIds, setMissingIds] = useState<number[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  // Portfolio Release Task 3B -- Secure Analysis Visibility: GET /compare
+  // now requires auth and resolves only startup_ids this caller is
+  // authorized to see (approved decision -- explicit IDs must not bypass
+  // authorization).
+  const { getToken } = useAuth();
 
   useEffect(() => {
     let isMounted = true;
@@ -76,7 +82,8 @@ export default function CompareView() {
       }
 
       try {
-        const response = await compareStartups(requestedIds);
+        const token = await getToken();
+        const response = await compareStartups(requestedIds, token);
 
         if (isMounted) {
           setStartups(response.startups);
@@ -100,7 +107,7 @@ export default function CompareView() {
     // requestedIdsKey is the real dependency (a stable string derived from
     // the URL); requestedIds itself is a fresh array every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedIdsKey]);
+  }, [requestedIdsKey, getToken]);
 
   function removeStartup(startupId: number) {
     const remaining = requestedIds.filter((id) => id !== startupId);

@@ -585,13 +585,14 @@ def test_modeled_venture_never_appears_in_rankings_or_discovery() -> None:
             response = client.post("/ventures", json=_create_venture_body(name=venture_name), headers=_auth_headers(USER_A))
             expect(response.status_code == 200, f"Create failed: {response.text}")
 
-        rankings = get_rankings()
+        # Portfolio Release Task 3B: admin bypass, unrelated to this test.
+        rankings = get_rankings("__task3b_sanity_admin__", True)
         expect(
             all(row["company_name"] != venture_name for row in rankings),
             "A modeled venture must never appear in Rankings",
         )
 
-        discovery = discover_startups()
+        discovery = discover_startups("__task3b_sanity_admin__", True)
         expect(
             all(row["company_name"] != venture_name for row in discovery),
             "A modeled venture must never appear in Discovery",
@@ -675,20 +676,46 @@ def test_api_never_accepts_client_controlled_user_id() -> None:
 
 
 def test_canonical_behavior_and_public_endpoints_unaffected() -> None:
-    before_rankings = len(get_rankings())
-    before_discovery = len(discover_startups())
+    # Portfolio Release Task 3B: get_rankings()/discover_startups() now
+    # require a viewer to scope by -- admin bypass here, unrelated to this
+    # test's own job (Idea Lab isolation from canonical intelligence).
+    before_rankings = len(get_rankings("__task3b_sanity_admin__", True))
+    before_discovery = len(discover_startups("__task3b_sanity_admin__", True))
 
     _ensure_test_users()
     try:
         with _patched_auth():
             client.post("/ventures", json=_create_venture_body(), headers=_auth_headers(USER_A))
 
-        expect(len(get_rankings()) == before_rankings, "Rankings population must be unaffected by Idea Lab activity")
-        expect(len(discover_startups()) == before_discovery, "Discovery population must be unaffected by Idea Lab activity")
+        expect(
+            len(get_rankings("__task3b_sanity_admin__", True)) == before_rankings,
+            "Rankings population must be unaffected by Idea Lab activity",
+        )
+        expect(
+            len(discover_startups("__task3b_sanity_admin__", True)) == before_discovery,
+            "Discovery population must be unaffected by Idea Lab activity",
+        )
 
-        expect(client.get("/rankings").status_code == 200, "/rankings must remain public")
-        expect(client.get("/discover").status_code == 200, "/discover must remain public")
-        expect(client.get("/compare", params={"startups": "1,2"}).status_code in (200, 400), "/compare must remain public")
+        # Portfolio Release Task 3B supersedes the original "remain public"
+        # assertion (approved decision: no public scores-only exception) --
+        # /rankings and /discover now require auth; any authenticated
+        # caller (USER_A here) can still reach them.
+        with _patched_auth():
+            expect(client.get("/rankings").status_code == 401, "/rankings must require auth")
+            expect(client.get("/discover").status_code == 401, "/discover must require auth")
+            expect(
+                client.get("/rankings", headers=_auth_headers(USER_A)).status_code == 200,
+                "An authenticated caller must still reach /rankings",
+            )
+            expect(
+                client.get("/discover", headers=_auth_headers(USER_A)).status_code == 200,
+                "An authenticated caller must still reach /discover",
+            )
+            expect(client.get("/compare", params={"startups": "1,2"}).status_code == 401, "/compare must require auth")
+            expect(
+                client.get("/compare", params={"startups": "1,2"}, headers=_auth_headers(USER_A)).status_code in (200, 400),
+                "An authenticated caller must still reach /compare",
+            )
     finally:
         _cleanup()
 

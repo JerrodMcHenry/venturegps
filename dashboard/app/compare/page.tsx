@@ -1,15 +1,22 @@
 import { Suspense } from "react";
+import { auth } from "@clerk/nextjs/server";
 
 import PageHeader from "@/components/layout/PageHeader";
 
 import CompareView from "./CompareView";
 
-// Compare Startups V1: public, no auth gate -- comparing canonical
-// intelligence is the same kind of public intelligence as Discovery/
-// Rankings/Startup Profile (Part 15). CompareView reads comparison state
-// from the URL via useSearchParams(), a Client Component hook -- same
-// Suspense-boundary reasoning as app/search/page.tsx.
-export default function ComparePage() {
+// Portfolio Release Task 3B -- Secure Analysis Visibility supersedes this
+// route's original "public, no auth gate" comment (approved decision --
+// no public scores-only exception). auth.protect() is the same real,
+// resource-based, server-side gate used throughout this app; GET /compare
+// on the backend enforces its own auth AND resolves explicit startup_ids
+// only if the caller is authorized for them, independently either way.
+// CompareView reads comparison state from the URL via useSearchParams(),
+// a Client Component hook -- same Suspense-boundary reasoning as
+// app/search/page.tsx.
+export default async function ComparePage() {
+  await auth.protect();
+
   return (
     <>
       <PageHeader

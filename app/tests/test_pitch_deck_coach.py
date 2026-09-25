@@ -533,7 +533,7 @@ def test_pitch_deck_review_lifecycle() -> None:
             before_analyses = connection.execute(text("SELECT COUNT(*) FROM analyses")).scalar()
             before_ventures = connection.execute(text("SELECT COUNT(*) FROM modeled_ventures")).scalar()
             before_memberships = connection.execute(text("SELECT COUNT(*) FROM startup_memberships")).scalar()
-        before_rankings = len(get_rankings())
+        before_rankings = len(get_rankings("__task3b_sanity_admin__", True))  # Portfolio Release Task 3B: admin bypass, unrelated to this test
 
         with _patched_auth():
             response = _upload_review(USER_A, SAMPLE_DECK_PAGES, filename="rideshare_deck.pdf")
@@ -589,7 +589,7 @@ def test_pitch_deck_review_lifecycle() -> None:
             after_analyses = connection.execute(text("SELECT COUNT(*) FROM analyses")).scalar()
             after_ventures = connection.execute(text("SELECT COUNT(*) FROM modeled_ventures")).scalar()
             after_memberships = connection.execute(text("SELECT COUNT(*) FROM startup_memberships")).scalar()
-        after_rankings = len(get_rankings())
+        after_rankings = len(get_rankings("__task3b_sanity_admin__", True))
 
         expect(after_startups == before_startups, "A pitch deck review must never create a startups row")
         expect(after_analyses == before_analyses, "A pitch deck review must never create an analyses row (no SPS path)")

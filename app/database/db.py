@@ -230,6 +230,54 @@ def add_startup_id_column():
         print("startup_id migration skipped", e)
 
 
+def add_analysis_submitted_by_column():
+    """
+    Portfolio Release Task 3B -- Secure Analysis Visibility. Nullable,
+    additive, same pattern as every other add_*_column() here. References
+    users(id) (ON DELETE SET NULL, not CASCADE -- a deleted user's past
+    analyses stay in place, they simply lose their recorded submitter,
+    same end state as any other historical NULL row below).
+
+    MUST run after create_users_table() (the FK target) -- see the call
+    order in app/api.py's migration sequence.
+
+    Deliberately never backfilled: every row that existed before this
+    migration has, and will always have, submitted_by_user_id = NULL.
+    That is not a bug to fix later -- app/auth.py's analysis-visibility
+    rule (see user_can_view_analysis()) treats a NULL-owner row as visible
+    only to an approved startup_memberships holder or an admin, never to
+    an unauthenticated caller and never to an arbitrary signed-in
+    "submitter" match (there is no submitter recorded to match). No
+    existing row is deleted, rewritten, or reinterpreted -- this migration
+    only adds a column that future INSERTs populate.
+
+    The accompanying index exists because every read path this task adds
+    (GET /startup/{name}, rankings, discovery, comparison, search, score
+    history) now filters on this column (see
+    app/database/db.py's _analysis_visibility_clause()) in addition to
+    startup_id, which already had its own FK (and therefore implicit)
+    index-friendly access pattern from get_or_create_startup().
+    """
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "ALTER TABLE analyses ADD COLUMN submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL"
+            ))
+        print("submitted_by_user_id column added")
+    except Exception as e:
+        print("submitted_by_user_id migration skipped", e)
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "CREATE INDEX IF NOT EXISTS analyses_submitted_by_user_id_idx "
+                "ON analyses (submitted_by_user_id)"
+            ))
+        print("analyses_submitted_by_user_id_idx index created")
+    except Exception as e:
+        print("analyses_submitted_by_user_id_idx migration skipped", e)
+
+
 def create_users_table():
     with engine.begin() as connection:
         connection.execute(text("""
@@ -716,6 +764,65 @@ def get_startup_memberships_for_user(user_id: str):
         return [dict(row) for row in result.mappings().all()]
 
 
+def _analysis_visibility_clause(table_alias: str = "") -> str:
+    """
+    Portfolio Release Task 3B -- Secure Analysis Visibility. A SQL boolean
+    condition: TRUE iff the analysis row (from `table_alias` or bare
+    `analyses` if no alias) is visible to the calling viewer. Every query
+    that uses this must bind two parameters alongside its own:
+    :viewer_user_id (the caller's verified Clerk user_id -- every route
+    that reaches these functions is RequireAuth-gated, so this is never
+    NULL in practice) and :viewer_is_admin (a plain bool, from
+    app.auth.is_admin(current_user.user_id) at the call site).
+
+    CORRECTED (final security review, before commit): approved startup
+    membership is NOT a general grant. It only ever substitutes for a
+    missing submitter on a historical row. A live analysis someone else
+    submitted stays private to that submitter -- being an approved member
+    of the same startup is not enough to read it. Two tiers:
+
+      1. the analysis's own submitter (submitted_by_user_id = :viewer_user_id)
+         always sees it, regardless of anyone else's membership.
+      2. a row with submitted_by_user_id IS NULL (every analysis that
+         existed before this migration -- see
+         add_analysis_submitted_by_column(), never backfilled) has no
+         submitter to match, so it falls back to the pre-migration rule:
+         visible to an approved member of the associated startup (a live
+         startup_memberships row for (:viewer_user_id, this row's
+         startup_id)). This is what "preserving existing founder access"
+         means -- it applies ONLY to NULL-owner rows, never to a row with
+         a real submitted_by_user_id that isn't :viewer_user_id.
+      3. an admin (:viewer_is_admin) always sees it, bypassing 1 and 2.
+
+    The previous version of this clause let branch 2 (membership) apply
+    unconditionally to every row, submitter or not -- meaning any approved
+    member of a startup could read a private analysis a *different* member
+    submitted about that same startup. That was the cross-user
+    confidentiality bug this correction fixes. Saved startups, watchlists,
+    and company-name matches were never and are still never a branch of
+    this clause -- they carry no visibility grant of their own.
+
+    This clause is deliberately placed INSIDE each query's own WHERE
+    clause, before any ROW_NUMBER()/DISTINCT ON "pick the latest" logic --
+    never applied as a post-fetch filter in Python -- so "the latest
+    analysis" always means "the latest analysis this viewer is authorized
+    to see," not "the globally latest one, access-checked afterward" (the
+    latter would incorrectly hide a viewer's own analysis behind a
+    stranger's newer, inaccessible one for the same company).
+    """
+    prefix = f"{table_alias}." if table_alias else ""
+    return f"""(
+        :viewer_is_admin
+        OR {prefix}submitted_by_user_id = :viewer_user_id
+        OR (
+            {prefix}submitted_by_user_id IS NULL
+            AND {prefix}startup_id IN (
+                SELECT startup_id FROM startup_memberships WHERE user_id = :viewer_user_id
+            )
+        )
+    )"""
+
+
 def user_has_startup_membership(user_id: str, startup_id: int) -> bool:
     """
     The single question every founder-only authorization check reduces
@@ -775,6 +882,25 @@ def get_founder_startup_workspace(startup_id: int, user_id: str):
     routing signal, distinct from the unfiltered `graduated_from_venture`
     acknowledgment below. Never used to re-check startup membership
     itself (that remains RequireStartupMember's job).
+
+    CORRECTED (final security review, before commit): `user_id` is now
+    ALSO used to filter which analyses this function will ever return.
+    Before this fix, both queries below selected across every analysis
+    for this startup_id with no owner check at all -- so an approved
+    member (RequireStartupMember only confirms membership, not submitter
+    identity) could see another member's privately-submitted analysis
+    just by opening Founder Workspace for a shared startup, the exact
+    cross-user confidentiality bug this review targets, via a path that
+    doesn't go through _analysis_visibility_clause() at all. The filter
+    mirrors that clause's own two tiers, inlined rather than reused,
+    because membership is already an established precondition of reaching
+    this function (RequireStartupMember already ran) so there's no need
+    to re-derive it with a startup_memberships subquery here:
+    submitted_by_user_id = :user_id (their own submission) OR
+    submitted_by_user_id IS NULL (a historical row -- preserved,
+    unchanged, exactly "existing founder access"). A row another member
+    submitted is skipped by both queries, same as everywhere else this
+    policy applies.
     """
     with engine.begin() as connection:
         startup_row = connection.execute(text("""
@@ -789,9 +915,10 @@ def get_founder_startup_workspace(startup_id: int, user_id: str):
             FROM analyses
             WHERE startup_id = :startup_id
               AND methodology IS NOT NULL
+              AND (submitted_by_user_id = :user_id OR submitted_by_user_id IS NULL)
             ORDER BY created_at DESC, id DESC
             LIMIT 1
-        """), {"startup_id": startup_id}).mappings().first()
+        """), {"startup_id": startup_id, "user_id": user_id}).mappings().first()
 
         history_rows = connection.execute(text("""
             SELECT
@@ -801,8 +928,9 @@ def get_founder_startup_workspace(startup_id: int, user_id: str):
             FROM analyses
             WHERE startup_id = :startup_id
               AND methodology IS NOT NULL
+              AND (submitted_by_user_id = :user_id OR submitted_by_user_id IS NULL)
             ORDER BY created_at ASC, id ASC
-        """), {"startup_id": startup_id}).mappings().all()
+        """), {"startup_id": startup_id, "user_id": user_id}).mappings().all()
 
     methodology = None
     created_at = None
@@ -1479,7 +1607,7 @@ def is_startup_saved_by_user(user_id: str, startup_id: int) -> bool:
         return result.first() is not None
 
 
-def get_saved_startups_for_user(user_id: str):
+def get_saved_startups_for_user(user_id: str, viewer_is_admin: bool = False):
     """
     One row per startup this user has saved, most-recently-saved first.
     Each row's intelligence fields (industry, stage, overall_score,
@@ -1499,9 +1627,23 @@ def get_saved_startups_for_user(user_id: str):
     still appears in the list -- with null intelligence fields -- rather
     than silently vanishing from a list the user explicitly built. No
     field here is ever fabricated to fill the gap.
+
+    Portfolio Release Task 3B: saving/bookmarking a startup is NOT
+    ownership and must not grant report access (approved decision, item
+    5) -- the LATERAL subquery below is scoped by
+    _analysis_visibility_clause() to THIS user (the viewer, who is also
+    `user_id` here -- this endpoint only ever lists the caller's own saved
+    list), so a startup someone else privately analyzed more recently than
+    any analysis the viewer can see now correctly falls back to the
+    viewer's own latest AUTHORIZED analysis (or null intelligence fields,
+    same as the "zero canonical analyses" case above) instead of silently
+    surfacing another user's private score/industry/stage. Before this
+    fix, the LATERAL subquery had no visibility filter at all and always
+    picked the platform-wide latest analysis regardless of who submitted
+    it -- a real, separate leak from the one GET /startup/{name} closes.
     """
     with engine.begin() as connection:
-        result = connection.execute(text("""
+        result = connection.execute(text(f"""
             SELECT
                 ss.startup_id AS startup_id,
                 ss.created_at AS saved_at,
@@ -1522,6 +1664,7 @@ def get_saved_startups_for_user(user_id: str):
                 WHERE analyses.startup_id = ss.startup_id
                   AND methodology IS NOT NULL
                   AND methodology->'analysis_context'->>'methodology_version' = :methodology_version
+                  AND {_analysis_visibility_clause()}
                 ORDER BY created_at DESC, id DESC
                 LIMIT 1
             ) latest ON true
@@ -1530,6 +1673,8 @@ def get_saved_startups_for_user(user_id: str):
         """), {
             "user_id": user_id,
             "methodology_version": METHODOLOGY_VERSION,
+            "viewer_user_id": user_id,
+            "viewer_is_admin": viewer_is_admin,
         })
 
         rows = result.mappings().all()
@@ -1660,32 +1805,48 @@ def save_score_history(
     print("Score history saved successfully.")
 
 
-def get_score_history(company_name: str):
+def get_score_history(company_name: str, viewer_user_id: str, viewer_is_admin: bool):
+    """
+    Portfolio Release Task 3B: score_history has no ownership of its own
+    (it's legacy, dead-write-path data -- nothing has written to it since
+    Phase 10.1B, see app/api.py's own comment on save_score_history()) but
+    every row's analysis_id references the analyses row it came from, so
+    visibility is resolved via a JOIN to that row's submitted_by_user_id/
+    startup_id (an INNER JOIN -- a score_history row whose analysis_id is
+    NULL, or whose analyses row no longer exists, has no owner to check
+    and is simply excluded, never shown to anyone including an admin; this
+    is a known, accepted limitation of very old rows, not a new gap this
+    task introduces).
+    """
     search_term = f"%{company_name}%"
 
     with engine.begin() as connection:
-        result = connection.execute(text("""
+        result = connection.execute(text(f"""
             SELECT
-                id,
-                analysis_id,
-                company_name,
-                industry,
-                stage,
-                business_model,
-                market_score,
-                team_score,
-                product_score,
-                competition_score,
-                traction_score,
-                financial_score,
-                overall_score,
-                readiness_score,
-                created_at
-            FROM score_history
-            WHERE company_name ILIKE :search_term
-            ORDER BY created_at ASC
+                sh.id AS id,
+                sh.analysis_id AS analysis_id,
+                sh.company_name AS company_name,
+                sh.industry AS industry,
+                sh.stage AS stage,
+                sh.business_model AS business_model,
+                sh.market_score AS market_score,
+                sh.team_score AS team_score,
+                sh.product_score AS product_score,
+                sh.competition_score AS competition_score,
+                sh.traction_score AS traction_score,
+                sh.financial_score AS financial_score,
+                sh.overall_score AS overall_score,
+                sh.readiness_score AS readiness_score,
+                sh.created_at AS created_at
+            FROM score_history sh
+            JOIN analyses a ON a.id = sh.analysis_id
+            WHERE sh.company_name ILIKE :search_term
+              AND {_analysis_visibility_clause("a")}
+            ORDER BY sh.created_at ASC
         """), {
-            "search_term": search_term
+            "search_term": search_term,
+            "viewer_user_id": viewer_user_id,
+            "viewer_is_admin": viewer_is_admin,
         })
 
         rows = result.mappings().all()
@@ -1693,8 +1854,8 @@ def get_score_history(company_name: str):
     return [dict(row) for row in rows]
 
 
-def get_startup_trends(company_name: str):
-    history = get_score_history(company_name)
+def get_startup_trends(company_name: str, viewer_user_id: str, viewer_is_admin: bool):
+    history = get_score_history(company_name, viewer_user_id, viewer_is_admin)
 
     if len(history) == 0:
         return {
@@ -1827,8 +1988,23 @@ def save_analysis(
     readiness_summary,
     methodology,
     startup_id=None,
+    submitted_by_user_id=None,
 ):
     """
+    Portfolio Release Task 3B -- Secure Analysis Visibility. submitted_by_user_id
+    is the verified Clerk user_id of whoever is submitting THIS analysis --
+    POST /analyze passes current_user.user_id here for every analysis it
+    creates (not just founder-targeted ones), now that the column exists
+    (see add_analysis_submitted_by_column()). Optional and defaults to
+    None only so this function's other, non-HTTP callers (calibration,
+    the reliability harness, tests) don't all need updating in the same
+    change -- every real product path that creates an analysis has a
+    verified user_id available and should pass it. A None value here
+    produces exactly the same "historical NULL-owner" row the pre-Task-3B
+    schema always produced, visible only to an approved startup member or
+    an admin (see app/auth.py::user_can_view_analysis()) -- never treated
+    as "public" or "nobody's problem."
+
     Phase 7.2.1 -- Deterministic Founder Re-analysis: startup_id is an
     OPTIONAL authoritative override, meant only for a caller that has
     ALREADY verified the current user is a real member of that exact
@@ -1920,6 +2096,7 @@ def save_analysis(
             INSERT INTO analyses (
                 company_name,
                 startup_id,
+                submitted_by_user_id,
                 company_text,
                 summary,
                 risk_analysis,
@@ -1950,6 +2127,7 @@ def save_analysis(
             VALUES (
                 :company_name,
                 :startup_id,
+                :submitted_by_user_id,
                 :company_text,
                 :summary,
                 :risk_analysis,
@@ -1982,6 +2160,7 @@ def save_analysis(
         """), {
             "company_name": company_name,
             "startup_id": resolved_startup_id,
+            "submitted_by_user_id": submitted_by_user_id,
             "company_text": company_text,
             "summary": summary,
             "risk_analysis": risk_analysis,
@@ -2014,7 +2193,7 @@ def save_analysis(
 
         
 
-def search_analyses(query: str):
+def search_analyses(query: str, viewer_user_id: str, viewer_is_admin: bool):
     """
     P0 Product Trust Cleanup: search results must represent unique
     startups backed by their latest CANONICAL Methodology v2 analysis --
@@ -2027,11 +2206,22 @@ def search_analyses(query: str):
     (methodology.startup_intelligence_score, not the legacy overall_score
     column) have changed; the match behavior and result shape the frontend
     consumes (company_name, summary, overall_score) are unchanged.
+
+    Portfolio Release Task 3B: scoped by _analysis_visibility_clause(),
+    applied inside the WHERE that feeds DISTINCT ON -- so "the latest
+    canonical result per company" means the caller's own latest
+    authorized one, not the platform's globally-latest analysis of that
+    company regardless of who submitted it. This also closes the "does
+    company_text contain phrase X" probing risk noted in the read-only
+    audit: full-text matching against company_text/summary/etc. now only
+    ever runs against rows this viewer is already authorized to read in
+    full, so a match can never reveal more than the viewer could already
+    see by opening that startup's own profile.
     """
     search_term = f"%{query}%"
 
     with engine.begin() as connection:
-        result = connection.execute(text("""
+        result = connection.execute(text(f"""
             SELECT
                 company_name,
                 summary,
@@ -2048,6 +2238,7 @@ def search_analyses(query: str):
                     AND methodology->'analysis_context'->>'methodology_version' = :methodology_version
                     AND company_name IS NOT NULL
                     AND TRIM(company_name) <> ''
+                    AND {_analysis_visibility_clause()}
                     AND (
                         company_text ILIKE :search_term
                         OR company_name ILIKE :search_term
@@ -2071,6 +2262,8 @@ def search_analyses(query: str):
         """), {
             "search_term": search_term,
             "methodology_version": METHODOLOGY_VERSION,
+            "viewer_user_id": viewer_user_id,
+            "viewer_is_admin": viewer_is_admin,
         })
 
         rows = result.mappings().all()
@@ -2132,8 +2325,23 @@ def get_analysis_by_id(analysis_id):
     return parse_structured_analysis(row)
 
 
-def get_startup_by_name(company_name: str):
+def get_startup_by_name(company_name: str, viewer_user_id: str, viewer_is_admin: bool):
     """
+    Portfolio Release Task 3B -- Secure Analysis Visibility. viewer_user_id/
+    viewer_is_admin are REQUIRED (no default) -- every caller of this
+    function must resolve them from a verified, authenticated identity
+    first (this function has no way to check that itself). The main
+    analyses query below is now scoped by _analysis_visibility_clause(),
+    applied BEFORE `ORDER BY ... LIMIT 1` picks "the latest" -- so a
+    viewer who is authorized to see SOME but not ALL analyses of a given
+    company name sees their own latest authorized one, never a stranger's
+    newer, inaccessible analysis silently taking priority (see that
+    function's own docstring). The `startups`-only fallback below (a
+    company that exists but has no analysis at all) carries zero analysis
+    content -- no methodology, no text -- so it stays visible to any
+    authenticated caller regardless of ownership; there is nothing
+    confidential in "this company exists and hasn't been analyzed yet."
+
     Note: the `id` field returned here is analyses.id (the specific
     analysis row), not startups.id -- that naming predates the canonical
     Startup entity and is left alone since existing consumers
@@ -2169,7 +2377,7 @@ def get_startup_by_name(company_name: str):
     normalized_company_name = company_name.strip()
 
     with engine.begin() as connection:
-        result = connection.execute(text("""
+        result = connection.execute(text(f"""
             SELECT
                 id,
                 startup_id,
@@ -2180,10 +2388,13 @@ def get_startup_by_name(company_name: str):
             WHERE LOWER(TRIM(company_name)) =
                   LOWER(TRIM(:company_name))
               AND methodology IS NOT NULL
+              AND {_analysis_visibility_clause()}
             ORDER BY created_at DESC, id DESC
             LIMIT 1
         """), {
-            "company_name": normalized_company_name
+            "company_name": normalized_company_name,
+            "viewer_user_id": viewer_user_id,
+            "viewer_is_admin": viewer_is_admin,
         })
 
         row = result.mappings().first()
@@ -2221,7 +2432,7 @@ def get_startup_by_name(company_name: str):
     return startup
 
 
-def get_sps_history(company_name: str):
+def get_sps_history(company_name: str, viewer_user_id: str, viewer_is_admin: bool):
     """
     Canonical SPS history for a company, sourced from the methodology
     JSONB rather than the legacy score_history table.
@@ -2234,11 +2445,18 @@ def get_sps_history(company_name: str):
     pre-canonical data, at the cost of most companies currently having
     zero or one point until more analyses are run under the current
     methodology.
+
+    Portfolio Release Task 3B: scoped by _analysis_visibility_clause() --
+    a viewer's SPS-history line only ever plots points from analyses of
+    this company THEY are authorized to see (their own, or an approved
+    member's), never every analysis anyone has ever submitted for a
+    company with this name. viewer_user_id/viewer_is_admin are required,
+    same contract as get_startup_by_name().
     """
     normalized_company_name = company_name.strip()
 
     with engine.begin() as connection:
-        result = connection.execute(text("""
+        result = connection.execute(text(f"""
             SELECT
                 id,
                 created_at,
@@ -2247,9 +2465,12 @@ def get_sps_history(company_name: str):
             WHERE LOWER(TRIM(company_name)) =
                   LOWER(TRIM(:company_name))
               AND methodology IS NOT NULL
+              AND {_analysis_visibility_clause()}
             ORDER BY created_at ASC, id ASC
         """), {
-            "company_name": normalized_company_name
+            "company_name": normalized_company_name,
+            "viewer_user_id": viewer_user_id,
+            "viewer_is_admin": viewer_is_admin,
         })
 
         rows = result.mappings().all()
@@ -2329,7 +2550,7 @@ def update_analysis(
 
     return updated_count
 
-def get_analytics():
+def get_analytics(viewer_user_id: str, viewer_is_admin: bool):
     """
     Canonical Dashboard MVP: sourced from the exact same canonical
     population get_rankings() computes (latest Methodology v2 analysis per
@@ -2347,8 +2568,12 @@ def get_analytics():
     would mean fabricating a metric, not just re-sourcing one. The
     redundant top_startups sub-list is dropped too: get_top_startups()
     already serves that, from the same canonical population, independently.
+
+    Portfolio Release Task 3B: inherits get_rankings()'s viewer scoping --
+    "total tracked startups"/"average score" now describe this viewer's
+    own authorized population, not the whole platform's.
     """
-    rankings = get_rankings()
+    rankings = get_rankings(viewer_user_id, viewer_is_admin)
 
     scores = [
         row["overall_score"]
@@ -2455,7 +2680,7 @@ def get_industry_analytics():
 
 
 
-def get_rankings():
+def get_rankings(viewer_user_id: str, viewer_is_admin: bool):
     """
     P0 Product Trust Cleanup: rankings must reflect ONLY canonical
     Methodology v2 analyses -- never the legacy flattened score columns,
@@ -2473,9 +2698,16 @@ def get_rankings():
     "One row per startup, latest canonical analysis" is still enforced via
     the same ROW_NUMBER()-over-normalized-company_name pattern as before,
     now scoped to canonical rows only.
+
+    Portfolio Release Task 3B: per the approved decision, Rankings is
+    scoped to this viewer's own authorized analyses (own submissions +
+    approved memberships + admin), not a platform-wide public leaderboard
+    -- _analysis_visibility_clause() is applied inside the WHERE, before
+    ROW_NUMBER() picks "latest," so this is the viewer's own latest
+    authorized analysis per company, never a stranger's newer one.
     """
     with engine.begin() as connection:
-        result = connection.execute(text("""
+        result = connection.execute(text(f"""
             SELECT
                 id,
                 company_name,
@@ -2518,11 +2750,14 @@ def get_rankings():
                     AND methodology->>'startup_intelligence_score' IS NOT NULL
                     AND company_name IS NOT NULL
                     AND TRIM(company_name) <> ''
+                    AND {_analysis_visibility_clause()}
             ) ranked_analyses
             WHERE row_number = 1
             ORDER BY overall_score DESC NULLS LAST, company_name ASC
         """), {
             "methodology_version": METHODOLOGY_VERSION,
+            "viewer_user_id": viewer_user_id,
+            "viewer_is_admin": viewer_is_admin,
         })
 
         rows = result.mappings().all()
@@ -2648,7 +2883,7 @@ def _build_discovery_filters(
     return where_sql, params
 
 
-_DISCOVERY_BASE_CTE = """
+_DISCOVERY_BASE_CTE = f"""
     WITH latest_per_startup AS (
         SELECT
             startup_id,
@@ -2691,13 +2926,23 @@ _DISCOVERY_BASE_CTE = """
                 AND a.methodology->>'startup_intelligence_score' IS NOT NULL
                 AND a.company_name IS NOT NULL
                 AND TRIM(a.company_name) <> ''
+                AND {_analysis_visibility_clause("a")}
         ) ranked
         WHERE row_number = 1
     )
 """
+# Portfolio Release Task 3B: the visibility clause above is baked into
+# this module-level CTE string at import time (it's a fixed SQL fragment
+# containing the :viewer_user_id/:viewer_is_admin placeholders, not
+# literal values -- same as :methodology_version already was) -- so every
+# one of this CTE's three consumers below now REQUIRES viewer_user_id and
+# viewer_is_admin among the params it binds, applied before ROW_NUMBER()
+# picks "latest," same reasoning as get_rankings()/search_analyses().
 
 
 def discover_startups(
+    viewer_user_id: str,
+    viewer_is_admin: bool,
     query: str | None = None,
     industry: str | None = None,
     stage: str | None = None,
@@ -2721,6 +2966,8 @@ def discover_startups(
     )
 
     params["methodology_version"] = METHODOLOGY_VERSION
+    params["viewer_user_id"] = viewer_user_id
+    params["viewer_is_admin"] = viewer_is_admin
     # Defensive bounds even though app/api.py's Query(...) validation
     # already enforces these -- this function is also called directly by
     # tests and is safe to call with untrusted values on its own.
@@ -2744,6 +2991,8 @@ def discover_startups(
 
 
 def count_discover_startups(
+    viewer_user_id: str,
+    viewer_is_admin: bool,
     query: str | None = None,
     industry: str | None = None,
     stage: str | None = None,
@@ -2764,6 +3013,8 @@ def count_discover_startups(
     )
 
     params["methodology_version"] = METHODOLOGY_VERSION
+    params["viewer_user_id"] = viewer_user_id
+    params["viewer_is_admin"] = viewer_is_admin
 
     sql = _DISCOVERY_BASE_CTE + f"""
         SELECT COUNT(*) FROM latest_per_startup
@@ -2774,7 +3025,7 @@ def count_discover_startups(
         return connection.execute(text(sql), params).scalar()
 
 
-def get_discovery_filter_options():
+def get_discovery_filter_options(viewer_user_id: str, viewer_is_admin: bool):
     """
     Startup Discovery V1, Part 4: filter option lists are derived from the
     REAL canonical population, never hardcoded -- so the UI can never offer
@@ -2782,6 +3033,11 @@ def get_discovery_filter_options():
     and automatically grows as more canonical analyses are added. Sourced
     from the exact same canonical population discover_startups() itself
     queries (same methodology_version/startup_id gate), via the shared CTE.
+
+    Portfolio Release Task 3B: same viewer-scoped CTE as discover_startups()
+    -- filter options (which industries/stages/business models to offer)
+    are derived only from analyses this viewer is authorized to see, never
+    the whole platform's.
     """
     sql = _DISCOVERY_BASE_CTE + """
         SELECT
@@ -2793,7 +3049,12 @@ def get_discovery_filter_options():
 
     with engine.begin() as connection:
         row = connection.execute(
-            text(sql), {"methodology_version": METHODOLOGY_VERSION}
+            text(sql),
+            {
+                "methodology_version": METHODOLOGY_VERSION,
+                "viewer_user_id": viewer_user_id,
+                "viewer_is_admin": viewer_is_admin,
+            },
         ).mappings().first()
 
     return {
@@ -2807,7 +3068,7 @@ MIN_COMPARISON_STARTUPS = 2
 MAX_COMPARISON_STARTUPS = 4
 
 
-def get_startups_for_comparison(startup_ids: list[int]):
+def get_startups_for_comparison(startup_ids: list[int], viewer_user_id: str, viewer_is_admin: bool):
     """
     Compare Startups V1. Resolves each of the given canonical startups.id
     values to its own latest canonical (methodology_version-matching)
@@ -2829,6 +3090,15 @@ def get_startups_for_comparison(startup_ids: list[int]):
     returned rows' startup_ids; this function never raises for a
     partially-unresolvable list, since "some ids didn't resolve" is a
     normal, cleanly-representable outcome, not an error.
+
+    Portfolio Release Task 3B: startup_ids here are caller-supplied,
+    explicit IDs (from the /compare?startups=1,2,3 query string) -- exactly
+    the "explicit IDs must not bypass authorization" case. The visibility
+    clause is applied inside the CTE's own WHERE, before ROW_NUMBER() picks
+    "latest," so a startup_id the viewer isn't authorized to see resolves
+    to nothing (indistinguishable from an invalid/nonexistent id in the
+    response shape -- see missing_startup_ids in app/api.py's /compare),
+    never a 403 that would confirm the id refers to something real.
     """
     deduped_ids = list(dict.fromkeys(startup_ids))
 
@@ -2836,7 +3106,7 @@ def get_startups_for_comparison(startup_ids: list[int]):
         return []
 
     with engine.begin() as connection:
-        result = connection.execute(text("""
+        result = connection.execute(text(f"""
             WITH latest_per_startup AS (
                 SELECT
                     a.startup_id AS startup_id,
@@ -2853,6 +3123,7 @@ def get_startups_for_comparison(startup_ids: list[int]):
                     a.startup_id = ANY(:startup_ids)
                     AND a.methodology IS NOT NULL
                     AND a.methodology->'analysis_context'->>'methodology_version' = :methodology_version
+                    AND {_analysis_visibility_clause("a")}
             )
             SELECT startup_id, analysis_id, company_name, created_at, methodology
             FROM latest_per_startup
@@ -2860,6 +3131,8 @@ def get_startups_for_comparison(startup_ids: list[int]):
         """), {
             "startup_ids": deduped_ids,
             "methodology_version": METHODOLOGY_VERSION,
+            "viewer_user_id": viewer_user_id,
+            "viewer_is_admin": viewer_is_admin,
         })
 
         rows = {row["startup_id"]: dict(row) for row in result.mappings().all()}
@@ -2893,7 +3166,7 @@ def get_startups_for_comparison(startup_ids: list[int]):
 # than one query per startup.
 # ---------------------------------------------------------------------------
 
-def get_watchlist_startups_for_user(user_id: str):
+def get_watchlist_startups_for_user(user_id: str, viewer_is_admin: bool = False):
     """
     One entry per startup this user has saved (most-recently-saved first),
     each carrying its own `latest` and `previous` canonical analysis
@@ -2911,9 +3184,25 @@ def get_watchlist_startups_for_user(user_id: str):
       calls out; callers must represent it as "unknown", never as a zero
       delta.
 
-    Ownership is enforced entirely in SQL via `WHERE ss.user_id =
-    :user_id` -- there is no path through this function for one user's
-    watchlist to include another user's saved_startups row.
+    Ownership of the WATCHLIST ITSELF is enforced entirely in SQL via
+    `WHERE ss.user_id = :user_id` -- there is no path through this
+    function for one user's watchlist to include another user's
+    saved_startups row.
+
+    Portfolio Release Task 3B -- Secure Analysis Visibility: watching
+    (saving) a startup is NOT ownership of its analysis content, same
+    principle as get_saved_startups_for_user() (approved decision, item
+    5) -- and this function is a MORE severe instance of that same gap
+    than Saved Startups' own list view: it returns the full methodology
+    JSONB (evidence, rationale, everything), not just a score. The
+    history_rows query below is now scoped by
+    _analysis_visibility_clause(), so a watched startup this user is not
+    otherwise authorized for (not the submitter, not an approved member,
+    not an admin) correctly resolves to latest/previous = None -- the
+    watchlist entry itself still appears (it's the user's own real
+    saved_startups row), just with no visible intelligence, exactly
+    mirroring the "zero canonical analyses yet" case already handled
+    above.
     """
     with engine.begin() as connection:
         saved_rows = connection.execute(text("""
@@ -2932,7 +3221,7 @@ def get_watchlist_startups_for_user(user_id: str):
         history_by_startup: dict[int, list[dict]] = {}
 
         if startup_ids:
-            history_rows = connection.execute(text("""
+            history_rows = connection.execute(text(f"""
                 SELECT startup_id, analysis_id, created_at, methodology, row_number
                 FROM (
                     SELECT
@@ -2949,11 +3238,14 @@ def get_watchlist_startups_for_user(user_id: str):
                         a.startup_id = ANY(:startup_ids)
                         AND a.methodology IS NOT NULL
                         AND a.methodology->'analysis_context'->>'methodology_version' = :methodology_version
+                        AND {_analysis_visibility_clause("a")}
                 ) ranked
                 WHERE row_number <= 2
             """), {
                 "startup_ids": startup_ids,
                 "methodology_version": METHODOLOGY_VERSION,
+                "viewer_user_id": user_id,
+                "viewer_is_admin": viewer_is_admin,
             }).mappings().all()
 
             for row in history_rows:
@@ -5642,7 +5934,7 @@ def get_pitch_deck_review_for_user(user_id: str, review_id: int):
     return _parse_pitch_deck_review_row(dict(row))
 
 
-def get_top_startups(limit: int = 10):
+def get_top_startups(viewer_user_id: str, viewer_is_admin: bool, limit: int = 10):
     """
     Canonical Dashboard MVP: Top Startups reuses get_rankings() directly --
     the exact same canonical population, "latest analysis per startup"
@@ -5650,12 +5942,13 @@ def get_top_startups(limit: int = 10):
     query against the legacy score_history table. Top Startups and
     Rankings can now never disagree about which analyses are eligible or
     which one is "latest" for a given company, because they're the same
-    query.
+    query. Portfolio Release Task 3B: inherits the same viewer-scoping
+    get_rankings() now applies.
     """
-    return get_rankings()[:limit]
+    return get_rankings(viewer_user_id, viewer_is_admin)[:limit]
 
 
-def get_top_improving_startups(limit: int = 10):
+def get_top_improving_startups(viewer_user_id: str, viewer_is_admin: bool, limit: int = 10):
     """
     Canonical Dashboard MVP: sourced ONLY from canonical Methodology v2
     analyses (methodology IS NOT NULL AND methodology_version matches the
@@ -5680,7 +5973,7 @@ def get_top_improving_startups(limit: int = 10):
     quietly including a decline.
     """
     with engine.begin() as connection:
-        result = connection.execute(text("""
+        result = connection.execute(text(f"""
             SELECT
                 company_name,
                 (methodology->>'startup_intelligence_score')::float AS sps,
@@ -5692,9 +5985,12 @@ def get_top_improving_startups(limit: int = 10):
                 AND methodology->>'startup_intelligence_score' IS NOT NULL
                 AND company_name IS NOT NULL
                 AND TRIM(company_name) <> ''
+                AND {_analysis_visibility_clause()}
             ORDER BY LOWER(TRIM(company_name)), created_at ASC, id ASC
         """), {
             "methodology_version": METHODOLOGY_VERSION,
+            "viewer_user_id": viewer_user_id,
+            "viewer_is_admin": viewer_is_admin,
         })
 
         rows = result.mappings().all()

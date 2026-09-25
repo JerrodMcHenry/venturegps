@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 
 import BaseCard from "@/components/ui/BaseCard";
 import DiscoveryResultCard from "@/components/discovery/DiscoveryResultCard";
@@ -226,6 +227,11 @@ export default function DiscoveryView() {
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   const compareSelection = useComparisonSelection();
+  // Portfolio Release Task 3B -- Secure Analysis Visibility: both
+  // endpoints below now require auth and return only this caller's own
+  // authorized analyses (approved decision -- no public scores-only
+  // exception).
+  const { getToken } = useAuth();
 
   // Filter option lists load once -- they're derived from the whole
   // canonical population, not from the current filter selection, so they
@@ -235,7 +241,8 @@ export default function DiscoveryView() {
 
     async function loadFilterOptions() {
       try {
-        const options = await getDiscoveryFilterOptions();
+        const token = await getToken();
+        const options = await getDiscoveryFilterOptions(token);
 
         if (isMounted) {
           setFilterOptions(options);
@@ -251,7 +258,7 @@ export default function DiscoveryView() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [getToken]);
 
   // Refetches whenever the URL (the single source of truth for committed
   // filters) or the local "how many results to show" limit changes.
@@ -268,10 +275,14 @@ export default function DiscoveryView() {
           new URLSearchParams(searchParamsKey)
         );
 
-        const response = await discoverStartups({
-          ...committedFilters,
-          limit,
-        });
+        const token = await getToken();
+        const response = await discoverStartups(
+          {
+            ...committedFilters,
+            limit,
+          },
+          token
+        );
 
         if (isMounted) {
           setResults(response.results);
@@ -293,7 +304,7 @@ export default function DiscoveryView() {
     return () => {
       isMounted = false;
     };
-  }, [searchParamsKey, limit]);
+  }, [searchParamsKey, limit, getToken]);
 
   function updateFilters(next: DiscoveryFilters) {
     const params = filtersToSearchParams(next);

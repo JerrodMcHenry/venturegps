@@ -256,6 +256,37 @@ jobs:
       - name: AI request reliability -- retry/backoff policy (app/tests/test_ai_request_reliability.py)
         run: python -m app.tests.test_ai_request_reliability
 
+      # Portfolio Release Task 3B -- Secure Analysis Visibility. The
+      # authoritative regression coverage for the private-by-default
+      # authorization rule itself (analyses.submitted_by_user_id,
+      # _analysis_visibility_clause()): anonymous/owner/unrelated/approved-
+      # member/admin access, historical NULL-owner rows, company-name
+      # collisions, and indirect disclosure through search/rankings/compare.
+      # Fully offline (no LLM/Tavily calls) and uses the same real-Postgres,
+      # zztest_visibility_*-prefixed, self-cleaning pattern every other file
+      # in this job already uses.
+      - name: Secure analysis visibility -- private-by-default authorization (app/tests/test_analysis_visibility.py)
+        run: python -m app.tests.test_analysis_visibility
+
+      # Portfolio Release Task 3B final security review. Founder Workspace
+      # (GET /founder/startups/{startup_id}, RequireStartupMember-gated)
+      # resolves the latest analysis via its own query in
+      # get_founder_startup_workspace() -- a separate code path that does
+      # NOT go through _analysis_visibility_clause() above, so it needed
+      # its own fix and its own coverage. Includes the cross-user privacy
+      # regression found and fixed in that review:
+      # test_approved_member_cannot_read_another_members_private_analysis
+      # (an approved member of a shared startup must not read a
+      # different member's privately-submitted analysis of it),
+      # test_submitting_founder_still_sees_their_own_report_via_workspace,
+      # and test_approved_member_still_sees_historical_null_owner_analysis
+      # (membership still grants access to a pre-migration NULL-owner
+      # row -- unchanged). Fully offline, same real-Postgres,
+      # zztest_founder_*-prefixed, self-cleaning pattern as every other
+      # file in this job. See docs/portfolio/SECURE_ANALYSIS_VISIBILITY.md.
+      - name: Founder Workspace -- membership authorization, not a general analysis grant (app/tests/test_founder_workspace.py)
+        run: python -m app.tests.test_founder_workspace
+
   frontend:
     name: Frontend — lint, typecheck, tests, build
     runs-on: ubuntu-latest
