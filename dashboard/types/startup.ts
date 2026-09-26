@@ -194,6 +194,20 @@ export type SavedStartupStatus = {
   saved: boolean;
 };
 
+// Portfolio Release Task 4 -- My Analyses: GET /me/analyses row shape.
+// One row PER ANALYSIS (submitted_by_user_id = the caller), not per
+// startup -- see app/models/startup.py::MyAnalysisEntry's own docstring
+// for why this differs from SavedStartupEntry above. startup_id/
+// company_name are nullable only defensively; every real write path
+// that sets submitted_by_user_id also resolves a real startup_id.
+export type MyAnalysisEntry = {
+  analysis_id: number;
+  startup_id: number | null;
+  company_name: string | null;
+  overall_score: number | null;
+  created_at: string;
+};
+
 // One point per canonical (methodology-bearing) analysis, sourced from
 // GET /startup/{company_name}/sps-history. Chronological order.
 export type SPSHistoryPoint = {

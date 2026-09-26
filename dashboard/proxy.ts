@@ -53,6 +53,10 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 // _analysis_visibility_clause()) -- this route-matcher redirect has no
 // bearing on WHICH analyses a signed-in user may see, only on whether
 // these routes are reachable at all while signed out.
+// Portfolio Release Task 4 -- My Analyses: /my-analyses added the same
+// way every other Task 3B route was -- UX-only redirect here; real
+// enforcement is app/my-analyses/page.tsx's own auth.protect() PLUS the
+// backend's independent RequireAuth on GET /me/analyses.
 const isProtectedRoute = createRouteMatcher([
   "/analyze(.*)",
   "/saved(.*)",
@@ -63,6 +67,7 @@ const isProtectedRoute = createRouteMatcher([
   "/rankings(.*)",
   "/search(.*)",
   "/compare(.*)",
+  "/my-analyses(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

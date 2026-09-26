@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import VentureGpsHero from "@/components/home/ventureGps/VentureGpsHero.tsx";
+import HowItWorksSection from "@/components/home/ventureGps/HowItWorksSection.tsx";
 import MarketDiscoverySection from "@/components/home/ventureGps/MarketDiscoverySection.tsx";
 
 import { loadHomepageMarkets } from "@/components/home/ventureGps/homepageData.ts";
@@ -23,17 +24,21 @@ import { absoluteUrl } from "@/lib/site.ts";
 // below need; React's cache() wrapper on that function means it only actually runs once per request either way.
 export async function generateMetadata(): Promise<Metadata> {
   const url = absoluteUrl("/");
-  const description = "Navigate the startup economy. Verified startup market intelligence from VentureGPS.";
+  // Portfolio Release Task 4 -- Phase 4: aligned with the current
+  // portfolio-release product (evidence-backed startup analysis), not
+  // the earlier Markets-first framing -- see VentureGpsHero.tsx's own
+  // comment for the on-page headline/CTA change this description mirrors.
+  const description = "Evidence-backed startup analysis. Submit a startup and get a defensible Startup Intelligence Score.";
 
   return {
     // Bypasses the root layout's "%s | Startup Intelligence Engine" template (same reasoning as
     // /markets/[slug]'s own generateMetadata) -- this is the VentureGPS-branded public homepage now, not the
     // legacy Startup Intelligence Engine product.
-    title: { absolute: "VentureGPS — Navigate the Startup Economy" },
+    title: { absolute: "VentureGPS — Evidence-Backed Startup Analysis" },
     description,
     alternates: { canonical: url },
     openGraph: {
-      title: "VentureGPS — Navigate the Startup Economy",
+      title: "VentureGPS — Evidence-Backed Startup Analysis",
       description,
       url,
       type: "website",
@@ -41,7 +46,7 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     twitter: {
       card: "summary_large_image",
-      title: "VentureGPS — Navigate the Startup Economy",
+      title: "VentureGPS — Evidence-Backed Startup Analysis",
       description,
     },
   };
@@ -54,6 +59,7 @@ export default async function HomePage() {
   return (
     <div>
       <VentureGpsHero featured={featured} />
+      <HowItWorksSection />
       <MarketDiscoverySection result={homepageMarkets} />
     </div>
   );

@@ -39,6 +39,7 @@ from app.database.db import (create_tables,
                          unsave_startup_for_user,
                          is_startup_saved_by_user,
                          get_saved_startups_for_user,
+                         get_my_analyses,
                          discover_startups,
                          count_discover_startups,
                          get_discovery_filter_options,
@@ -165,7 +166,7 @@ from app.database.db import (create_tables,
 from typing import Literal
 from fastapi import Query
 
-from app.models.startup import StartupAnalysisRequest, StartupAnalysisResponse, StartupProfileResponse, UpdateAnalysisRequest, WebsiteAnalysisRequest, MAX_COMPANY_TEXT_LENGTH, SavedStartupEntry, SavedStartupStatus, DiscoveryResponse, DiscoveryFilterOptions, ComparisonResponse, ComparisonStartup, ComparisonPillar, ComparisonSubscore
+from app.models.startup import StartupAnalysisRequest, StartupAnalysisResponse, StartupProfileResponse, UpdateAnalysisRequest, WebsiteAnalysisRequest, MAX_COMPANY_TEXT_LENGTH, SavedStartupEntry, SavedStartupStatus, MyAnalysisEntry, DiscoveryResponse, DiscoveryFilterOptions, ComparisonResponse, ComparisonStartup, ComparisonPillar, ComparisonSubscore
 from app.models.sps_v3 import SPSV3Assessment
 from app.models.idea_lab import CreateVentureRequest, UpdateVentureRequest, VentureResponse, VentureSummary, VPSResult, ScenarioCompareRequest, ScenarioCompareResponse, StructureIdeaRequest, StructureIdeaResponse, VentureDraft, VentureHistoryResponse, VentureHistoryEvent, VentureHistoryCategoryChange, VentureHistoryAssumptionChange, UpdateVentureShareRequest, VentureShareSettings, VentureSnapshotResponse, VentureSnapshotCategory
 from app.models.venture_missions import (
@@ -882,6 +883,19 @@ def get_startup_sps_history(company_name: str, current_user: AuthenticatedUser =
 # above) are completely untouched by this section -- these are new,
 # additive routes, not a change to how any existing route is protected.
 # ---------------------------------------------------------------------------
+
+# Portfolio Release Task 4 -- My Analyses. RequireAuth only -- no admin
+# bypass, no startup_memberships fallback: get_my_analyses() itself is
+# already the strict "submitted_by_user_id = this exact caller" rule (see
+# its own docstring for why _analysis_visibility_clause() is deliberately
+# NOT reused here). Newest first, straight from the DB function -- no
+# extra sorting/filtering belongs at this layer.
+@app.get("/me/analyses", response_model=list[MyAnalysisEntry])
+def list_my_analyses(
+    current_user: AuthenticatedUser = RequireAuth,
+):
+    return get_my_analyses(current_user.user_id)
+
 
 @app.get("/me/saved-startups", response_model=list[SavedStartupEntry])
 def list_my_saved_startups(

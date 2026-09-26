@@ -179,6 +179,28 @@ class SavedStartupEntry(BaseModel):
     saved_at: datetime
 
 
+class MyAnalysisEntry(BaseModel):
+    """
+    Portfolio Release Task 4 -- My Analyses list-row shape. See
+    get_my_analyses()'s own docstring for why this is one row PER
+    ANALYSIS (submitted_by_user_id = the caller), not one row per
+    startup the way SavedStartupEntry above is -- two users (or the same
+    user, twice) analyzing the same company_name are two separate rows
+    here, each reopening its own submitter's own authorized report.
+    startup_id/company_name are nullable only for the same defensive
+    reason StartupProfileResponse's own startup_id is (a row whose
+    startup somehow doesn't resolve) -- never expected in practice, since
+    every write path that sets submitted_by_user_id also always resolves
+    a real startup_id (see save_analysis()'s own docstring), but the
+    frontend still guards against it rather than assuming.
+    """
+    analysis_id: int
+    startup_id: int | None = None
+    company_name: str | None = None
+    overall_score: float | None = None
+    created_at: datetime
+
+
 class SavedStartupStatus(BaseModel):
     saved: bool
 

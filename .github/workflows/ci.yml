@@ -287,6 +287,20 @@ jobs:
       - name: Founder Workspace -- membership authorization, not a general analysis grant (app/tests/test_founder_workspace.py)
         run: python -m app.tests.test_founder_workspace
 
+      # Portfolio Release Task 4 -- My Analyses. GET /me/analyses
+      # (app/database/db.py::get_my_analyses()) is scoped by ONE rule --
+      # submitted_by_user_id = the caller -- deliberately NOT
+      # _analysis_visibility_clause(), so a bookmark or startup membership
+      # can never surface another user's analysis here (see that
+      # function's own docstring). Covers newest-first ordering, strict
+      # per-submitter scoping, two users analyzing the same company each
+      # seeing only their own submission, and that each entry reopens the
+      # correct authorized report. Fully offline, same real-Postgres,
+      # zztest_myanalyses_*-prefixed, self-cleaning pattern as every other
+      # file in this job.
+      - name: My Analyses -- strict submitter scoping (app/tests/test_my_analyses.py)
+        run: python -m app.tests.test_my_analyses
+
   frontend:
     name: Frontend — lint, typecheck, tests, build
     runs-on: ubuntu-latest

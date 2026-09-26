@@ -1,45 +1,74 @@
 "use client";
 
-// VentureGPS Increment 17.1 -- the first REAL, functional public navigation for the VentureGPS brand surfaces.
-// Replaces two things that were each, in their own way, not this:
-// - PublicHeader.tsx (still used unmodified by the dev-only /design/* prototypes): branding only, explicitly
-//   documented as deliberately not a nav menu, because no second real public route existed yet.
-// - CinematicHero.tsx's own baked-in nav bar (still used unmodified by the /design/cinematic-homepage
-//   prototype): plain, non-interactive <span> labels under aria-label="...(concept)" -- a mockup, not links.
+// Portfolio Release Task 4 -- Unified UX, Analysis Retrieval and
+// Authentication, Phase 2. This is now THE single, reusable navigation
+// system for the homepage AND the authenticated application -- not "the
+// public one" alongside a separate TopNav for signed-in users. Before
+// this phase, the homepage/`/markets`/`/admin` rendered this component
+// while every other route (the whole authenticated app) rendered a
+// completely separate TopNav.tsx (desktop) + MobileTabBar.tsx (mobile)
+// pair, with its own brand mark, its own destination list, and its own
+// account-menu wiring -- exactly the "entirely different navigation and
+// visual systems" problem this phase exists to remove. TopNav.tsx and
+// MobileTabBar.tsx are deleted; PRIMARY_NAVIGATION (the signed-in
+// destination list) now lives here, as the one array both the desktop
+// row and the mobile disclosure panel below render from -- never two
+// hand-authored lists (see this file's own docstring on
+// SIGNED_IN_NAVIGATION for the "avoid duplicating desktop and mobile
+// navigation logic" instruction this satisfies).
 //
-// Only links to routes that actually exist in production. Revisit this file's NAV_LINKS the moment a route is
-// removed or renamed.
-//
-// Milestone 1, Task 1 -- Unify Navigation: "Search" (/search) and "Analyze" (/analyze) added, and sign-in/
-// account access added alongside NAV_LINKS. Increment 17.1's original comment here said linking to /search
-// "would be exactly the 'dead navigation link' this increment forbids" -- that was true only because no
-// VentureGPS-branded route existed yet to distinguish it from; the task instruction now explicitly requires
-// visitors be able to reach existing search and Analyze from here, while (its own explicit requirement)
-// NEVER implying legacy SIE search/assessments and V2's verified Markets records are the same kind of data.
-// Deliberately NOT solved by restyling this into two visually separate groups (a homepage-chrome redesign this
-// task's own boundaries forbid) -- solved the smaller way instead: the labels themselves ("Markets" vs.
-// "Search"/"Analyze") are never implied to be the same product, and neither page's own content is touched by
-// this file at all, so each page's own honest framing (V2 verified facts vs. an AI-assisted assessment) is
-// exactly as before. /analyze itself already requires sign-in (its own existing auth.protect()) -- linking to
-// it directly from here is safe by construction, not a new auth surface: a signed-out click lands on sign-in
-// first, same as always.
+// Two states, not four:
+//   Signed out -- VentureGPS branding, "How It Works" (an anchor into the
+//     homepage's own explainer section, reachable from any page), "Sign
+//     in", and "Get Started" (-> /analyze, which already requires sign-in
+//     via its own auth.protect() -- a signed-out click lands on /sign-in
+//     first, same as every other authenticated route in this app).
+//   Signed in -- Analyze, My Analyses, Saved, plus PersonalMenu (account
+//     controls). Build (Idea Lab), My Startups (Founder Workspace),
+//     Learn (Playbooks), and Investor intelligence are NOT competing
+//     primary destinations anymore -- per this phase's own explicit
+//     instruction ("remove competing navigation from the primary release
+//     journey" while "keep existing founder, investor, market and
+//     experimental routes intact") they are demoted, not deleted: same
+//     routes, same auth, reachable from PersonalMenu's account menu
+//     instead (see that file's own comment for the full record of this
+//     exact promote/demote history -- this is not the first time these
+//     destinations have moved between "primary nav" and "account menu").
+// Markets/Search are reachable from the homepage's own content and
+// PersonalMenu, not the primary signed-out row -- Phase 4's own
+// instruction not to feature Markets/Explore/V2 in the primary release
+// journey applies to navigation just as much as homepage copy.
 import { Show } from "@clerk/nextjs";
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import PersonalMenu from "./PersonalMenu";
+import ThemeToggle from "@/components/ui/ThemeToggle";
 
 type NavLink = {
   label: string;
   href: string;
 };
 
-const NAV_LINKS: NavLink[] = [
-  { label: "Markets", href: "/markets" },
-  { label: "Search", href: "/search" },
+// Signed-out primary row. Deliberately short -- four things, exactly as
+// specified: branding (rendered separately, below) + these three.
+const SIGNED_OUT_NAVIGATION: NavLink[] = [{ label: "How It Works", href: "/#how-it-works" }];
+
+// Signed-in primary row -- the one array TopNav.tsx's old PRIMARY_NAVIGATION
+// used to be, now here so the desktop nav and the mobile disclosure panel
+// share the exact same source (see this file's own header comment).
+export const PRIMARY_NAVIGATION: NavLink[] = [
   { label: "Analyze", href: "/analyze" },
+  { label: "My Analyses", href: "/my-analyses" },
+  { label: "Saved", href: "/saved" },
 ];
+
+function isLinkActive(pathname: string, href: string): boolean {
+  const [path] = href.split("#");
+  if (path === "") return pathname === "/";
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
 
 type PublicNavProps = {
   variant: "overlay" | "header";
@@ -60,6 +89,11 @@ const LINK_TEXT_CLASSES: Record<PublicNavProps["variant"], string> = {
   header: "text-text-secondary hover:text-text-primary",
 };
 
+const LINK_ACTIVE_CLASSES: Record<PublicNavProps["variant"], string> = {
+  overlay: "text-white",
+  header: "text-text-primary",
+};
+
 const MENU_BUTTON_CLASSES: Record<PublicNavProps["variant"], string> = {
   overlay: "text-white",
   header: "text-text-secondary",
@@ -70,41 +104,81 @@ const MOBILE_PANEL_CLASSES: Record<PublicNavProps["variant"], string> = {
   header: "border-t border-border bg-surface",
 };
 
+function NavLinks({
+  links,
+  variant,
+  pathname,
+  onNavigate,
+  mobile = false,
+}: {
+  links: NavLink[];
+  variant: PublicNavProps["variant"];
+  pathname: string;
+  onNavigate?: () => void;
+  mobile?: boolean;
+}) {
+  return (
+    <>
+      {links.map((link) => {
+        const active = isLinkActive(pathname, link.href);
+
+        return (
+          <Link
+            key={link.href}
+            href={link.href}
+            onClick={onNavigate}
+            aria-current={active ? "page" : undefined}
+            className={[
+              mobile ? "min-h-11 py-3 text-base font-medium" : "text-sm font-medium tracking-wide transition-colors",
+              active ? LINK_ACTIVE_CLASSES[variant] : LINK_TEXT_CLASSES[variant],
+            ].join(" ")}
+          >
+            {link.label}
+          </Link>
+        );
+      })}
+    </>
+  );
+}
+
 export default function PublicNav({ variant }: PublicNavProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = usePathname();
+  const closeMobileMenu = () => setMobileMenuOpen(false);
 
   return (
     <div className={variant === "header" ? VARIANT_CLASSES.header : undefined}>
       <div className={["relative z-10 flex items-center justify-between px-4 py-4 sm:px-8 sm:py-5", variant === "overlay" ? VARIANT_CLASSES.overlay : "h-14 py-0 sm:px-6 lg:px-10"].join(" ")}>
-        <Link href="/" className="flex items-center gap-2" onClick={() => setMobileMenuOpen(false)}>
+        <Link href="/" className="flex shrink-0 items-center gap-2" onClick={closeMobileMenu} aria-label="VentureGPS home">
           <span aria-hidden="true" className={["size-2 rounded-full", variant === "overlay" ? "bg-white" : "bg-primary"].join(" ")} />
           <span className={["text-base font-bold tracking-tight", WORDMARK_TEXT_CLASSES[variant]].join(" ")}>VentureGPS</span>
         </Link>
 
-        <nav aria-label="VentureGPS" className="hidden items-center gap-7 sm:flex">
-          {NAV_LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              aria-current={pathname === link.href || pathname.startsWith(`${link.href}/`) ? "page" : undefined}
-              className={["text-sm font-medium tracking-wide transition-colors", LINK_TEXT_CLASSES[variant]].join(" ")}
-            >
-              {link.label}
-            </Link>
-          ))}
+        <nav aria-label="Primary" className="hidden items-center gap-7 sm:flex">
+          <Show when="signed-out">
+            <NavLinks links={SIGNED_OUT_NAVIGATION} variant={variant} pathname={pathname} />
+          </Show>
+          <Show when="signed-in">
+            <NavLinks links={PRIMARY_NAVIGATION} variant={variant} pathname={pathname} />
+          </Show>
 
-          {/* Milestone 1, Task 1: account access, same <Show>-gated pattern TopNav.tsx already uses -- a solid
-              pill button works unchanged on both the dark "overlay" hero background and the light "header" bar,
-              so no per-variant styling is needed here the way the plain nav links above need. Auth itself is
-              completely unchanged: this is Clerk's own sign-in link / UserButton, the exact same components
-              TopNav.tsx already renders, not a second implementation. */}
+          {variant === "header" ? <ThemeToggle /> : null}
+
           <Show when="signed-out">
             <Link
               href="/sign-in"
-              className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
+              className={[
+                "rounded-full px-4 py-2 text-sm font-semibold transition-colors",
+                variant === "overlay" ? "border border-white/40 text-white hover:bg-white/10" : "border border-border text-text-primary hover:bg-surface-muted",
+              ].join(" ")}
             >
               Sign in
+            </Link>
+            <Link
+              href="/analyze"
+              className="rounded-full bg-gradient-to-r from-accent to-secondary px-4 py-2 text-sm font-bold text-white shadow-sm transition-opacity hover:opacity-90"
+            >
+              Get Started
             </Link>
           </Show>
           <Show when="signed-in">
@@ -112,16 +186,21 @@ export default function PublicNav({ variant }: PublicNavProps) {
           </Show>
         </nav>
 
-        {/* Mobile: a compact always-visible account affordance next to the hamburger (not hidden behind the
-            disclosure panel -- signing in/managing your account is a one-tap action, not a secondary nav item),
-            plus the menu toggle. NAV_LINKS is short enough today that a simple disclosure panel (no portal, no
-            focus trap library) is proportionate. */}
+        {/* Mobile: a compact always-visible account affordance next to the hamburger, plus the menu toggle.
+            Same NavLinks/data source as desktop (see this file's own header comment on
+            "avoid duplicating desktop and mobile navigation logic") -- only the disclosure panel below differs
+            in presentation, never in which destinations exist. */}
         <div className="flex items-center gap-2 sm:hidden">
+          {variant === "header" ? <ThemeToggle /> : null}
+
           <Show when="signed-out">
             <Link
               href="/sign-in"
-              onClick={() => setMobileMenuOpen(false)}
-              className="rounded-full bg-primary px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
+              onClick={closeMobileMenu}
+              className={[
+                "rounded-full px-3 py-1.5 text-sm font-semibold transition-colors",
+                variant === "overlay" ? "border border-white/40 text-white" : "border border-border text-text-primary",
+              ].join(" ")}
             >
               Sign in
             </Link>
@@ -153,18 +232,20 @@ export default function PublicNav({ variant }: PublicNavProps) {
 
       {mobileMenuOpen ? (
         <div id="public-nav-mobile-menu" className={["relative z-10 sm:hidden", MOBILE_PANEL_CLASSES[variant]].join(" ")}>
-          <nav aria-label="VentureGPS" className="flex flex-col px-4 py-2">
-            {NAV_LINKS.map((link) => (
+          <nav aria-label="Primary" className="flex flex-col px-4 py-2">
+            <Show when="signed-out">
+              <NavLinks links={SIGNED_OUT_NAVIGATION} variant={variant} pathname={pathname} onNavigate={closeMobileMenu} mobile />
               <Link
-                key={link.href}
-                href={link.href}
-                onClick={() => setMobileMenuOpen(false)}
-                aria-current={pathname === link.href || pathname.startsWith(`${link.href}/`) ? "page" : undefined}
-                className={["min-h-11 py-3 text-base font-medium", LINK_TEXT_CLASSES[variant]].join(" ")}
+                href="/analyze"
+                onClick={closeMobileMenu}
+                className="my-2 inline-flex min-h-11 items-center justify-center rounded-xl bg-gradient-to-r from-accent to-secondary px-4 text-base font-bold text-white"
               >
-                {link.label}
+                Get Started
               </Link>
-            ))}
+            </Show>
+            <Show when="signed-in">
+              <NavLinks links={PRIMARY_NAVIGATION} variant={variant} pathname={pathname} onNavigate={closeMobileMenu} mobile />
+            </Show>
           </nav>
         </div>
       ) : null}

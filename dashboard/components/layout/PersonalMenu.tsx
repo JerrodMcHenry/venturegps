@@ -28,6 +28,18 @@ import { UserButton } from "@clerk/nextjs";
 // state), so this menu doesn't need to fetch anything to decide what to
 // show.
 //
+// Portfolio Release Task 4 -- Unified UX, Phase 2: "My Ideas" (/idea-lab),
+// "My Startup" (/founder), and "Learn" (/playbooks) are BACK here. Phase 32
+// (see this file's own history below) had promoted them out of this menu
+// into TopNav.tsx's always-visible PRIMARY_NAVIGATION; this task's own
+// explicit instruction is the opposite move -- the primary release
+// journey's nav row is now Analyze / My Analyses / Saved, and "keep
+// existing founder... routes intact but remove competing navigation from
+// the primary release journey" is exactly this: same routes, same auth,
+// demoted from a competing top-level nav item back to an account-menu
+// destination, not deleted. Nothing about /idea-lab or /founder
+// themselves changed.
+//
 // Phase 10.3 follow-up fix: this originally wrapped Clerk's own
 // <UserButton /> (which renders its own <button>) inside a second,
 // hand-rolled <button> used to open a custom popover -- invalid nested
@@ -44,11 +56,44 @@ import { UserButton } from "@clerk/nextjs";
 // stacked ones.
 const ICON_CLASS = "size-4";
 
-// Phase 32, Part 2/9: IdeaIcon/StartupIcon/LearnIcon removed along with
-// the menu links they illustrated (see this file's own comment above
-// PersonalMenu()) -- dead code left behind by a removed feature is its
-// own small confusion for the next reader, same as a dead route would
-// be.
+// Portfolio Release Task 4, Phase 2: reinstated alongside the menu links
+// they illustrate (see this file's own comment above PersonalMenu()) --
+// same icons Phase 32 removed, not redesigned.
+function IdeaIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className={ICON_CLASS}>
+      <path d="M12 3l2.4 5.3 5.6.6-4.2 3.9 1.2 5.6L12 15.8l-5 2.6 1.2-5.6-4.2-3.9 5.6-.6L12 3z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function StartupIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className={ICON_CLASS}>
+      <path d="M12 3l2.4 5.3 5.6.6-4.2 3.9 1.2 5.6L12 15.8l-5 2.6 1.2-5.6-4.2-3.9 5.6-.6L12 3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function LearnIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className={ICON_CLASS}>
+      <path
+        d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21.5v-16z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5a2.5 2.5 0 0 1 2.5 2.5v-16z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function FeedbackIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className={ICON_CLASS}>
@@ -109,6 +154,9 @@ export default function PersonalMenu() {
   return (
     <UserButton appearance={{ elements: { userButtonAvatarBox: "size-9" } }}>
       <UserButton.MenuItems>
+        <UserButton.Link label="My Ideas" href="/idea-lab" labelIcon={<IdeaIcon />} />
+        <UserButton.Link label="My Startup" href="/founder" labelIcon={<StartupIcon />} />
+        <UserButton.Link label="Learn" href="/playbooks" labelIcon={<LearnIcon />} />
         <UserButton.Link label="Send feedback" href={FEEDBACK_MAILTO} labelIcon={<FeedbackIcon />} />
       </UserButton.MenuItems>
     </UserButton>

@@ -95,18 +95,32 @@ export default function VentureGpsHero({ featured }: VentureGpsHeroProps) {
         <div className="max-w-lg rounded-3xl border border-white/15 bg-black/45 p-5 shadow-2xl shadow-black/40 backdrop-blur-xl sm:p-8 lg:max-w-3xl">
           <div className="mb-4 inline-flex w-fit items-center gap-2 sm:mb-5">
             <span aria-hidden="true" className="size-1.5 rounded-full bg-accent" />
-            <span className="text-xs font-medium tracking-wide text-white/85">Verified Startup Market Intelligence</span>
+            <span className="text-xs font-medium tracking-wide text-white/85">Evidence-Backed Startup Analysis</span>
           </div>
 
+          {/* Portfolio Release Task 4 -- Phase 4 (Homepage Coherence): headline/supporting text/primary CTA
+              realigned with the current portfolio-release product -- evidence-backed startup analysis -- from
+              the earlier Markets-first "Navigate the Startup Economy" framing. The visual treatment itself
+              (gradient word, glass panel, full-bleed hero image) is unchanged; only the copy and the addition of
+              a primary CTA button (there was none before -- the only path to /analyze was a small top-nav link)
+              changed. */}
           <h1 className="text-4xl font-black leading-[1.02] tracking-tight text-white sm:text-6xl lg:text-7xl">
-            <span className="bg-gradient-to-r from-accent via-primary to-secondary bg-clip-text text-transparent">Navigate</span> the
+            <span className="bg-gradient-to-r from-accent via-primary to-secondary bg-clip-text text-transparent">Evidence-backed</span>
             <br />
-            Startup Economy
+            startup analysis
           </h1>
 
           <p className="mt-4 max-w-md text-base leading-7 text-white/85 sm:mt-5 sm:text-lg">
-            Discover the companies, markets and ideas shaping what&rsquo;s next.
+            Submit a startup and get a defensible analysis across market, team, product, execution, traction and
+            financial health -- every score backed by evidence, never a guess.
           </p>
+
+          <Link
+            href="/analyze"
+            className="mt-6 inline-flex min-h-11 w-fit items-center justify-center rounded-full bg-gradient-to-r from-accent to-secondary px-6 text-sm font-bold text-white shadow-lg shadow-primary/30 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:mt-8 sm:text-base"
+          >
+            Analyze a startup →
+          </Link>
         </div>
 
         <div className="lg:absolute lg:bottom-10 lg:right-8 lg:mt-0">{featured ? <FeaturedMarketCard featured={featured} /> : <NoCoverageCard />}</div>

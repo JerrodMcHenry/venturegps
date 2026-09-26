@@ -2270,8 +2270,56 @@ def search_analyses(query: str, viewer_user_id: str, viewer_is_admin: bool):
 
     return [dict(row) for row in rows]
 
-        
-    
+
+# Portfolio Release Task 4 -- My Analyses. Deliberately NOT
+# _analysis_visibility_clause() -- that clause's whole job is "what can
+# this viewer see," which includes the approved-member/admin branches;
+# My Analyses is narrower and different in kind: "what did I submit,"
+# full stop. Reusing the visibility clause here would (correctly, per
+# that clause's own rules) also surface historical NULL-owner analyses
+# an approved member merely has access to but never actually submitted
+# -- exactly the "bookmarks or startup membership as permission" conflation
+# this task's own instructions explicitly forbid for this page. A plain
+# submitted_by_user_id = :user_id equality is the whole rule: it is
+# already the strictest, most specific branch _analysis_visibility_clause()
+# itself has, so no admin bypass or membership fallback belongs here --
+# an admin viewing THEIR OWN My Analyses page sees exactly what they
+# personally submitted, same as anyone else.
+def get_my_analyses(user_id: str):
+    """
+    Every analysis this exact user submitted (analyses.submitted_by_user_id
+    = user_id), newest first. One row per analysis, not per startup --
+    Phase 3's own test (two users analyzing the same company) is exactly
+    why: each submission is its own row here regardless of whether another
+    user (or this same user) has also analyzed the same company_name: this
+    lists what I did, not "the startup's current canonical state" the way
+    Rankings/Discovery/a startup profile do. Deliberately flat/minimal
+    (mirrors SavedStartupEntry's own list-row shape) -- this is a list
+    view, not a second report experience. startup_id is used by the
+    frontend to build the real /startup/{company_name} link (via the
+    startups join for canonical_name) so each entry reopens the exact
+    same authorized report GET /startup/{name} would show this same user
+    -- never a separate, second read of analysis content.
+    """
+    with engine.begin() as connection:
+        result = connection.execute(text("""
+            SELECT
+                analyses.id AS analysis_id,
+                analyses.startup_id AS startup_id,
+                startups.canonical_name AS company_name,
+                (analyses.methodology->>'startup_intelligence_score')::float AS overall_score,
+                analyses.created_at AS created_at
+            FROM analyses
+            LEFT JOIN startups ON startups.id = analyses.startup_id
+            WHERE analyses.submitted_by_user_id = :user_id
+            ORDER BY analyses.created_at DESC, analyses.id DESC
+        """), {"user_id": user_id})
+
+        rows = result.mappings().all()
+
+    return [dict(row) for row in rows]
+
+
 def parse_structured_analysis(row):
     analysis = dict(row)
 
