@@ -191,7 +191,7 @@ export default function StartupHeroV2({
     business_model.trim().toLowerCase() !== industry.trim().toLowerCase();
 
   return (
-    <BaseCard className="p-8">
+    <BaseCard variant="glass" className="p-8">
       <div className="grid gap-10 lg:grid-cols-[320px_1fr] lg:items-center">
         <div className="flex justify-center">
           {/* Phase 10.9, Part 14: sps_v3 is additive and absent on every
@@ -212,7 +212,7 @@ export default function StartupHeroV2({
 
         <div>
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <h1 className="text-4xl font-bold text-text-primary">
+            <h1 className="bg-gradient-to-r from-accent via-primary to-secondary bg-clip-text text-4xl font-bold text-transparent">
               {methodology.context.company_name}
             </h1>
 

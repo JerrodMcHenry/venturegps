@@ -90,6 +90,7 @@ export default function MyAnalysesView() {
       <PageHeader
         title="My Analyses"
         subtitle="Every startup you've submitted for evidence-backed analysis, newest first."
+        variant="glow"
       />
 
       {isLoading ? (

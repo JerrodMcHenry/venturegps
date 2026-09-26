@@ -166,6 +166,7 @@ export default function SavedStartupsView() {
       <PageHeader
         title="Watchlist"
         subtitle="Startups you're tracking, always shown with their latest Startup Power Score."
+        variant="glow"
       />
 
       {loadState === "loading" ? (

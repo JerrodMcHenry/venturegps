@@ -216,14 +216,39 @@ function test_how_it_works_section_exists_and_is_wired_into_the_homepage(): void
 }
 
 function test_homepage_does_not_expand_markets_explore_v2_or_founder_investor_features(): void {
-  // Phase 4's own explicit boundary: this task changes hero copy/CTA and
-  // adds a small explainer section -- it must not grow Markets/Explore/V2
-  // or founder/investor feature surfaces. MarketDiscoverySection stays
-  // exactly as imported before this task; this only checks it wasn't
-  // duplicated or given new props that would indicate an expansion.
+  // Task 4 Phase 4's own boundary was "don't grow Markets/Explore/V2" --
+  // Task 5 (Unified Visual Design and Homepage Simplification) went
+  // further and explicitly REMOVED MarketDiscoverySection/the featured-
+  // market widget from the homepage entirely (its own instruction: "Remove
+  // homepage featured-market widgets... Discover/Explore the Markets
+  // sections and all redundant Explore the Market buttons. Do not delete
+  // underlying market routes, backend functionality or data."). This test
+  // now asserts THAT boundary: the component is gone from "/" but the
+  // file, the /markets route, and homepageData.ts are untouched on disk.
   const pageSource = readSource("app/page.tsx");
-  const marketSectionMatches = pageSource.match(/<MarketDiscoverySection\b/g) ?? [];
-  expect(marketSectionMatches.length === 1, "MarketDiscoverySection must be rendered exactly once, unchanged from before this task");
+  // Checks actual import/JSX usage, not prose -- this file's own comments
+  // legitimately reference "MarketDiscoverySection" by name to explain
+  // what changed and why (same convention this codebase already uses
+  // elsewhere for retired identifiers).
+  expect(!/from\s+"@\/components\/home\/ventureGps\/MarketDiscoverySection/.test(pageSource), "app/page.tsx must no longer import MarketDiscoverySection (Task 5: homepage simplification)");
+  expect(!/<MarketDiscoverySection\b/.test(pageSource), "app/page.tsx must no longer render <MarketDiscoverySection />");
+  expect(!/from\s+"@\/components\/home\/ventureGps\/homepageData/.test(pageSource), "app/page.tsx must no longer import loadHomepageMarkets -- nothing on the simplified homepage needs it");
+  expect(!/loadHomepageMarkets\(\)/.test(pageSource), "app/page.tsx must no longer call loadHomepageMarkets()");
+
+  expect(existsSync(path.join(DASHBOARD_ROOT, "components/home/ventureGps/MarketDiscoverySection.tsx")), "MarketDiscoverySection.tsx must still exist on disk -- removed from the homepage's render, not deleted");
+  expect(existsSync(path.join(DASHBOARD_ROOT, "components/home/ventureGps/homepageData.ts")), "homepageData.ts must still exist on disk -- the underlying market data fetch is untouched, just no longer called from the homepage");
+  expect(existsSync(path.join(DASHBOARD_ROOT, "app/markets/page.tsx")), "The real /markets route must still exist and be unaffected");
+}
+
+function test_hero_no_longer_renders_a_featured_market_widget(): void {
+  const source = readSource("components/home/ventureGps/VentureGpsHero.tsx");
+  // Checks actual function/prop/JSX declarations, not prose -- this
+  // file's own comment legitimately references "FeaturedMarketCard" by
+  // name to explain what was removed and why.
+  expect(!/function FeaturedMarketCard/.test(source), "VentureGpsHero must no longer define a FeaturedMarketCard component");
+  expect(!/<FeaturedMarketCard\b/.test(source), "VentureGpsHero must no longer render <FeaturedMarketCard />");
+  expect(!/Explore the market/.test(source), "VentureGpsHero must not contain a redundant \"Explore the Market\" button");
+  expect(!/VentureGpsHeroProps/.test(source), "VentureGpsHero must no longer take any props at all (the `featured` market prop is gone)");
 }
 
 const TESTS: [string, () => void][] = [
@@ -245,6 +270,7 @@ const TESTS: [string, () => void][] = [
   ["test_hero_has_a_primary_cta_into_analyze", test_hero_has_a_primary_cta_into_analyze],
   ["test_how_it_works_section_exists_and_is_wired_into_the_homepage", test_how_it_works_section_exists_and_is_wired_into_the_homepage],
   ["test_homepage_does_not_expand_markets_explore_v2_or_founder_investor_features", test_homepage_does_not_expand_markets_explore_v2_or_founder_investor_features],
+  ["test_hero_no_longer_renders_a_featured_market_widget", test_hero_no_longer_renders_a_featured_market_widget],
 ];
 
 function main(): void {

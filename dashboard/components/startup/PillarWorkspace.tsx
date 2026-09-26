@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import { SPSRing } from "@/components/sps";
 import BaseCard from "@/components/ui/BaseCard";
+import CollapsibleSection from "@/components/ui/CollapsibleSection";
 
 import { CONFIDENCE_BADGE_CLASSES } from "./pillarMeta";
 import {
@@ -598,62 +599,38 @@ function TechnicalDetails({
   scoringSummary?: string;
   evidenceCoverage: number;
 }) {
-  const [expanded, setExpanded] = useState(false);
-
   return (
-    <section className="rounded-xl bg-surface-muted">
-      <button
-        type="button"
-        onClick={() => setExpanded((previous) => !previous)}
-        aria-expanded={expanded}
-        className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left"
-      >
-        <span className={SECTION_HEADING_CLASSES}>Technical Details</span>
-        <span
-          aria-hidden="true"
-          className={[
-            "text-text-muted transition-transform duration-200",
-            expanded ? "rotate-90" : "",
-          ].join(" ")}
-        >
-          ▸
-        </span>
-      </button>
+    <CollapsibleSection title="Technical Details">
+      <div>
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-muted">
+          <GaugeIcon className="h-3.5 w-3.5" />
+          Scoring summary
+        </p>
 
-      {expanded ? (
-        <div className="space-y-4 border-t border-border px-4 py-3">
-          <div>
-            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-muted">
-              <GaugeIcon className="h-3.5 w-3.5" />
-              Scoring summary
-            </p>
+        {scoringSummary ? (
+          <p className="mt-1.5 max-w-prose text-base leading-7 text-text-secondary">
+            {scoringSummary}
+          </p>
+        ) : (
+          <p className="mt-1.5 text-sm text-text-secondary">Not enough evidence.</p>
+        )}
+      </div>
 
-            {scoringSummary ? (
-              <p className="mt-1.5 max-w-prose text-base leading-7 text-text-secondary">
-                {scoringSummary}
-              </p>
-            ) : (
-              <p className="mt-1.5 text-sm text-text-secondary">Not enough evidence.</p>
-            )}
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between text-xs text-text-muted">
-              <span>Evidence coverage</span>
-              <span className="font-medium text-text-secondary">
-                {evidenceCoverage}%
-              </span>
-            </div>
-
-            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface">
-              <div
-                className="h-full rounded-full bg-primary transition-[width] duration-500"
-                style={{ width: `${evidenceCoverage}%` }}
-              />
-            </div>
-          </div>
+      <div>
+        <div className="flex items-center justify-between text-xs text-text-muted">
+          <span>Evidence coverage</span>
+          <span className="font-medium text-text-secondary">
+            {evidenceCoverage}%
+          </span>
         </div>
-      ) : null}
-    </section>
+
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface">
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-500 motion-reduce:transition-none"
+            style={{ width: `${evidenceCoverage}%` }}
+          />
+        </div>
+      </div>
+    </CollapsibleSection>
   );
 }

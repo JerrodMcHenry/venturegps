@@ -449,7 +449,7 @@ export default function AnalyzeStartupForm() {
   if (founderTarget.status === "checking") {
     return (
       <>
-        <PageHeader title="Analyze Startup" />
+        <PageHeader title="Analyze Startup" variant="glow" />
         <Skeleton className="h-64 w-full" />
       </>
     );
@@ -463,6 +463,7 @@ export default function AnalyzeStartupForm() {
         <PageHeader
           title="What do you want to improve?"
           subtitle="Choose the kind of feedback you're looking for."
+          variant="glow"
         />
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -507,7 +508,7 @@ export default function AnalyzeStartupForm() {
   if (founderTarget.status === "denied") {
     return (
       <>
-        <PageHeader title="Analyze Startup" />
+        <PageHeader title="Analyze Startup" variant="glow" />
         <ErrorMessage
           className="p-8 text-center"
           action={
@@ -545,6 +546,7 @@ export default function AnalyzeStartupForm() {
             ? "Provide a company website, an updated pitch deck, or additional information -- SIE combines it with its own research and refreshes this startup's intelligence."
             : "Provide a company website, a pitch deck, additional information, or any combination -- SIE will combine what you give it with its own research and build one full, evidence-based Startup Profile."
         }
+        variant="glow"
       />
 
       {isFounderTargeted && !isSubmitting ? (
@@ -692,7 +694,10 @@ export default function AnalyzeStartupForm() {
             </ErrorMessage>
           ) : null}
 
-          <Button type="submit">
+          {/* Task 5 -- Unified Visual Design: the one prominent CTA on this page gets the shared gradient
+              Button variant (same treatment as the homepage's "Analyze a startup" CTA), not a route-specific
+              gradient hand-rolled again here. */}
+          <Button type="submit" variant="gradient">
             {isFounderTargeted ? "Update Startup" : "Analyze Startup"}
           </Button>
         </form>

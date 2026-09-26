@@ -2,6 +2,15 @@ type PageHeaderProps = {
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
+  // Task 5 -- Unified Visual Design: opt-in only. "default" is the exact,
+  // unchanged className this component always returned -- every one of
+  // this component's ~15 existing call sites passes no `variant` at all,
+  // so they render byte-identically. "glow" is scoped to exactly the
+  // four routes that task named (Analyze, My Analyses, Saved, the
+  // startup report): a gradient-text title inside a restrained glass
+  // band, echoing the homepage hero's own glass-panel treatment, without
+  // touching a single page this task didn't ask for.
+  variant?: "default" | "glow";
 };
 
 // Phase 10.3: switched from hardcoded slate-* colors (which only ever
@@ -20,11 +29,28 @@ export default function PageHeader({
   title,
   subtitle,
   action,
+  variant = "default",
 }: PageHeaderProps) {
+  const isGlow = variant === "glow";
+
   return (
-    <header className="mb-8 flex flex-col gap-5 border-b border-border pb-7 sm:flex-row sm:items-start sm:justify-between">
+    <header
+      className={[
+        "mb-8 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between",
+        isGlow
+          ? "rounded-2xl border border-primary/15 bg-surface/70 p-6 shadow-lg shadow-primary/5 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/60 sm:p-8"
+          : "border-b border-border pb-7",
+      ].join(" ")}
+    >
       <div className="min-w-0">
-        <h1 className="text-3xl font-bold tracking-tight text-text-primary sm:text-4xl">
+        <h1
+          className={[
+            "text-3xl font-bold tracking-tight sm:text-4xl",
+            isGlow
+              ? "bg-gradient-to-r from-accent via-primary to-secondary bg-clip-text text-transparent"
+              : "text-text-primary",
+          ].join(" ")}
+        >
           {title}
         </h1>
 

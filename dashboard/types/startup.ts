@@ -130,6 +130,32 @@ export type SPSV3Assessment = {
   computed_at: string;
 };
 
+// Task 5 -- Unified Visual Design (AI transparency addendum). Mirrors
+// app/models/analysis_context.py::AnalysisContext -- every field is
+// optional/defaulted there too ("Populated only for analyses run after
+// this field set was added... loading an older stored methodology JSONB
+// -- which never had these keys -- leaves them blank rather than
+// pretending that analysis carried provenance it never actually
+// recorded"). Replaces the previous `analysis_context?: unknown` so the
+// new "How this analysis was generated" section can read these fields
+// safely, typed -- this is a frontend typing addition only, not a
+// backend contract change; the JSON shape was already exactly this.
+export type SIEAnalysisContext = {
+  analysis_type?: string;
+  evidence_sources?: string[];
+  missing_information?: string[];
+  methodology_version?: string;
+  anchor_registry_version?: string;
+  scoring_version?: string;
+  model_identifier?: string;
+  prompt_version?: string;
+  company_text_hash?: string;
+  search_query?: string;
+  research_brief_snapshot?: string;
+  source_snapshot?: Array<{ title?: string; url?: string }>;
+  analyzed_at?: string;
+};
+
 export type SIEMethodologyAnalysis = {
   context: SIEContext;
 
@@ -151,7 +177,7 @@ export type SIEMethodologyAnalysis = {
   structural_coverage?: PartialStructuralCoverage | null;
 
   startup_scorecard?: unknown;
-  analysis_context?: unknown;
+  analysis_context?: SIEAnalysisContext;
 
   sps_v3?: SPSV3Assessment | null;
 };

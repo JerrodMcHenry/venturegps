@@ -2,15 +2,20 @@ import type { Metadata } from "next";
 
 import VentureGpsHero from "@/components/home/ventureGps/VentureGpsHero.tsx";
 import HowItWorksSection from "@/components/home/ventureGps/HowItWorksSection.tsx";
-import MarketDiscoverySection from "@/components/home/ventureGps/MarketDiscoverySection.tsx";
 
-import { loadHomepageMarkets } from "@/components/home/ventureGps/homepageData.ts";
 import { absoluteUrl } from "@/lib/site.ts";
 
 // VentureGPS Increment 17.1 -- the public homepage, promoted from the approved /design/cinematic-homepage
-// prototype (VentureGpsHero.tsx / MarketDiscoverySection.tsx's own header comments have the full detail on what
-// changed and why: real V2 market data instead of SAMPLE_MARKET_SIGNALS, and a rights-clear placeholder standing
-// in for the approved design's real photography -- see this increment's report for that blocker).
+// prototype.
+//
+// Task 5 -- Unified Visual Design and Homepage Simplification: this page no longer imports
+// MarketDiscoverySection or loadHomepageMarkets -- this task's own explicit instruction to remove the
+// homepage's featured-market widgets and Discover/Explore-the-Markets sections, so the homepage stays a
+// focused, two-section page (hero + How It Works) rather than growing into a second Markets landing page.
+// Nothing about /markets itself, homepageData.ts, or MarketDiscoverySection.tsx was deleted or had its own
+// behavior changed -- both remain exactly as they were, just no longer imported by "/"; the real market
+// route and its backend data are completely unaffected. VentureGpsHero no longer takes a `featured` prop for
+// the same reason (see that component's own comment).
 //
 // Replaces the Phase 10.5 "Consumer Home V2" founder-funnel homepage (Hero/EntryPaths/IdeaJourney/
 // ScenarioExamples/CompetitionTeaser/TrustSection, all in components/home/) at this same route. Not deleted --
@@ -18,11 +23,7 @@ import { absoluteUrl } from "@/lib/site.ts";
 // increment establishes the public VentureGPS brand experience as what a visitor lands on at "/". Every route
 // that funnel pointed into (/idea-lab/new, /analyze, sign-in, the authenticated app) is completely unaffected;
 // only what "/" itself renders has changed.
-//
-// A Server Component: loadHomepageMarkets does the one real data fetch (bounded, cached via Next's Data Cache
-// through v2Fetch's own revalidate option -- see homepageData.ts) that both this page and generateMetadata
-// below need; React's cache() wrapper on that function means it only actually runs once per request either way.
-export async function generateMetadata(): Promise<Metadata> {
+export function generateMetadata(): Metadata {
   const url = absoluteUrl("/");
   // Portfolio Release Task 4 -- Phase 4: aligned with the current
   // portfolio-release product (evidence-backed startup analysis), not
@@ -52,15 +53,11 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default async function HomePage() {
-  const homepageMarkets = await loadHomepageMarkets();
-  const featured = homepageMarkets.status === "ok" ? (homepageMarkets.markets[0] ?? null) : null;
-
+export default function HomePage() {
   return (
     <div>
-      <VentureGpsHero featured={featured} />
+      <VentureGpsHero />
       <HowItWorksSection />
-      <MarketDiscoverySection result={homepageMarkets} />
     </div>
   );
 }

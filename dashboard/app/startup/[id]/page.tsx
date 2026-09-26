@@ -5,6 +5,7 @@ import { getSPSHistory, getStartupProfile } from "@/lib/api";
 
 import BaseCard from "@/components/ui/BaseCard";
 import StartupHeroV2 from "@/components/startup/StartupHeroV2";
+import HowThisAnalysisWasGenerated from "@/components/startup/HowThisAnalysisWasGenerated";
 import SPSHistory from "@/components/startup/SPSHistory";
 import IntelligencePillars from "@/components/startup/IntelligencePillars";
 import ClaimStartupButton from "@/components/startup/ClaimStartupButton";
@@ -106,7 +107,7 @@ export default async function StartupProfilePage({ params }: Props) {
 
   if (!startup) {
     return (
-      <BaseCard className="p-10 text-center">
+      <BaseCard variant="glass" className="p-10 text-center">
         <h1 className="text-2xl font-bold text-text-primary">
           Startup not found
         </h1>
@@ -138,7 +139,7 @@ export default async function StartupProfilePage({ params }: Props) {
   if (!startup.has_analysis || !startup.methodology) {
     return (
       <div className="space-y-8">
-        <BaseCard className="p-10">
+        <BaseCard variant="glass" className="p-10">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <h1 className="text-4xl font-bold text-text-primary">{startup.canonical_name}</h1>
 
@@ -169,6 +170,8 @@ export default async function StartupProfilePage({ params }: Props) {
         createdAt={startup.created_at}
         startupId={startup.startup_id}
       />
+
+      <HowThisAnalysisWasGenerated analysisContext={methodology.analysis_context} />
 
       {/* Phase 10.9 verification fix: SPSHistory always tracks the legacy
           V2.1 startup_intelligence_score (see its own component docstring)
