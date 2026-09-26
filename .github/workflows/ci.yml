@@ -301,6 +301,22 @@ jobs:
       - name: My Analyses -- strict submitter scoping (app/tests/test_my_analyses.py)
         run: python -m app.tests.test_my_analyses
 
+      # Portfolio Release Task 7, Phase 2 -- Reduce Analysis Latency.
+      # Covers app/ai/concurrency.py::run_concurrently() (the shared
+      # bounded-concurrency helper for the three independent-call groups
+      # the Phase 1 audit identified: research searches, free-form
+      # calls, pillar analyses) and app/ai/sps_v3_adapter.py's flipped
+      # SPS_ENGINE_VERSION default (V3 now off unless explicitly
+      # requested -- One Production Scoring Methodology). Proves real
+      # concurrency via real threads/timing (not just mocked call
+      # order, same discipline as test_analyze_unified_concurrency.py),
+      # deterministic result assembly regardless of completion order,
+      # and clean failure (never a silent partial analysis) when a
+      # dependency fails. No real LLM/Tavily calls -- every AI-calling
+      # dependency is monkeypatched with a sleep-based stand-in.
+      - name: Pipeline concurrency -- bounded parallelism and SPS engine default (app/tests/test_pipeline_concurrency.py)
+        run: python -m app.tests.test_pipeline_concurrency
+
   frontend:
     name: Frontend — lint, typecheck, tests, build
     runs-on: ubuntu-latest

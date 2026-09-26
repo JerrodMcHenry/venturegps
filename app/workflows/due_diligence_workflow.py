@@ -23,6 +23,7 @@ from app.models.startup import SIEContext
 from app.models.analysis_context import AnalysisContext
 from app.workflows.sie_assembler import assemble_sie_analysis
 from app.ai.sps_v3_adapter import sps_v3_enabled, compute_sps_v3_assessment
+from app.ai.concurrency import run_concurrently
 
 
 def build_provenance_context(
@@ -211,17 +212,33 @@ def analyze_pillars_from_enriched_text(enriched_text: str) -> dict:
     live Tavily search or research-enrichment LLM call happens per
     scoring run. Production behavior is unchanged -- run_due_diligence()
     below still always builds enriched_text from live research first and
-    calls this same function; nothing here changes what production does
-    by default.
+    calls this same function.
+
+    Portfolio Release Task 7, Phase 2 -- Reduce Analysis Latency: these
+    six calls are independent of each other (each reads only
+    enriched_text -- confirmed by the Phase 1 audit) and now run
+    CONCURRENTLY via run_concurrently() (app/ai/concurrency.py), bounded
+    to all six at once -- a small, explicit, conservative bound, not
+    unbounded fan-out. Each pillar's own internal evidence-extraction ->
+    scoring dependency (app/ai/analyze_pillar.py::analyze_pillar(), and
+    that function's own bounded retry/correction-pass behavior via
+    call_analysis_model()) is completely unchanged and still runs
+    sequentially within that one pillar's own call; only the six
+    pillars' relationship TO EACH OTHER changed, from sequential to
+    concurrent. Same prompts, same model, same scoring methodology --
+    this is an orchestration change only. A failure in any one pillar
+    raises (run_concurrently()'s own "fails loud, never partial"
+    contract) rather than silently omitting that pillar or returning an
+    incomplete analysis.
     """
-    return {
-        "founder_analysis": analyze_founders(enriched_text),
-        "market_analysis": analyze_market(enriched_text),
-        "product_analysis": analyze_product(enriched_text),
-        "execution_analysis": analyze_execution(enriched_text),
-        "traction_analysis": analyze_traction(enriched_text),
-        "financial_analysis": analyze_financials(enriched_text),
-    }
+    return run_concurrently({
+        "founder_analysis": lambda: analyze_founders(enriched_text),
+        "market_analysis": lambda: analyze_market(enriched_text),
+        "product_analysis": lambda: analyze_product(enriched_text),
+        "execution_analysis": lambda: analyze_execution(enriched_text),
+        "traction_analysis": lambda: analyze_traction(enriched_text),
+        "financial_analysis": lambda: analyze_financials(enriched_text),
+    })
 
 
 def run_due_diligence(
@@ -243,11 +260,26 @@ def run_due_diligence(
 
     enriched_text = build_enriched_text(company_text, research_context)
 
-    summary = summarize_company(enriched_text)
-    risk_analysis = analyze_risks(enriched_text)
-    competitor_analysis = analyze_competitors(enriched_text)
-    memo = generate_investment_memo(enriched_text)
-    structured_analysis = generate_structured_analysis(enriched_text)
+    # Portfolio Release Task 7, Phase 2: these five calls are independent
+    # of each other (each reads only enriched_text -- confirmed by the
+    # Phase 1 audit) and now run concurrently via the same
+    # run_concurrently() helper analyze_pillars_from_enriched_text() uses
+    # below, bounded to all five at once. Same functions, same
+    # arguments, same outputs -- only the orchestration (sequential ->
+    # concurrent) changed. A failure in any one of them raises rather
+    # than silently omitting it.
+    free_form_results = run_concurrently({
+        "summary": lambda: summarize_company(enriched_text),
+        "risk_analysis": lambda: analyze_risks(enriched_text),
+        "competitor_analysis": lambda: analyze_competitors(enriched_text),
+        "memo": lambda: generate_investment_memo(enriched_text),
+        "structured_analysis": lambda: generate_structured_analysis(enriched_text),
+    })
+    summary = free_form_results["summary"]
+    risk_analysis = free_form_results["risk_analysis"]
+    competitor_analysis = free_form_results["competitor_analysis"]
+    memo = free_form_results["memo"]
+    structured_analysis = free_form_results["structured_analysis"]
 
     pillar_results = analyze_pillars_from_enriched_text(enriched_text)
     founder_analysis = pillar_results["founder_analysis"]
@@ -313,18 +345,26 @@ def run_due_diligence(
 
     overall_score = sie_analysis.startup_intelligence_score
 
-    # SPS V3 Canonical Activation: sps_v3_enabled() now defaults ON
-    # (SPS_ENGINE_VERSION unset -> V3; explicit "v2_1" -> legacy-only).
+    # Portfolio Release Task 7, Phase 2 -- One Production Scoring
+    # Methodology: sps_v3_enabled() now defaults OFF (SPS_ENGINE_VERSION
+    # unset, or anything other than exactly "v3", selects V2.1-only;
+    # explicit "v3" re-enables it) -- reversing the prior phase's
+    # "Canonical Activation" default now that the Phase 1 audit found no
+    # product surface (Rankings/Search/Discovery/Compare/Score History)
+    # actually reads sps_v3, so every analysis was paying for an extra
+    # sequential LLM call for an assessment nothing downstream used.
     # NOTHING above this line changes either way -- the V2.1 pipeline
     # that produced overall_score/investment_score/readiness runs
     # unconditionally, completely unaffected by this flag; it is not
-    # replaced, only supplemented. When enabled (the default), this makes
-    # exactly ONE additional LLM call (a classification pass over
-    # evidence V2.1 already extracted -- no new research, no new Tavily
-    # call) and can only ADD sie_analysis.sps_v3; it never modifies
+    # replaced, only supplemented. When enabled, this makes exactly ONE
+    # additional LLM call (a classification pass over evidence V2.1
+    # already extracted -- no new research, no new Tavily call) and can
+    # only ADD sie_analysis.sps_v3; it never modifies
     # market_score/team_score/.../overall_score or any other field
-    # already assembled above. See docs/methodology/
-    # SPS_V3_CANONICAL_ACTIVATION.md for the full activation record.
+    # already assembled above. V3's own code (app/ai/sps_v3_adapter.py,
+    # app/ai/sps_v3_engine/) and every already-persisted analysis's
+    # sps_v3 field are completely unchanged -- see
+    # sps_v3_enabled()'s own docstring for the full record.
     if sps_v3_enabled():
         sie_analysis.sps_v3 = compute_sps_v3_assessment(
             sie_analysis,

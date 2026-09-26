@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 import json
 import os
 
+from app.ai.concurrency import run_concurrently
+
 load_dotenv()
 
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -173,16 +175,46 @@ _CATEGORY_LABELS = {
 def enrich_research(company_text):
     queries = extract_search_queries(company_text)
 
+    # Portfolio Release Task 7, Phase 2 -- Reduce Analysis Latency: these
+    # up-to-four category searches are independent Tavily calls (each
+    # its own query, no shared state) -- confirmed by the Phase 1 audit
+    # as one of the three safely-parallelizable groups. Run concurrently
+    # via run_concurrently() (app/ai/concurrency.py), bounded to at most
+    # len(RESEARCH_CATEGORIES) at once. A category whose query came back
+    # empty is skipped exactly as before -- never submitted as a task at
+    # all, not merely filtered out of the result afterward.
+    categories_to_search = [category for category in RESEARCH_CATEGORIES if queries.get(category)]
+
+    results_by_category = run_concurrently(
+        {
+            # Default-arg capture (q=queries[category]) -- without it,
+            # every one of these closures would share the SAME final
+            # loop variable `category` by the time they actually run
+            # (Python's usual late-binding-closure trap), and every
+            # search would query for whichever category happened to be
+            # last, not its own.
+            category: (lambda q=queries[category]: search_web(q))
+            for category in categories_to_search
+        }
+    )
+
     combined_research_text_parts = []
     combined_sources = []
     seen_source_urls = set()
 
+    # Deterministic assembly: iterate RESEARCH_CATEGORIES' own FIXED
+    # order (never dict/completion order) so the combined research text
+    # fed into the brief-synthesis call below is identical to what the
+    # old sequential loop produced for the same underlying Tavily
+    # results, regardless of which search actually finished first. This
+    # is what makes "the same controlled inputs produce the same output"
+    # true here, not just at the pillar/free-form call level.
     for category in RESEARCH_CATEGORIES:
-        query = queries.get(category, "")
-        if not query:
+        if category not in results_by_category:
             continue
 
-        web_results = search_web(query)
+        query = queries[category]
+        web_results = results_by_category[category]
 
         if web_results["research_text"]:
             combined_research_text_parts.append(

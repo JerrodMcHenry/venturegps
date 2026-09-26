@@ -160,20 +160,32 @@ _DIMENSIONS_BY_PILLAR_KEY: dict[str, tuple[str, ...]] = {
 
 def sps_v3_enabled() -> bool:
     """
-    SPS V3 Canonical Activation. V3 is now the DEFAULT for new analyses:
-    an unset SPS_ENGINE_VERSION selects V3, matching this phase's own
-    "a developer should not need SPS_ENGINE_VERSION=v3 for normal
-    operation" requirement. V2.1 remains fully intact and unconditionally
-    computed either way (see run_due_diligence()'s own comment) -- this
-    flag only controls whether the ADDITIVE sps_v3 field is also
-    computed. The narrowly-scoped rollback switch from Phase 10.9 is
-    preserved unchanged: explicitly setting SPS_ENGINE_VERSION=v2_1
-    forces legacy (V3-off) behavior for emergency rollback or testing.
-    Any other explicit value (including a typo) also falls back to
-    legacy -- fails closed toward the previously-shipped behavior, never
-    silently toward an unrecognized third state.
+    Portfolio Release Task 7, Phase 2 -- One Production Scoring
+    Methodology. Reverses the "SPS V3 Canonical Activation" default from
+    the previous phase: V3 is now OFF for new analyses unless explicitly
+    requested. The Phase 1 audit (docs/methodology/-- see this task's own
+    report) found V3 running in production by default with no product
+    surface actually using it (Rankings/Search/Discovery/Compare/Score
+    History all key off V2.1's startup_intelligence_score, never
+    sps_v3), each analysis paying for an extra sequential LLM call for
+    an assessment nothing downstream reads. Six-pillar V2.1 is the one
+    canonical production scoring system per this task's own explicit
+    instruction.
+
+    This uses the SAME configuration mechanism as before, not a new
+    one: SPS_ENGINE_VERSION unset, or any value that isn't exactly
+    "v3", now selects V2.1-only. Explicitly setting
+    SPS_ENGINE_VERSION=v3 still turns V3 back on -- nothing about V3's
+    OWN code, its adapter, its engine, or any already-persisted
+    analysis's sps_v3 field changed; this flips which state is the
+    default, the same one-line-config-change shape the previous phase's
+    own rollback switch already used in the other direction. V2.1
+    remains fully intact and unconditionally computed either way (see
+    run_due_diligence()'s own comment) -- this flag only ever controlled
+    whether the ADDITIVE sps_v3 field is also computed, never V2.1
+    itself.
     """
-    return os.getenv("SPS_ENGINE_VERSION", "v3").strip().lower() != "v2_1"
+    return os.getenv("SPS_ENGINE_VERSION", "v2_1").strip().lower() == "v3"
 
 
 _STAGE_KEYWORDS: tuple[tuple[str, Stage], ...] = (
