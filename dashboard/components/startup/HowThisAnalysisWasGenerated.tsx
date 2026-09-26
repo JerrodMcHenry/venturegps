@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import CollapsibleSection from "@/components/ui/CollapsibleSection";
 import { SparkleIcon } from "./icons";
 
@@ -102,11 +104,28 @@ export default function HowThisAnalysisWasGenerated({
           <li><span className="font-medium text-text-primary">Unavailable</span> — there wasn&rsquo;t enough information to responsibly score this; it is excluded from the score, never guessed.</li>
           <li><span className="font-medium text-text-primary">Confidence (Low / Medium / High)</span> — how much the AI itself trusts its own read of the available evidence for that dimension.</li>
         </ul>
+
+        {/* Portfolio Release Task 7, Phase 3: Key Risks (in the summary
+            above) uses friendlier labels built directly from these same
+            three evidence statuses -- explained here so the two
+            vocabularies are never confusing side by side. */}
+        <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-text-muted">How Key Risks labels map to these</p>
+        <ul className="mt-1.5 space-y-1.5 text-sm leading-6 text-text-secondary">
+          <li><span className="font-medium text-text-primary">Observed weakness</span> — a real, below-average finding on a dimension marked Observed.</li>
+          <li><span className="font-medium text-text-primary">Inferred risk</span> — a below-average finding on a dimension marked Inferred; treat with more uncertainty than an Observed weakness.</li>
+          <li><span className="font-medium text-text-primary">Information gap</span> — a dimension marked Unavailable. Never a demonstrated weakness — missing information is not evidence of poor performance.</li>
+        </ul>
         <p className="mt-2 text-sm leading-6 text-text-secondary">
           One distinction this report does not yet make: whether a piece of evidence came directly
           from the company (e.g. a pitch deck claim) versus an independent public source. Every
           quoted evidence item above is shown as-is, regardless of which it was.
         </p>
+      </div>
+
+      <div className="border-t border-border pt-3">
+        <Link href="/how-it-works" className="text-sm font-semibold text-primary hover:underline">
+          Read the full technical explanation of how VentureGPS works →
+        </Link>
       </div>
     </CollapsibleSection>
   );

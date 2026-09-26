@@ -66,8 +66,13 @@ function test_signed_out_navigation_matches_the_spec(): void {
   const arrayEnd = source.indexOf("];", arrayStart);
   const arrayText = source.slice(arrayStart, arrayEnd);
 
+  // Portfolio Release Task 7, Phase 3: repointed from the homepage's own
+  // inline anchor to the full /how-it-works page -- a primary nav
+  // destination should lead somewhere real from any page, not just
+  // scroll an anchor that only exists on "/". See PublicNav.tsx's own
+  // comment.
   expect(/label:\s*"How It Works"/.test(arrayText), "Signed-out nav must link to \"How It Works\"");
-  expect(/href:\s*"\/#how-it-works"/.test(arrayText), "\"How It Works\" must anchor into the homepage's own explainer section");
+  expect(/href:\s*"\/how-it-works"/.test(arrayText), "\"How It Works\" must link to the full /how-it-works page");
 }
 
 function test_signed_out_row_has_sign_in_and_get_started(): void {

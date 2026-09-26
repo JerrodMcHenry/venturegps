@@ -130,6 +130,23 @@ export default function PillarWorkspace({
         </Section>
 
         <Section title="Evidence" icon={<DocumentIcon className="h-3.5 w-3.5 text-text-muted" />}>
+          {/* Portfolio Release Task 7, Phase 3 -- Improve Evidence
+              Transparency. Traced end to end: an evidence item CAN carry
+              a real source URL (EvidenceList below already renders it as
+              a clickable link when present -- see isEvidenceObject()),
+              but the evidence-extraction prompt (app/ai/
+              evidence_extraction.py) only ever asks for quoted/
+              paraphrased text, never a per-quote source URL, so in
+              practice every item here is an unlinked quote today. Stated
+              plainly rather than silently -- the real research source
+              URLs this analysis used are one section below ("How this
+              analysis was generated"), just not yet tied to any specific
+              quote. This is a known gap, not a fabricated link. */}
+          <p className="mb-2 text-sm text-text-secondary">
+            Direct quotes or paraphrases from the submitted material and research. Individual quotes
+            aren&rsquo;t yet linked to a specific source — see &ldquo;How this analysis was
+            generated&rdquo; below for the public sources this analysis consulted.
+          </p>
           <EvidenceList items={pillar.evidence} />
         </Section>
 

@@ -192,24 +192,144 @@ function isFullyInsufficientEvidence(methodology: SIEMethodologyAnalysis): boole
   return Boolean(unavailable) && unavailable!.length >= PILLARS.length;
 }
 
-// Key Risks: a concise, top-level synthesis from the SAME weaknesses
-// already rendered per-pillar below (PillarWorkspace's own "Key
-// Weaknesses" section) -- no new data, no new AI call. One risk per
-// pillar (its own first-listed weakness), ordered weakest-scored-pillar
-// first, capped at three so this stays a summary, not a duplicate of
-// the full per-pillar detail underneath.
-type KeyRisk = { pillarLabel: string; risk: string };
+// Portfolio Release Task 7, Phase 3 -- Improve Analytical Integrity.
+// Key Risks used to be built from the pillar-level `weaknesses` list --
+// free narrative text generated in the SAME evidence-extraction call as
+// the per-dimension evidence, but NOT individually tagged to a
+// dimension or an evidence_status in the output schema (confirmed by
+// reading app/ai/evidence_extraction.py's own prompt: "weaknesses": []
+// is a bare string array). Verified against a real production analysis
+// (ClaimPilot) that this produces exactly the failure mode this phase
+// asks to fix: "No disclosed unit economics such as CAC, gross margin,
+// or LTV:CAC" was shown as a "Key Weakness" -- it is an INFORMATION GAP
+// (nothing was disclosed), not a demonstrated negative finding, and the
+// old code had no way to tell the difference for an individual string.
+//
+// This is rebuilt from Subscore data instead -- each dimension already
+// carries a real, backend-verified evidence_status (Observed/Inferred/
+// Unavailable), which the old free-text list never referenced. Three
+// distinct kinds, matching this phase's own required distinction:
+//   - "Information gap": evidence_status === "Unavailable". Never
+//     described as a negative finding -- missing_information (what
+//     would be needed) is shown, not a judgment about performance.
+//   - "Observed weakness": evidence_status === "Observed" and a real,
+//     below-average score -- a genuine negative finding backed by
+//     actual evidence, using that dimension's own rationale.
+//   - "Inferred risk": evidence_status === "Inferred" and a below-
+//     average score -- explicitly framed with uncertainty language,
+//     since "Inferred" means the AI drew a conclusion without direct
+//     evidence (at most two indirect signals, per the evidence-
+//     extraction prompt's own rule).
+// No new AI call, no scoring change -- this reads fields the backend
+// already computes and persists; it only fixes which LABEL a finding
+// gets, using data reliable enough to support that label.
+const CONCERNING_SCORE_CEILING = 5.0;
 
-function getKeyRisks(methodology: SIEMethodologyAnalysis): KeyRisk[] {
-  const withScores = PILLARS.map((pillar) => ({
-    pillarLabel: pillar.label,
-    score: methodology[pillar.key].score,
-    risk: methodology[pillar.key].weaknesses[0],
-  })).filter((entry): entry is { pillarLabel: string; score: number | null; risk: string } => Boolean(entry.risk));
+export type KeyFindingKind = "observed_weakness" | "information_gap" | "inferred_risk";
 
-  withScores.sort((a, b) => (a.score ?? Infinity) - (b.score ?? Infinity));
+type KeyFinding = {
+  pillarLabel: string;
+  dimensionName: string;
+  kind: KeyFindingKind;
+  text: string;
+};
 
-  return withScores.slice(0, 3).map(({ pillarLabel, risk }) => ({ pillarLabel, risk }));
+const KEY_FINDING_KIND_LABEL: Record<KeyFindingKind, string> = {
+  observed_weakness: "Observed weakness",
+  information_gap: "Information gap",
+  inferred_risk: "Inferred risk",
+};
+
+const KEY_FINDING_KIND_DOT_CLASS: Record<KeyFindingKind, string> = {
+  observed_weakness: "bg-danger",
+  information_gap: "bg-text-muted",
+  inferred_risk: "bg-warning",
+};
+
+const KEY_FINDING_KIND_BADGE_CLASS: Record<KeyFindingKind, string> = {
+  observed_weakness: "bg-danger/10 text-danger",
+  information_gap: "bg-surface-muted text-text-muted",
+  inferred_risk: "bg-warning/10 text-warning",
+};
+
+function truncate(text: string, maxLength: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxLength) return trimmed;
+  const cut = trimmed.slice(0, maxLength);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim()}…`;
+}
+
+function getKeyFindings(methodology: SIEMethodologyAnalysis): KeyFinding[] {
+  const candidates: (KeyFinding & { sortScore: number })[] = [];
+
+  for (const pillar of PILLARS) {
+    const subscores = methodology[pillar.key].score_breakdown?.subscores ?? [];
+
+    for (const sub of subscores) {
+      if (sub.evidence_status === "Unavailable") {
+        const missing = sub.missing_information?.[0];
+        if (!missing) continue;
+        candidates.push({
+          pillarLabel: pillar.label,
+          dimensionName: sub.name,
+          kind: "information_gap",
+          text: truncate(missing, 140),
+          // Information gaps rank after real findings by default (a
+          // gap is not itself evidence of a problem) -- sortScore
+          // deliberately high/neutral, not tied to the (nonexistent)
+          // score for this dimension.
+          sortScore: 5.5,
+        });
+        continue;
+      }
+
+      if (sub.score === null || sub.score >= CONCERNING_SCORE_CEILING) continue;
+      if (!sub.rationale) continue;
+
+      if (sub.evidence_status === "Observed") {
+        candidates.push({
+          pillarLabel: pillar.label,
+          dimensionName: sub.name,
+          kind: "observed_weakness",
+          text: truncate(sub.rationale, 140),
+          sortScore: sub.score,
+        });
+      } else if (sub.evidence_status === "Inferred") {
+        candidates.push({
+          pillarLabel: pillar.label,
+          dimensionName: sub.name,
+          kind: "inferred_risk",
+          text: truncate(sub.rationale, 140),
+          sortScore: sub.score,
+        });
+      }
+    }
+  }
+
+  // Observed weaknesses first (the most defensible findings), then
+  // inferred risks, then information gaps -- within each kind, weakest
+  // score first. Deduped by text so the same missing_information
+  // phrase never appears twice (Phase 3's own "eliminate duplicate
+  // risks where practical").
+  const kindOrder: Record<KeyFindingKind, number> = { observed_weakness: 0, inferred_risk: 1, information_gap: 2 };
+  candidates.sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || a.sortScore - b.sortScore);
+
+  const seen = new Set<string>();
+  const deduped: KeyFinding[] = [];
+  for (const candidate of candidates) {
+    const key = candidate.text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push({
+      pillarLabel: candidate.pillarLabel,
+      dimensionName: candidate.dimensionName,
+      kind: candidate.kind,
+      text: candidate.text,
+    });
+  }
+
+  return deduped.slice(0, 5);
 }
 
 export default function StartupHeroV2({
@@ -222,7 +342,7 @@ export default function StartupHeroV2({
   const analysisType = getAnalysisType(methodology.analysis_context);
   const analysisDate = formatAnalysisDate(createdAt);
   const insufficientEvidence = isFullyInsufficientEvidence(methodology);
-  const keyRisks = getKeyRisks(methodology);
+  const keyFindings = getKeyFindings(methodology);
 
   // Phase 31C-A -- Global Founder UX Acceptance, Part 1/6: this used to
   // also include "Methodology v2.1-spec-2026-08-29" (the raw internal
@@ -369,21 +489,40 @@ export default function StartupHeroV2({
             <p className="mt-3 max-w-prose text-[17px] leading-8 text-text-secondary">
               {methodology.executive_coaching_summary}
             </p>
+
+            {/* Portfolio Release Task 7, Phase 3: this paragraph is the
+                model's own free-text narrative synthesis -- unlike Key
+                Risks below, it is not tagged to a specific dimension or
+                evidence_status, so it can't be reliably reclassified as
+                Observed/Inferred/Gap here. Conservative disclosure
+                instead of inventing a per-sentence classification. */}
+            <p className="mt-2 text-xs text-text-muted">
+              AI-written narrative synthesis, not individually evidence-tagged. See Key Risks below and
+              each pillar&rsquo;s own dimensions for the evidence-classified detail.
+            </p>
           </div>
 
-          {keyRisks.length > 0 ? (
+          {keyFindings.length > 0 ? (
             <div className="mt-6 border-t border-border pt-6">
               <h2 className="flex items-center gap-1.5 text-xl font-semibold text-text-primary">
                 <AlertIcon className="h-4 w-4 text-danger" />
                 Key Risks
               </h2>
+              <p className="mt-1 text-xs text-text-secondary">
+                Built directly from each dimension&rsquo;s own evidence status -- an information gap is
+                never shown as a demonstrated weakness.
+              </p>
 
-              <ul className="mt-3 space-y-2">
-                {keyRisks.map(({ pillarLabel, risk }) => (
-                  <li key={pillarLabel} className="flex gap-2.5 text-base leading-7 text-text-secondary">
-                    <span aria-hidden="true" className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />
+              <ul className="mt-3 space-y-2.5">
+                {keyFindings.map((finding) => (
+                  <li key={`${finding.pillarLabel}-${finding.dimensionName}`} className="flex gap-2.5 text-base leading-7 text-text-secondary">
+                    <span aria-hidden="true" className={["mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full", KEY_FINDING_KIND_DOT_CLASS[finding.kind]].join(" ")} />
                     <span>
-                      <span className="font-medium text-text-primary">{pillarLabel}:</span> {risk}
+                      <span className="font-medium text-text-primary">{finding.pillarLabel} — {finding.dimensionName}:</span>{" "}
+                      {finding.text}{" "}
+                      <span className={["ml-1 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium", KEY_FINDING_KIND_BADGE_CLASS[finding.kind]].join(" ")}>
+                        {KEY_FINDING_KIND_LABEL[finding.kind]}
+                      </span>
                     </span>
                   </li>
                 ))}

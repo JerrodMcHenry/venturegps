@@ -83,6 +83,15 @@ export default function HowItWorksSection() {
           >
             {aiExpanded ? "Hide how VentureGPS uses AI ▴" : "How VentureGPS uses AI ▾"}
           </button>
+
+          {/* Portfolio Release Task 7, Phase 3: this section stays a
+              short teaser (Task 5's own "don't make the homepage
+              longer" boundary) -- the full stage-by-stage pipeline,
+              architecture diagram, and probabilistic/deterministic
+              explanation live on their own page. */}
+          <Link href="/how-it-works" className="text-sm font-semibold text-primary hover:underline">
+            Read the full technical explanation →
+          </Link>
         </div>
 
         {aiExpanded ? (

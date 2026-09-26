@@ -53,7 +53,14 @@ type NavLink = {
 
 // Signed-out primary row. Deliberately short -- four things, exactly as
 // specified: branding (rendered separately, below) + these three.
-const SIGNED_OUT_NAVIGATION: NavLink[] = [{ label: "How It Works", href: "/#how-it-works" }];
+// Portfolio Release Task 7, Phase 3: points at the full /how-it-works
+// page (the real production pipeline, stage by stage) rather than the
+// homepage's own short inline section -- a primary nav destination
+// should lead somewhere real to land on from any page, not just scroll
+// an anchor that only exists on "/". The homepage's own section still
+// exists and still links onward to this same page for anyone who lands
+// there first.
+const SIGNED_OUT_NAVIGATION: NavLink[] = [{ label: "How It Works", href: "/how-it-works" }];
 
 // Signed-in primary row -- the one array TopNav.tsx's old PRIMARY_NAVIGATION
 // used to be, now here so the desktop nav and the mobile disclosure panel

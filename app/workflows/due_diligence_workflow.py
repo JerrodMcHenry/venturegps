@@ -1,4 +1,5 @@
 import hashlib
+import time
 from datetime import datetime, timezone
 
 from app.ai.summarize import summarize_company
@@ -24,6 +25,33 @@ from app.models.analysis_context import AnalysisContext
 from app.workflows.sie_assembler import assemble_sie_analysis
 from app.ai.sps_v3_adapter import sps_v3_enabled, compute_sps_v3_assessment
 from app.ai.concurrency import run_concurrently
+
+
+# ---------------------------------------------------------------------------
+# Portfolio Release Task 7, Phase 3 -- Add Processing-Time Observability.
+# Reuses this codebase's existing logging convention (print() to stdout --
+# see app/auth.py's own auth-failure diagnostics, CLAUDE.md's own
+# description of this as the established mechanism) rather than adding a
+# new monitoring service or dependency. One line per stage plus one total
+# line, all prefixed the same way so they're trivially greppable
+# ("[due_diligence_workflow]") in whatever already collects stdout
+# (Render's own log capture in production, a local terminal in dev).
+#
+# `run_id` is a short (12-hex-char) SHA-256 prefix of company_text --
+# deterministic, and reveals nothing about the content (a hash is not
+# reversible), so it's safe to log even though company_text itself never
+# is. It exists only so multiple stage lines from the SAME analysis can
+# be correlated in a log stream where many analyses may be interleaved
+# across concurrent requests -- never company text, never a prompt,
+# never a research brief, never any credential.
+# ---------------------------------------------------------------------------
+
+def _new_run_id(company_text: str) -> str:
+    return hashlib.sha256(company_text.encode("utf-8")).hexdigest()[:12]
+
+
+def _log_stage(run_id: str, stage: str, duration_s: float) -> None:
+    print(f"[due_diligence_workflow] run_id={run_id} stage={stage} duration_s={duration_s:.2f}")
 
 
 def build_provenance_context(
@@ -252,7 +280,12 @@ def run_due_diligence(
     # analysis, or scoring. Defaults keep every pre-existing caller
     # (text, website, calibration, the CLI) behaving exactly as before;
     # only /analyze-pdf and /analyze pass non-default values.
+    run_id = _new_run_id(company_text)
+    pipeline_started = time.monotonic()
+
+    stage_started = time.monotonic()
     research_result = enrich_research(company_text)
+    _log_stage(run_id, "research", time.monotonic() - stage_started)
 
     research_context = research_result["research_brief"]
     sources = research_result["sources"]
@@ -268,6 +301,7 @@ def run_due_diligence(
     # arguments, same outputs -- only the orchestration (sequential ->
     # concurrent) changed. A failure in any one of them raises rather
     # than silently omitting it.
+    stage_started = time.monotonic()
     free_form_results = run_concurrently({
         "summary": lambda: summarize_company(enriched_text),
         "risk_analysis": lambda: analyze_risks(enriched_text),
@@ -275,13 +309,16 @@ def run_due_diligence(
         "memo": lambda: generate_investment_memo(enriched_text),
         "structured_analysis": lambda: generate_structured_analysis(enriched_text),
     })
+    _log_stage(run_id, "free_form_calls", time.monotonic() - stage_started)
     summary = free_form_results["summary"]
     risk_analysis = free_form_results["risk_analysis"]
     competitor_analysis = free_form_results["competitor_analysis"]
     memo = free_form_results["memo"]
     structured_analysis = free_form_results["structured_analysis"]
 
+    stage_started = time.monotonic()
     pillar_results = analyze_pillars_from_enriched_text(enriched_text)
+    _log_stage(run_id, "pillar_analyses", time.monotonic() - stage_started)
     founder_analysis = pillar_results["founder_analysis"]
     market_analysis = pillar_results["market_analysis"]
     product_analysis = pillar_results["product_analysis"]
@@ -316,6 +353,7 @@ def run_due_diligence(
     financial_score = get_pillar_score(sie_analysis.financial_health)
     overall_score = sie_analysis.startup_intelligence_score
 
+    stage_started = time.monotonic()
     readiness = generate_readiness_score(
         market_score,
         team_score,
@@ -325,6 +363,7 @@ def run_due_diligence(
         financial_score,
         overall_score,
     )
+    _log_stage(run_id, "readiness_score", time.monotonic() - stage_started)
 
     sie_analysis = build_sie_methodology_analysis(
         structured_analysis=structured_analysis,
@@ -366,10 +405,14 @@ def run_due_diligence(
     # sps_v3 field are completely unchanged -- see
     # sps_v3_enabled()'s own docstring for the full record.
     if sps_v3_enabled():
+        stage_started = time.monotonic()
         sie_analysis.sps_v3 = compute_sps_v3_assessment(
             sie_analysis,
             id_seed=(structured_analysis.get("company_name") or "STARTUP")[:40],
         )
+        _log_stage(run_id, "sps_v3_assessment", time.monotonic() - stage_started)
+
+    _log_stage(run_id, "total", time.monotonic() - pipeline_started)
 
     investment_score = {
         "market_score": market_score,

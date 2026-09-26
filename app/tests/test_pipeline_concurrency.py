@@ -20,7 +20,9 @@ Run with:
     python -m app.tests.test_pipeline_concurrency
 """
 
+import io
 import time
+from contextlib import redirect_stdout
 
 from app.ai.concurrency import run_concurrently
 from app.ai.sps_v3_adapter import sps_v3_enabled
@@ -482,6 +484,40 @@ def test_full_pipeline_fails_cleanly_when_a_dependency_fails() -> None:
         _restore(originals)
 
 
+# ---------------------------------------------------------------------------
+# Processing-time observability (Task 7, Phase 3)
+# ---------------------------------------------------------------------------
+
+def test_run_due_diligence_logs_a_duration_line_per_stage_and_a_total() -> None:
+    """Verifies the actual log OUTPUT, not just that timing doesn't
+    break anything -- the point of this instrumentation is that someone
+    reading stdout can see per-stage and total durations. Also confirms
+    company_text itself is never printed (only a short, irreversible
+    hash prefix) -- the "never log private content" requirement."""
+    call_counts: dict[str, int] = {}
+    originals = _install_full_pipeline_mocks({name: 0.02 for name in _ALL_MOCKED_NAMES}, call_counts)
+
+    captured = io.StringIO()
+    try:
+        with redirect_stdout(captured):
+            workflow.run_due_diligence("Confidential Acme Corp pitch deck text that must never be logged verbatim.")
+    finally:
+        _restore(originals)
+
+    output = captured.getvalue()
+    expect("[due_diligence_workflow]" in output, "Expected the established log prefix to appear")
+    for stage in ("stage=research", "stage=free_form_calls", "stage=pillar_analyses", "stage=readiness_score", "stage=total"):
+        expect(stage in output, f"Expected a log line for {stage}, got:\n{output}")
+    expect("run_id=" in output, "Expected a run_id correlation field on each log line")
+    expect(
+        "Confidential Acme Corp pitch deck text" not in output,
+        "The raw company_text must NEVER appear in logs -- only a short hash prefix (run_id)",
+    )
+    # SPS V3 is off by default (Task 7 Phase 2) -- its own stage line
+    # must not appear when no SPS_ENGINE_VERSION=v3 override is set.
+    expect("stage=sps_v3_assessment" not in output, "V3's stage line must not appear when V3 is off (the default)")
+
+
 TESTS = [
     test_run_concurrently_is_actually_concurrent_not_sequential,
     test_run_concurrently_result_mapping_is_deterministic_regardless_of_completion_order,
@@ -496,6 +532,7 @@ TESTS = [
     test_full_pipeline_runs_concurrently_and_calls_each_dependency_exactly_once,
     test_full_pipeline_produces_identical_scores_regardless_of_completion_order,
     test_full_pipeline_fails_cleanly_when_a_dependency_fails,
+    test_run_due_diligence_logs_a_duration_line_per_stage_and_a_total,
 ]
 
 

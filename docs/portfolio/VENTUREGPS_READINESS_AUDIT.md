@@ -166,6 +166,8 @@ graph TB
 
 ### 4.2 Sequence diagram — `POST /analyze`
 
+**Updated (Portfolio Release Task 7, Phases 2–3):** the three independent call groups below (research searches, free-form narrative calls, six pillar analyses) are now dispatched through the shared `app/ai/concurrency.py::run_concurrently()` helper — a bounded `ThreadPoolExecutor` with deterministic result-order reassembly — instead of running one call at a time. Each pillar's own two-call evidence→scoring dependency is preserved (only the six *pillars* run concurrently with each other; within one pillar, evidence extraction still finishes before scoring starts). `run_due_diligence()` also now logs a duration line per stage plus a total, keyed by a hash-only `run_id` (never the raw company text) — see `app/workflows/due_diligence_workflow.py::_log_stage()`.
+
 ```mermaid
 sequenceDiagram
     participant U as User (Browser)
@@ -190,27 +192,34 @@ sequenceDiagram
     API->>API: extract_text_from_website() [SSRF-guarded] and/or extract_text_from_pdf()
     API->>Pipeline: run_due_diligence(assembled_text)
     Pipeline->>OpenAI: extract_search_queries() (1 call)
-    Pipeline->>Tavily: search_web() x4 (one per research category)
-    Pipeline->>OpenAI: summarize, risk, competitor, memo, structured_analysis (5 calls)
-    loop 6 pillars (market/team/product/execution/traction/financial)
-        Pipeline->>OpenAI: extract_pillar_evidence()
-        Pipeline->>OpenAI: score_pillar_evidence()
+    par bounded concurrency (research)
+        Pipeline->>Tavily: search_web() x4 (one per research category)
+    end
+    par bounded concurrency (free-form)
+        Pipeline->>OpenAI: summarize, risk, competitor, memo, structured_analysis (5 calls)
+    end
+    par bounded concurrency (6 pillars, each still evidence-before-scoring)
+        loop per pillar (market/team/product/execution/traction/financial)
+            Pipeline->>OpenAI: extract_pillar_evidence()
+            Pipeline->>OpenAI: score_pillar_evidence()
+        end
     end
     Pipeline->>Pipeline: deterministic overrides + weighted scoring (Python, no LLM)
     Pipeline->>OpenAI: generate_readiness_score()
-    opt SPS v3 enabled (default)
+    opt SPS v3 enabled (off by default since Task 7, Phase 2)
         Pipeline->>OpenAI: compute_sps_v3_assessment()
     end
+    Pipeline->>Pipeline: _log_stage() per stage + total (hash-only run_id, no raw company text)
     Pipeline-->>API: sie_analysis (structured result)
     API->>DB: save_analysis() (public schema)
     API->>DB: finish_analysis_run(status="completed")
     API-->>FE: 200 StartupAnalysisResponse
-    FE-->>U: Redirect to Startup Profile (six pillars, SPS, evidence)
+    FE-->>U: Redirect to Startup Profile (six pillars, VentureGPS Score, evidence)
 ```
 
 ### 4.3 Missing integration / production blockers identified in this trace
 
-- **Latency**: ~19–20 sequential LLM calls + 4 sequential Tavily calls per request, none parallelized (`app/workflows/due_diligence_workflow.py` is straight-line Python, no `asyncio.gather`/threading). The real recorded cohort run (§3.1) measured **230.5 seconds for one company** — this is real, not estimated. **VERIFIED**.
+- **Latency (as originally audited, before Task 7):** ~19–20 sequential LLM calls + 4 sequential Tavily calls per request, none parallelized (`app/workflows/due_diligence_workflow.py` was straight-line Python, no `asyncio.gather`/threading). The real recorded cohort run (§3.1) measured **230.5 seconds for one company** — this was real, not estimated, at the time. **Addressed (Portfolio Release Task 7, Phase 2):** the three independent call groups (4 research searches, 5 free-form calls, 6 pillar analyses) now run through `run_concurrently()` with a conservative bounded worker count, preserving each pillar's own evidence→scoring order and existing retry/backoff. This is a concurrency change only — no prompt, weight, threshold, or scoring-formula change — and per-request wall-clock/call-count improvement was measured with comparable inputs rather than assumed; see the Phase 2 implementation record for exact before/after figures. Failures are still never silently discarded: any dependency failure in a group fails that request loudly rather than returning a partial or misleading analysis.
 - **No per-call timeout/retry tuning**: every `OpenAI(...)` client across `app/ai/*.py` is constructed with only `api_key=...` — no `timeout=`, no `max_retries=` override, and no module anywhere catches `openai.RateLimitError`/`APITimeoutError` specifically (grep for these found zero hits). A single transient failure anywhere in the ~20-call chain fails the *entire* multi-minute, already-expensive pipeline; the only containment is the top-level generic `except Exception` in `app/api.py` that returns 502. **VERIFIED.**
   **Partially addressed (Portfolio Release Task 2):** `app/ai/pillar_shared.py::call_analysis_model()` — the call every one of the six pillar analyses shares — now retries transient failures (connection errors, timeouts, 429/408/409/5xx) with bounded exponential backoff and jitter, and fails immediately on permanent ones (auth, bad request, etc.). See `docs/portfolio/AI_REQUEST_RELIABILITY.md` for the full design record. The five narrative-generation calls (`summarize.py`, `risk_analysis.py`, `memo_generator.py`, `competitor_anlalysis.py`, `structured_analysis.py`) and `research_enrichment.py`'s OpenAI/Tavily calls each still construct their own separate client with no retry logic — this gap remains open for those specifically.
 - **No CI**: nothing runs any of the 61 backend test files, the V2 pytest suite, or the frontend checks automatically on push/PR. Everything I ran in §5 I ran by hand, today. **VERIFIED**.
