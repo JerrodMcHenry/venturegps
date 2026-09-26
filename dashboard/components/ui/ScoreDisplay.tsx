@@ -101,7 +101,7 @@ export default function ScoreDisplay({
       {modeled ? (
         <p className="mt-2 text-base leading-7 text-text-secondary">
           Based on modeled assumptions — not observed evidence, and not comparable to a real
-          company&rsquo;s Startup Power Score.
+          company&rsquo;s VentureGPS Score.
         </p>
       ) : null}
     </div>

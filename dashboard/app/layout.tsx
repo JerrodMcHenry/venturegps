@@ -17,12 +17,21 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Portfolio Release Task 6 -- Standardize User-Facing Terminology:
+// "Startup Intelligence Engine"/"Startup Power Score" were the product's
+// old public-facing names -- every page that doesn't set its own
+// explicit <title> (via generateMetadata) fell back to this site-wide
+// default, so the browser tab/search-result title disagreed with the
+// VentureGPS branding the homepage and nav already use (Portfolio
+// Release Task 4). SIE remains the correct INTERNAL engine name (see
+// CLAUDE.md, app/docs/SIE_Methodology_v1.md) -- this is a user-facing
+// display change only, not a rename of the engine itself.
 export const metadata: Metadata = {
   title: {
-    default: "Startup Intelligence Engine",
-    template: "%s | Startup Intelligence Engine",
+    default: "VentureGPS",
+    template: "%s | VentureGPS",
   },
-  description: "Startup intelligence powered by the Startup Power Score.",
+  description: "Evidence-backed startup analysis, powered by the VentureGPS Score.",
 };
 
 export default function RootLayout({

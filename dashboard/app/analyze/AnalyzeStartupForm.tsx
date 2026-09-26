@@ -51,7 +51,7 @@ const STAGES = [
   "Researching the company",
   "Analyzing the six intelligence pillars",
   "Evaluating evidence",
-  "Calculating the Startup Power Score",
+  "Calculating the VentureGPS Score",
   "Building the intelligence profile",
 ];
 
@@ -400,7 +400,7 @@ export default function AnalyzeStartupForm() {
       if (!companyName) {
         setStatus("error");
         setError(
-          "The analysis completed, but SIE could not determine a clear company name to build a profile for. Try including the company's name explicitly and submit again."
+          "The analysis completed, but VentureGPS could not determine a clear company name to build a profile for. Try including the company's name explicitly and submit again."
         );
         return;
       }
@@ -421,7 +421,7 @@ export default function AnalyzeStartupForm() {
         /Request timed out/.test(message)
           ? "The analysis is taking longer than expected and timed out. Your input hasn't been lost -- you can try submitting again."
           : /Network error/.test(message)
-            ? "Couldn't reach the SIE backend. Confirm it's running, then try again."
+            ? "Couldn't reach the VentureGPS backend. Confirm it's running, then try again."
             : /API request failed \(401\)/.test(message)
               ? SESSION_EXPIRED_MESSAGE
               : /API request failed \(404\)/.test(message) && founderTarget.status === "ready"
@@ -543,8 +543,8 @@ export default function AnalyzeStartupForm() {
         title={isFounderTargeted ? "Re-analyze Startup" : "Analyze Startup"}
         subtitle={
           isFounderTargeted
-            ? "Provide a company website, an updated pitch deck, or additional information -- SIE combines it with its own research and refreshes this startup's intelligence."
-            : "Provide a company website, a pitch deck, additional information, or any combination -- SIE will combine what you give it with its own research and build one full, evidence-based Startup Profile."
+            ? "Provide a company website, an updated pitch deck, or additional information -- VentureGPS combines it with its own research and refreshes this startup's intelligence."
+            : "Provide a company website, a pitch deck, additional information, or any combination -- VentureGPS will combine what you give it with its own research and build one full, evidence-based Startup Analysis."
         }
         variant="glow"
       />
@@ -661,7 +661,7 @@ export default function AnalyzeStartupForm() {
 
           <p className="text-sm text-text-secondary">
             At least one source is required. Provide any combination --
-            SIE combines everything you give it into one analysis.
+            VentureGPS combines everything you give it into one analysis.
           </p>
 
           {/* Portfolio Release Task 3B -- Secure Analysis Visibility.
@@ -708,14 +708,39 @@ export default function AnalyzeStartupForm() {
   );
 }
 
+// Portfolio Release Task 6, Step 4 -- Redesign the Loading Experience.
+// Matches the homepage's own glass/gradient system (BaseCard's "glass"
+// variant, the same accent-to-secondary gradient used for the hero's
+// score badges and CTAs) instead of the plain bordered box this used to
+// be. Explicitly names the two real things running -- AI-assisted
+// research, then AI-generated analysis across the six pillars -- rather
+// than the vaguer "researching and evaluating."
+//
+// The duration estimate ("Usually 2-4 minutes") is grounded in Step 5's
+// own investigation of this exact pipeline
+// (app/workflows/due_diligence_workflow.py::run_due_diligence()): around
+// sixteen sequential OpenAI calls today (research query + brief
+// synthesis, five free-form calls, six independent pillar analyses, a
+// readiness-score call, and -- since SPS V3 defaults on -- one V3
+// classification call), none of them run in parallel yet, each with its
+// own generation time and possible retry. This is a real, honest range
+// based on that call count, not a made-up number -- and it is a RANGE,
+// not a false-precision countdown, since actual duration still varies
+// with retries and per-call generation time. STAGES below remains
+// exactly what it was: a static list of what the pipeline covers, never
+// live per-stage progress -- the backend does not report which call is
+// in flight, and this deliberately does not pretend otherwise.
 function AnalyzingState({ elapsedSeconds }: { elapsedSeconds: number }) {
   return (
-    <div className="rounded-2xl border border-border bg-surface p-8">
+    <div className="rounded-2xl border border-primary/15 bg-surface/70 p-8 shadow-lg shadow-primary/5 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/60">
       <div className="flex items-center gap-4">
         <span
           aria-hidden="true"
-          className="h-8 w-8 shrink-0 animate-spin rounded-full border-2 border-border-strong border-t-primary"
-        />
+          className="relative h-10 w-10 shrink-0 rounded-full bg-gradient-to-br from-accent to-secondary p-[3px] motion-safe:animate-spin"
+          style={{ animationDuration: "1.4s" }}
+        >
+          <span className="block h-full w-full rounded-full bg-surface" />
+        </span>
 
         <div>
           <p className="text-lg font-semibold text-text-primary">
@@ -723,8 +748,8 @@ function AnalyzingState({ elapsedSeconds }: { elapsedSeconds: number }) {
           </p>
 
           <p className="mt-1 text-sm text-text-secondary">
-            SIE is researching and evaluating this startup. This typically
-            takes a few minutes -- please keep this tab open.
+            VentureGPS is running AI-assisted research on this company, then AI-generated analysis
+            across the six Intelligence Pillars. Usually 2&ndash;4 minutes -- please keep this tab open.
           </p>
         </div>
       </div>
@@ -735,7 +760,7 @@ function AnalyzingState({ elapsedSeconds }: { elapsedSeconds: number }) {
 
       <div className="mt-6 border-t border-border pt-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          What SIE evaluates
+          What VentureGPS evaluates
         </p>
 
         <ul className="mt-3 space-y-2 text-sm text-text-secondary">
@@ -743,7 +768,7 @@ function AnalyzingState({ elapsedSeconds }: { elapsedSeconds: number }) {
             <li key={stage} className="flex items-center gap-2.5">
               <span
                 aria-hidden="true"
-                className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong"
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-accent to-secondary"
               />
               {stage}
             </li>
@@ -751,7 +776,7 @@ function AnalyzingState({ elapsedSeconds }: { elapsedSeconds: number }) {
         </ul>
 
         <p className="mt-4 text-sm text-text-secondary">
-          This describes what the analysis covers, not live progress -- SIE
+          This describes what the analysis covers, not live progress -- VentureGPS
           doesn&rsquo;t currently report which stage is in flight, so no
           single step is shown as complete until the whole analysis
           finishes.

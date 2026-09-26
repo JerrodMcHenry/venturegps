@@ -322,7 +322,7 @@ export default function FounderStartupWorkspaceView({
             </p>
             <p className="mt-1 text-sm text-text-secondary">
               Update {canonical_name}&rsquo;s startup intelligence to see whether your
-              Startup Power Score reflects what&rsquo;s actually happened.
+              VentureGPS Score reflects what&rsquo;s actually happened.
             </p>
           </div>
           <Link
@@ -359,7 +359,7 @@ function NotYetAnalyzed({
   return (
     <NextStepCard
       eyebrow="No intelligence yet"
-      title={`Analyze ${canonicalName} to see its Startup Power Score`}
+      title={`Analyze ${canonicalName} to see its VentureGPS Score`}
       why="Run SIE's analysis to see pillar scores, strengths, risks, and recommendations here."
       primaryAction={{ label: "Analyze this startup", href: reanalyzeHref }}
     />

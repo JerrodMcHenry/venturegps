@@ -8,16 +8,6 @@ import type { SPSHistoryPoint } from "@/types";
 
 type SPSHistoryProps = {
   history: SPSHistoryPoint[];
-  // Phase 10.9 verification fix: this component always tracks the legacy
-  // V2.1 startup_intelligence_score (score_history has no V3 field --
-  // see get_sps_history()'s own docstring in app/database/db.py). When
-  // the current analysis ALSO has a V3 assessment, showing a bare
-  // "SPS History" / "Current SPS" here reads as a second, competing
-  // number right next to (or directly contradicting, for LIMITED/
-  // INSUFFICIENT) the V3 assessment above it. This only changes the
-  // copy to disambiguate which methodology the number belongs to -- the
-  // data source and every number are unchanged.
-  isLegacyLabel?: boolean;
 };
 
 const CHART_WIDTH = 640;
@@ -41,23 +31,29 @@ function formatShortDate(iso: string): string {
   });
 }
 
-export default function SPSHistory({ history, isLegacyLabel = false }: SPSHistoryProps) {
+// Portfolio Release Task 6 -- Diagnose the Report / Standardize
+// Terminology. This component used to take an `isLegacyLabel` prop,
+// switching its own labels to "V2.1 Score (legacy)"/"V2.1 Score
+// History" whenever the analysis also had an SPS V3 assessment -- a
+// band-aid so this section's "Current Score" didn't read as a second
+// number directly contradicting the hero above it (see
+// StartupHeroV2.tsx's own comment on the actual fix). Now that the
+// hero always shows this SAME startup_intelligence_score (V3, when
+// present, is a clearly-labeled secondary/experimental note, never a
+// competing "current" number), there is nothing left to disambiguate --
+// this always says "Current Score"/"Score History", full stop. Removing
+// the special case is the real fix; relabeling around a contradiction
+// was only ever a symptom treatment.
+export default function SPSHistory({ history }: SPSHistoryProps) {
   const gradientId = useId();
-  // Phase 31C-A -- Global Founder UX Acceptance, Part 1/2/6: "SPS" spelled
-  // out to "Score" throughout this component's labels -- live-discovered
-  // bare on the public Startup Profile ("SPS HISTORY" / "CURRENT SPS").
-  // The V2.1 methodology tag itself is kept (it's a real, meaningful
-  // disambiguation between two methodology generations -- see this
-  // component's own docstring -- not jargon to remove).
-  const currentLabel = isLegacyLabel ? "V2.1 Score (legacy)" : "Current Score";
 
   if (history.length === 0) {
     return (
       <BaseCard className="p-6">
-        <SectionHeading isLegacyLabel={isLegacyLabel} />
+        <SectionHeading />
         <p className="mt-3 text-sm text-text-secondary">
           No historical analyses yet. Run another analysis for this company
-          to start tracking its Startup Power Score over time.
+          to start tracking its VentureGPS Score over time.
         </p>
       </BaseCard>
     );
@@ -69,11 +65,11 @@ export default function SPSHistory({ history, isLegacyLabel = false }: SPSHistor
   if (history.length === 1) {
     return (
       <BaseCard className="p-6">
-        <SectionHeading isLegacyLabel={isLegacyLabel} />
+        <SectionHeading />
 
         <div className="mt-4 flex flex-wrap items-end gap-x-10 gap-y-4">
           <Stat
-            label={currentLabel}
+            label="Current Score"
             value={latest.startup_intelligence_score.toFixed(1)}
           />
           <Stat label="Historical analyses" value="1" />
@@ -81,9 +77,7 @@ export default function SPSHistory({ history, isLegacyLabel = false }: SPSHistor
         </div>
 
         <p className="mt-4 text-sm text-text-secondary">
-          {isLegacyLabel
-            ? "This tracks the earlier V2.1 methodology's score history, separate from the Startup Power Score assessment above."
-            : "Only one canonical analysis exists for this company — a trend will appear once a second analysis is recorded."}
+          Only one canonical analysis exists for this company — a trend will appear once a second analysis is recorded.
         </p>
       </BaseCard>
     );
@@ -95,11 +89,11 @@ export default function SPSHistory({ history, isLegacyLabel = false }: SPSHistor
 
   return (
     <BaseCard className="p-6">
-      <SectionHeading isLegacyLabel={isLegacyLabel} />
+      <SectionHeading />
 
       <div className="mt-4 flex flex-wrap items-end gap-x-10 gap-y-4">
         <Stat
-          label={currentLabel}
+          label="Current Score"
           value={latest.startup_intelligence_score.toFixed(1)}
         />
 
@@ -113,13 +107,6 @@ export default function SPSHistory({ history, isLegacyLabel = false }: SPSHistor
         <Stat label="Last analysis" value={formatDate(latest.created_at)} />
       </div>
 
-      {isLegacyLabel ? (
-        <p className="mt-2 text-sm text-text-secondary">
-          This chart tracks the earlier V2.1 methodology&rsquo;s score history, separate from the
-          Startup Power Score assessment above.
-        </p>
-      ) : null}
-
       <div className="mt-6">
         <SPSLineChart history={history} gradientId={gradientId} />
       </div>
@@ -127,10 +114,10 @@ export default function SPSHistory({ history, isLegacyLabel = false }: SPSHistor
   );
 }
 
-function SectionHeading({ isLegacyLabel }: { isLegacyLabel: boolean }) {
+function SectionHeading() {
   return (
     <h2 className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-      {isLegacyLabel ? "V2.1 Score History" : "Score History"}
+      Score History
     </h2>
   );
 }
@@ -224,7 +211,7 @@ function SPSLineChart({
         viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
         className="w-full"
         role="img"
-        aria-label={`SPS history chart, ${history.length} analyses, current score ${history[
+        aria-label={`VentureGPS Score history chart, ${history.length} analyses, current score ${history[
           history.length - 1
         ].startup_intelligence_score.toFixed(1)}`}
       >
@@ -313,7 +300,7 @@ function SPSLineChart({
                 fill="transparent"
                 tabIndex={0}
                 role="img"
-                aria-label={`${formatDate(point.created_at)}: SPS ${point.startup_intelligence_score.toFixed(
+                aria-label={`${formatDate(point.created_at)}: VentureGPS Score ${point.startup_intelligence_score.toFixed(
                   1
                 )}`}
                 onMouseEnter={() => setActiveIndex(index)}

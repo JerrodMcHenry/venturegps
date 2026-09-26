@@ -263,7 +263,7 @@ export default function FundraisingReadinessView({ startupId }: FundraisingReadi
                   {readiness.canonical_name}&rsquo;s story is for a{" "}
                   <span className="font-medium text-text-primary">{readiness.stage_label}</span>{" "}
                   fundraising conversation — not how good the company is, and not the odds of
-                  actually closing a round. A strong Startup Power Score doesn&rsquo;t
+                  actually closing a round. A strong VentureGPS Score doesn&rsquo;t
                   automatically mean an investor-ready story, and a modest one doesn&rsquo;t rule
                   one out.
                 </p>
@@ -275,7 +275,7 @@ export default function FundraisingReadinessView({ startupId }: FundraisingReadi
                     to read. Bumped to the 14px floor, spelled out. */}
                 {readiness.current_sps !== null ? (
                   <p className="mt-2 text-sm text-text-secondary">
-                    Current Startup Power Score: <span className="font-medium text-text-secondary">{readiness.current_sps.toFixed(1)}</span>{" "}
+                    Current VentureGPS Score: <span className="font-medium text-text-secondary">{readiness.current_sps.toFixed(1)}</span>{" "}
                     (shown for context only — Fundraising Readiness never changes it, and never appears in Rankings).
                   </p>
                 ) : null}
@@ -350,7 +350,7 @@ export default function FundraisingReadinessView({ startupId }: FundraisingReadi
                   {/* Phase 31C-A -- Global Founder UX Acceptance, Part 1/2/6:
                       "SPS 8.0/10" was doubly confusing -- bare jargon,
                       AND actually mislabeled (this is the PILLAR's own
-                      0-10 score, not the aggregate Startup Power Score,
+                      0-10 score, not the aggregate VentureGPS Score,
                       which is 0-100). Relabeled for accuracy, not just
                       readability. Kept at the compact metadata size
                       (Part 8's own "genuinely constrained UI" exception --
@@ -440,7 +440,7 @@ export default function FundraisingReadinessView({ startupId }: FundraisingReadi
           <p className="text-base leading-7 text-text-secondary">
             {readiness.pitch_deck_note} Fundraising Readiness is a separate, deterministic
             assessment of how prepared and well-evidenced your story is for a fundraising
-            conversation — it is not your Startup Power Score, and completing actions or
+            conversation — it is not your VentureGPS Score, and completing actions or
             milestones never changes it directly.
           </p>
         </>

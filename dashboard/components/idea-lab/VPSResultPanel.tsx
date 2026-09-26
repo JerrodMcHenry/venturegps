@@ -79,7 +79,7 @@ export default function VPSResultPanel({ result, title = "Venture Potential Scor
                   evidence-analyzed startups) a first-time founder here has
                   no reason to have encountered yet. Same substantive
                   distinction, plain language. */}
-              <li>• This score is <strong>modeled</strong> from your own assumptions — it&rsquo;s different from a real company&rsquo;s evidence-based Startup Power Score, and the two are never comparable.</li>
+              <li>• This score is <strong>modeled</strong> from your own assumptions — it&rsquo;s different from a real company&rsquo;s evidence-based VentureGPS Score, and the two are never comparable.</li>
               <li>• It reflects your own stated assumptions, not verified company performance.</li>
               <li>• Missing categories are expected for an early idea — that&rsquo;s honest, not a penalty.</li>
               <li>• Validation improves as you add real observations (interviews, signups, paying customers) — not by changing assumptions alone.</li>

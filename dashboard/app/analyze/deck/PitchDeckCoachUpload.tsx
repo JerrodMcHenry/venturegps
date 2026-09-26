@@ -221,7 +221,7 @@ export default function PitchDeckCoachUpload() {
 
           <p className="text-sm text-text-secondary">
             This is a coaching tool, not an investment decision -- it never scores your startup and
-            never affects any Startup Power Score. It&rsquo;s private to your account.
+            never affects any VentureGPS Score. It&rsquo;s private to your account.
           </p>
         </form>
       ) : (

@@ -279,7 +279,7 @@ export default function ActionPlan({ startupId, canonicalName, methodology }: Ac
           14px helper-copy floor and spelled out the score name, same
           fix as the SPS ring itself (RingCenter.tsx). */}
       <p className="mt-3 text-base leading-7 text-text-secondary">
-        Completing actions tracks your execution progress. Your Startup Power Score only
+        Completing actions tracks your execution progress. Your VentureGPS Score only
         changes when new evidence is analyzed.
       </p>
 

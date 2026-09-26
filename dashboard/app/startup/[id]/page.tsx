@@ -152,7 +152,7 @@ export default async function StartupProfilePage({ params }: Props) {
           </div>
 
           <p className="mt-4 max-w-prose text-base leading-7 text-text-secondary">
-            SIE has not analyzed {startup.canonical_name} yet — there is no Startup Power Score,
+            VentureGPS has not analyzed {startup.canonical_name} yet — there is no VentureGPS Score,
             pillar breakdown, or evidence to show. This page will update automatically once an
             analysis exists.
           </p>
@@ -165,26 +165,25 @@ export default async function StartupProfilePage({ params }: Props) {
 
   return (
     <div className="space-y-8">
+      {/* Portfolio Release Task 6, Step 3 -- Simplify the Report: one
+          coherent CURRENT-analysis view first (hero/score/summary/risks,
+          the six pillar sections, then expandable evidence/methodology),
+          with historical trend information (Score History) moved BELOW
+          all of it -- previously it sat between the hero and the pillar
+          detail, ahead of the actual current-report content it's a
+          supplement to. Nothing about SPSHistory's own data or behavior
+          changed, only where it renders on the page. */}
       <StartupHeroV2
         methodology={methodology}
         createdAt={startup.created_at}
         startupId={startup.startup_id}
       />
 
+      <IntelligencePillars methodology={methodology} />
+
       <HowThisAnalysisWasGenerated analysisContext={methodology.analysis_context} />
 
-      {/* Phase 10.9 verification fix: SPSHistory always tracks the legacy
-          V2.1 startup_intelligence_score (see its own component docstring)
-          -- when this analysis also has a V3 assessment, that creates a
-          real "which score is current" confusion (a "Current SPS: 68.0"
-          stat sitting directly under a LIMITED/INSUFFICIENT hero that just
-          said "no overall SPS", or a second number next to a SUFFICIENT
-          V3 ring). isLegacyLabel disambiguates the copy only -- the data
-          source, the V2.1 pipeline, and V2.1's own historical record are
-          completely unchanged. */}
-      <SPSHistory history={history} isLegacyLabel={methodology.sps_v3 != null} />
-
-      <IntelligencePillars methodology={methodology} />
+      <SPSHistory history={history} />
     </div>
   );
 }

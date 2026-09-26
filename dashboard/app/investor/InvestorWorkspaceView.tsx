@@ -212,7 +212,7 @@ function EmptyState() {
 
       <p className="mx-auto mt-2 max-w-md text-base leading-7 text-text-secondary">
         Save a startup from its profile, Rankings, or Search to start tracking
-        it here -- you&apos;ll see its current Startup Power Score, what
+        it here -- you&apos;ll see its current VentureGPS Score, what
         changed since the last analysis, and what deserves attention.
       </p>
 

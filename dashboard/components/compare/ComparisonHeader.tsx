@@ -96,7 +96,7 @@ export default function ComparisonHeader({
 
       {tooClose ? (
         <p className="mt-3 text-center text-sm text-text-secondary">
-          These startups have very close Startup Power Scores — treat this
+          These startups have very close VentureGPS Scores — treat this
           as roughly tied, not a clear leader.
         </p>
       ) : null}

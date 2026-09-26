@@ -53,7 +53,7 @@ export default function SPSRing({
           className="relative flex items-center justify-center rounded-full transition-transform duration-300 ease-out"
           style={{ width: config.diameter, height: config.diameter }}
           role="img"
-          aria-label={ariaLabel ?? `Startup Power Score unavailable: ${unavailableLabel}`}
+          aria-label={ariaLabel ?? `VentureGPS Score unavailable: ${unavailableLabel}`}
         >
           <RingSVG score={null} size={config.diameter} strokeWidth={config.strokeWidth} animated={animated} />
           <RingCenter score={null} unavailableLabel={showDetails ? unavailableLabel : undefined} compact={size === "xs"} />
@@ -86,7 +86,7 @@ export default function SPSRing({
         role="img"
         aria-label={
           ariaLabel ??
-          `Startup Power Score ${normalizedScore.toFixed(1)} out of 100`
+          `VentureGPS Score ${normalizedScore.toFixed(1)} out of 100`
         }
       >
         <RingSVG

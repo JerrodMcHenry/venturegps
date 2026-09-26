@@ -134,7 +134,7 @@ export default function ClaimStartupForm({
         We manually review startup claims before granting founder access —
         we don&rsquo;t verify domains or documents automatically, and review
         isn&rsquo;t instant. Submitting a claim never changes this startup&rsquo;s
-        public intelligence or Startup Power Score.
+        public intelligence or VentureGPS Score.
       </p>
 
       {error ? <p className="text-xs text-danger">{error}</p> : null}

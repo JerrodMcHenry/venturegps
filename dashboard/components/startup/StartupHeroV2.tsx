@@ -4,7 +4,6 @@ import { SPSRing } from "@/components/sps";
 import BaseCard from "@/components/ui/BaseCard";
 import ClaimStartupButton from "./ClaimStartupButton";
 import SaveStartupButton from "./SaveStartupButton";
-import SPSV3ScoreSection from "./SPSV3ScoreSection";
 
 import { CONFIDENCE_BADGE_CLASSES, PILLARS } from "./pillarMeta";
 import { AlertIcon, SparkleIcon } from "./icons";
@@ -28,6 +27,12 @@ const ANALYSIS_TYPE_LABELS: Record<string, string> = {
   founder: "Founder Analysis",
   investor: "Investor Analysis",
   data_room: "Data Room Analysis",
+};
+
+const SPS_V3_STATE_LABELS: Record<string, string> = {
+  sufficient: "Sufficient",
+  limited: "Limited",
+  insufficient: "Insufficient",
 };
 
 // analysis_context is intentionally typed `unknown` on the frontend (same
@@ -137,6 +142,76 @@ function getRecommendation(startupScorecard: unknown): string | null {
   return null;
 }
 
+// Portfolio Release Task 6 -- Diagnose the Report. Root cause of "the
+// header reports only Team as scored while the pillar workspace shows
+// all six": this hero used to swap its ENTIRE score display to
+// SPSV3ScoreSection whenever methodology.sps_v3 was present -- V3 is a
+// separate, additive, feature-flagged assessment engine
+// (app/ai/sps_v3_engine) with its OWN, much stricter per-pillar
+// evidence-sufficiency bar than the six V2.1 pillar analyses the
+// detailed workspace below always renders unconditionally. For a real
+// production analysis, V3 judged 5 of 6 pillars "not publishable" (0%
+// coverage for four of them) while V2.1 had already scored all six --
+// two independently-computed, methodologically-different assessments of
+// the SAME evidence, shown side by side with no reconciliation. This is
+// not stale data (same analysis row), not different endpoints (both
+// come from this one methodology object), and not a caching issue --
+// it's mixed analysis versions with inconsistent evidence-sufficiency
+// rules between them.
+//
+// The smallest correction that makes the report internally consistent:
+// this hero now ALWAYS derives its primary score/confidence from the
+// same V2.1 pillars the workspace below renders -- V2.1 is also the
+// only methodology used anywhere else in the product today (Rankings,
+// Search, Discovery, Compare, Score History all key off
+// startup_intelligence_score; see docs/methodology/
+// SPS_V3_PRODUCTION_INTEGRATION_10_9.md Section 4 -- V3 is off by
+// default and not yet wired into any of them). If `sps_v3` is present,
+// it's shown as a small, clearly-labeled, secondary note (never hidden
+// with CSS, never silently dropped) rather than swapped in as the
+// headline. No backend/scoring logic changed -- this is a presentation-
+// layer fix only.
+function getSPSV3Summary(sps: NonNullable<SIEMethodologyAnalysis["sps_v3"]>): string {
+  const stateLabel = SPS_V3_STATE_LABELS[sps.assessment_state] ?? sps.assessment_state;
+  const scorePart = sps.overall_score !== null ? ` (${sps.overall_score.toFixed(1)})` : "";
+  return `${stateLabel}${scorePart} · Coverage ${sps.coverage_pct.toFixed(0)}% · ${sps.confidence} confidence`;
+}
+
+// Portfolio Release Task 6, Step 3: "Never display an overall score when
+// canonical methodology says evidence is insufficient." V2.1's own
+// calculate_base_score() (app/ai/investment_score.py, frozen -- not
+// touched by this task) returns a bare 0.0 when literally zero pillars
+// were scoreable, indistinguishable from a genuinely zero-scoring
+// company. structural_coverage.pillars_unavailable_entirely (already
+// computed, already additive) is the real, existing signal for this --
+// when it names every one of the six pillars, this frontend now shows
+// an honest "not enough evidence" state instead of a fake 0.0 ring,
+// the same shape SPSV3ScoreSection's own InsufficientScore already uses.
+function isFullyInsufficientEvidence(methodology: SIEMethodologyAnalysis): boolean {
+  const unavailable = methodology.structural_coverage?.pillars_unavailable_entirely;
+  return Boolean(unavailable) && unavailable!.length >= PILLARS.length;
+}
+
+// Key Risks: a concise, top-level synthesis from the SAME weaknesses
+// already rendered per-pillar below (PillarWorkspace's own "Key
+// Weaknesses" section) -- no new data, no new AI call. One risk per
+// pillar (its own first-listed weakness), ordered weakest-scored-pillar
+// first, capped at three so this stays a summary, not a duplicate of
+// the full per-pillar detail underneath.
+type KeyRisk = { pillarLabel: string; risk: string };
+
+function getKeyRisks(methodology: SIEMethodologyAnalysis): KeyRisk[] {
+  const withScores = PILLARS.map((pillar) => ({
+    pillarLabel: pillar.label,
+    score: methodology[pillar.key].score,
+    risk: methodology[pillar.key].weaknesses[0],
+  })).filter((entry): entry is { pillarLabel: string; score: number | null; risk: string } => Boolean(entry.risk));
+
+  withScores.sort((a, b) => (a.score ?? Infinity) - (b.score ?? Infinity));
+
+  return withScores.slice(0, 3).map(({ pillarLabel, risk }) => ({ pillarLabel, risk }));
+}
+
 export default function StartupHeroV2({
   methodology,
   createdAt,
@@ -146,6 +221,8 @@ export default function StartupHeroV2({
   const recommendation = getRecommendation(methodology.startup_scorecard);
   const analysisType = getAnalysisType(methodology.analysis_context);
   const analysisDate = formatAnalysisDate(createdAt);
+  const insufficientEvidence = isFullyInsufficientEvidence(methodology);
+  const keyRisks = getKeyRisks(methodology);
 
   // Phase 31C-A -- Global Founder UX Acceptance, Part 1/6: this used to
   // also include "Methodology v2.1-spec-2026-08-29" (the raw internal
@@ -168,10 +245,11 @@ export default function StartupHeroV2({
   // shown only when the backend actually flagged it, never inferred.
   // structural_coverage is absent/null on analyses stored before this
   // field existed, so the banner correctly never appears for those.
+  // Suppressed when insufficientEvidence is already showing its own,
+  // more complete "not enough evidence" state -- never both at once.
   const structuralCoverage = methodology.structural_coverage;
-  const showPartialCoverageWarning = Boolean(
-    structuralCoverage?.partial_structural_coverage
-  );
+  const showPartialCoverageWarning =
+    !insufficientEvidence && Boolean(structuralCoverage?.partial_structural_coverage);
 
   const { company_stage, industry, business_model, funding_stage } = methodology.context;
 
@@ -193,14 +271,15 @@ export default function StartupHeroV2({
   return (
     <BaseCard variant="glass" className="p-8">
       <div className="grid gap-10 lg:grid-cols-[320px_1fr] lg:items-center">
-        <div className="flex justify-center">
-          {/* Phase 10.9, Part 14: sps_v3 is additive and absent on every
-              analysis produced while the backend's V3 feature flag is
-              off (the default) -- that is the ONLY case handled below by
-              the unchanged V2.1 ring, so today's production behavior is
-              byte-for-byte identical to before this phase. */}
-          {methodology.sps_v3 ? (
-            <SPSV3ScoreSection sps={methodology.sps_v3} />
+        <div className="flex flex-col items-center">
+          {insufficientEvidence ? (
+            <div className="w-full max-w-xs text-center">
+              <p className="text-sm font-semibold text-text-primary">Not enough evidence yet</p>
+              <p className="mt-1 text-sm text-text-secondary">
+                We don&rsquo;t have enough evidence yet to responsibly score any of the six pillars for
+                this company.
+              </p>
+            </div>
           ) : (
             <SPSRing
               score={methodology.startup_intelligence_score}
@@ -208,6 +287,18 @@ export default function StartupHeroV2({
               size="xl"
             />
           )}
+
+          {/* V3 (app/ai/sps_v3_engine) is a separate, additive, feature-
+              flagged assessment with its own stricter evidence-sufficiency
+              rules -- shown here as a small, clearly-labeled secondary
+              note, never as a second competing "headline" score and never
+              hidden. See this file's own comment above getSPSV3Summary(). */}
+          {methodology.sps_v3 ? (
+            <p className="mt-3 max-w-[16rem] text-center text-xs text-text-muted">
+              Separate experimental assessment (V3, not yet used elsewhere in the product):{" "}
+              {getSPSV3Summary(methodology.sps_v3)}
+            </p>
+          ) : null}
         </div>
 
         <div>
@@ -261,7 +352,7 @@ export default function StartupHeroV2({
                   structuralCoverage.pillars_unavailable_entirely.length > 0
                     ? `No scoreable evidence was found for: ${structuralCoverage.pillars_unavailable_entirely.join(", ")}. `
                     : ""}
-                  The Startup Power Score above reflects only the pillars
+                  The VentureGPS Score above reflects only the pillars
                   that could be responsibly scored -- it is not penalized
                   for the missing ones.
                 </p>
@@ -272,13 +363,33 @@ export default function StartupHeroV2({
           <div className="mt-6 border-t border-border pt-6">
             <h2 className="flex items-center gap-1.5 text-xl font-semibold text-text-primary">
               <SparkleIcon className="h-4 w-4 text-primary" />
-              Executive Coaching Summary
+              Summary
             </h2>
 
             <p className="mt-3 max-w-prose text-[17px] leading-8 text-text-secondary">
               {methodology.executive_coaching_summary}
             </p>
           </div>
+
+          {keyRisks.length > 0 ? (
+            <div className="mt-6 border-t border-border pt-6">
+              <h2 className="flex items-center gap-1.5 text-xl font-semibold text-text-primary">
+                <AlertIcon className="h-4 w-4 text-danger" />
+                Key Risks
+              </h2>
+
+              <ul className="mt-3 space-y-2">
+                {keyRisks.map(({ pillarLabel, risk }) => (
+                  <li key={pillarLabel} className="flex gap-2.5 text-base leading-7 text-text-secondary">
+                    <span aria-hidden="true" className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />
+                    <span>
+                      <span className="font-medium text-text-primary">{pillarLabel}:</span> {risk}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       </div>
     </BaseCard>

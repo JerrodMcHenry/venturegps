@@ -165,7 +165,7 @@ export default function SavedStartupsView() {
           reference are unchanged, presentation only. */}
       <PageHeader
         title="Watchlist"
-        subtitle="Startups you're tracking, always shown with their latest Startup Power Score."
+        subtitle="Startups you're tracking, always shown with their latest VentureGPS Score."
         variant="glow"
       />
 
@@ -208,7 +208,7 @@ export default function SavedStartupsView() {
                   </th>
 
                   <th scope="col" className="px-6 py-3.5">
-                    SPS
+                    VentureGPS Score
                   </th>
 
                   <th scope="col" className="px-6 py-3.5">
@@ -308,7 +308,7 @@ function EmptyState() {
 
       <p className="mx-auto mt-2 max-w-md text-base leading-7 text-text-secondary">
         Save a startup from its Startup Profile to track it here — you&rsquo;ll
-        always see its latest Startup Power Score, not a snapshot from when
+        always see its latest VentureGPS Score, not a snapshot from when
         you saved it.
       </p>
 

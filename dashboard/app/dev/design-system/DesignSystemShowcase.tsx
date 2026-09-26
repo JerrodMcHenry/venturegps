@@ -132,7 +132,7 @@ export default function DesignSystemShowcase() {
           <div className="grid gap-4 sm:grid-cols-3">
             <BaseCard className="p-6">
               <ScoreDisplay
-                label="Startup Power Score"
+                label="VentureGPS Score"
                 score={78.8}
                 statusLabel="Promising but Needs Diligence"
                 statusTone="primary"

@@ -38,7 +38,7 @@ export default async function ExplorePreview() {
       </h2>
 
       <p className="mx-auto mt-3 max-w-xl text-center text-base leading-7 text-text-secondary">
-        Real, public Startup Power Scores — not illustrations.
+        Real, public VentureGPS Scores — not illustrations.
       </p>
 
       <div className="mt-8 grid gap-4 sm:grid-cols-3">

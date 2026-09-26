@@ -57,7 +57,7 @@ function LimitedScore({ sps }: { sps: SPSV3Assessment }) {
     <div className="w-full max-w-xs text-center">
       <p className="text-sm font-semibold text-text-primary">Limited public assessment</p>
       <p className="mt-1 text-sm text-text-secondary">
-        Not enough public evidence yet for a full Startup Power Score -- here&rsquo;s what we could
+        Not enough public evidence yet for a full VentureGPS Score -- here&rsquo;s what we could
         responsibly assess.
       </p>
 

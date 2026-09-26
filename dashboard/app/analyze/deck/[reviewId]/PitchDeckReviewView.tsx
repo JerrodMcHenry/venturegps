@@ -191,7 +191,7 @@ export default function PitchDeckReviewView({ reviewId }: { reviewId: number }) 
           </div>
           <p className="mt-2 text-sm text-text-secondary">{READINESS_COPY[review.readiness_label]}</p>
           <p className="mt-3 text-sm text-text-secondary">
-            This is a coaching signal, not a score -- it never affects any Startup Power Score, and it
+            This is a coaching signal, not a score -- it never affects any VentureGPS Score, and it
             says nothing about whether your startup itself is a good idea.
           </p>
         </BaseCard>

@@ -27,7 +27,7 @@ export default async function SearchPage() {
     <>
       <PageHeader
         title="Discover Startups"
-        subtitle="Browse the canonical Startup Intelligence Engine universe -- filter by industry, stage, and Startup Power Score to find companies worth a closer look."
+        subtitle="Browse the canonical Startup Intelligence Engine universe -- filter by industry, stage, and VentureGPS Score to find companies worth a closer look."
         action={
           <Link
             href="/rankings"

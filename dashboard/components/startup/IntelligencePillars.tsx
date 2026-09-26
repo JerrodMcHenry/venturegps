@@ -26,9 +26,12 @@ export default function IntelligencePillars({
       {/* Phase 10.11, Part 6/11: "Workspace" implied a private, editable
           tool -- this is a read-only public drill-down into how the
           score breaks down. Presentation only; nothing about the
-          pillar/methodology data model changed. */}
+          pillar/methodology data model changed.
+          Portfolio Release Task 6 -- Standardize User-Facing
+          Terminology: the six categories are consistently called
+          "Intelligence Pillars" (SIE remains the internal engine name). */}
       <h2 className="text-xl font-semibold text-text-primary">
-        What&rsquo;s behind this score
+        The Six Intelligence Pillars
       </h2>
 
       <div className="mt-4 grid gap-6 lg:grid-cols-[300px_1fr] lg:items-start">
