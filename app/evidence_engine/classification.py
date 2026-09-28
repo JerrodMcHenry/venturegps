@@ -148,6 +148,36 @@ def requires_independent_source(qualifying_labels: frozenset[str]) -> LabelRequi
     return check
 
 
+def requires_named_entity_fact(qualifying_labels: frozenset[str]) -> LabelRequirementCheck:
+    """Task 14 (Team & Leadership): a generic requirement distinct from
+    `requires_independent_source` -- some dimensions' own approved
+    evidence bar is not about source INDEPENDENCE (a founder's own bio is
+    explicitly admissible evidence per spec Part 3.3's own wording for
+    Founder Relevant Experience/Public Track Record) but about whether the
+    cited evidence names a SPECIFIC, checkable fact (a named company, a
+    named role) rather than a vague, unsupported claim ("extensive
+    industry experience," with nothing named). For any label in
+    qualifying_labels, at least one cited claim must carry a
+    `structured_fact` with a non-empty `named_entity` value -- the
+    deterministic stand-in for "the AI extracted a specific, checkable
+    name from this evidence," the same role `structured_fact` already
+    plays throughout this engine (stage-signal claims, Market Opportunity's
+    magnitude bands)."""
+
+    def check(label: str, cited: tuple[Claim, ...]) -> str | None:
+        if label not in qualifying_labels:
+            return None
+        if not any((c.structured_fact or {}).get("named_entity") for c in cited):
+            return (
+                f"label {label!r} requires at least one cited claim naming a specific, checkable "
+                f"entity (a company or role), but none of the cited claims "
+                f"({[c.claim_id for c in cited]}) name one"
+            )
+        return None
+
+    return check
+
+
 def requires_minimum_distinct_facts(label_minimums: dict[str, int]) -> LabelRequirementCheck:
     """For Technical Depth Signal: a label like SUBSTANTIAL requires at
     least N PROVENANCE-VERIFIED distinct facts among the CITED claims

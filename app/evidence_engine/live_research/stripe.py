@@ -108,4 +108,79 @@ CLAIMS: list[Claim] = [
         # disclosed term, unmodified, exactly as CNBC reported it.
         structured_fact={"kind": "funding_round_type", "value": "tender offer"},
     ),
+    # --- Task 14 addition: Team & Leadership evidence, real live
+    # research, 2026-09-27 retrieval. Deliberately includes a
+    # prestigious-university-only claim carrying NO founder_experience
+    # structured_fact, to directly demonstrate in the sanity check that
+    # university prestige is not itself evidence for this pillar.
+    Claim(
+        claim_id="stripe-team-identity-001",
+        company_ref=COMPANY_REF,
+        claim_text="Public reporting identifies Patrick Collison as co-founder and CEO of Stripe.",
+        subject_entity="Patrick Collison",
+        source_url="https://en.wikipedia.org/wiki/John_Collison",
+        source_publisher="Wikipedia",
+        source_type=SourceType.AGGREGATOR_OR_DIRECTORY,
+        retrieved_at=RETRIEVED_AT,
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Patrick Collison, co-founder and CEO of Stripe",
+        assessment_criteria=["team_identity"],
+        independence_group_id="stripe-team-identity-patrick",
+        structured_fact={"kind": "team_identity", "person_id": "patrick_collison", "role": "founder"},
+    ),
+    Claim(
+        claim_id="stripe-team-experience-001",
+        company_ref=COMPANY_REF,
+        claim_text="Independent reporting describes the Collison brothers founding and selling Auctomatic, an e-commerce tools startup, before starting Stripe.",
+        subject_entity="Patrick Collison",
+        source_url="https://kitrum.com/blog/stripe-founders-the-story-of-collison-brothers/",
+        source_publisher="Kitrum",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        retrieved_at=RETRIEVED_AT,
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="designed, launched, and sold the business for $5 million",
+        assessment_criteria=["founder_relevant_experience"],
+        independence_group_id="stripe-team-auctomatic-experience",
+        # Classified ADJACENT, not DIRECT: prior entrepreneurial/software
+        # experience is real and checkable, but Auctomatic (eBay seller
+        # tools) is not SPECIFICALLY payments/fintech -- the relevance
+        # connection to Stripe's own domain is real but not squarely
+        # on-point, a deliberately conservative reading per Task 14 item 5
+        # ("do not invent relevance when the connection is unclear").
+        structured_fact={"kind": "founder_experience", "value": "ADJACENT", "person_id": "patrick_collison", "named_entity": "Auctomatic"},
+    ),
+    Claim(
+        claim_id="stripe-team-track-record-001",
+        company_ref=COMPANY_REF,
+        claim_text="Independent reporting confirms Auctomatic was acquired by Live Current Media for approximately $5 million in 2008.",
+        subject_entity="Patrick Collison",
+        source_url="https://kitrum.com/blog/stripe-founders-the-story-of-collison-brothers/",
+        source_publisher="Kitrum",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        retrieved_at=RETRIEVED_AT,
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="sold the business for $5 million",
+        assessment_criteria=["public_track_record"],
+        independence_group_id="stripe-team-auctomatic-exit",
+        structured_fact={"kind": "track_record", "value": "PRIOR_EXIT", "person_id": "patrick_collison", "named_entity": "Auctomatic"},
+    ),
+    # Deliberately NOT founder_relevant_experience evidence -- carries no
+    # structured_fact at all, exactly like the offline test case. Included
+    # specifically to confirm real, famous-university prestige does not,
+    # by itself, move this pillar's score.
+    Claim(
+        claim_id="stripe-team-university-001",
+        company_ref=COMPANY_REF,
+        claim_text="Independent reporting notes the Collison brothers attended MIT and Harvard before dropping out to build Stripe.",
+        subject_entity="Patrick Collison",
+        source_url="https://kitrum.com/blog/stripe-founders-the-story-of-collison-brothers/",
+        source_publisher="Kitrum",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        retrieved_at=RETRIEVED_AT,
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="dropped out of their prestigious universities",
+        assessment_criteria=["founder_relevant_experience"],
+        independence_group_id="stripe-team-university",
+        structured_fact=None,
+    ),
 ]

@@ -182,4 +182,61 @@ CLAIMS: list[Claim] = [
         structured_fact={"kind": "competitive_structure", "value": "concentrated"},
         limitations=["Ten named competitors exist (a fragmentation signal by count), but the source explicitly frames one (Jira) as dominant -- a real ambiguity the FRAGMENTED/CONCENTRATED binary does not cleanly resolve; classified CONCENTRATED here on the source's own explicit 'dominates' framing. See the sanity-check report."],
     ),
+    # --- Task 14 addition: Team & Leadership evidence, real live
+    # research, 2026-09-27 retrieval. Karri Saarinen is real but far less
+    # publicly famous than Stripe's founders -- a deliberate contrast
+    # case for the sanity check (an honestly-scored, evidence-rich,
+    # non-famous founder).
+    Claim(
+        claim_id="linear-team-identity-001",
+        company_ref=COMPANY_REF,
+        claim_text="Public reporting identifies Karri Saarinen as CEO and co-founder of Linear.",
+        subject_entity="Karri Saarinen",
+        source_url="https://designerfounders.com/karri-saarinen",
+        source_publisher="Designer Founders",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        retrieved_at=RETRIEVED_AT,
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Karri Saarinen, CEO & co-founder of Linear",
+        assessment_criteria=["team_identity"],
+        independence_group_id="linear-team-identity-karri",
+        structured_fact={"kind": "team_identity", "person_id": "karri_saarinen", "role": "founder"},
+    ),
+    Claim(
+        claim_id="linear-team-experience-001",
+        company_ref=COMPANY_REF,
+        claim_text="Independent reporting states Karri Saarinen was principal designer at Airbnb and founding/head of design at Coinbase before founding Linear.",
+        subject_entity="Karri Saarinen",
+        source_url="https://designerfounders.com/karri-saarinen",
+        source_publisher="Designer Founders",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        retrieved_at=RETRIEVED_AT,
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="principal designer at Airbnb and the founding designer at Coinbase",
+        assessment_criteria=["founder_relevant_experience"],
+        independence_group_id="linear-team-design-experience",
+        # Classified DIRECT: senior product/design leadership at major
+        # product companies is squarely, specifically relevant to founding
+        # a design-forward product tool -- a closer, more on-point
+        # connection than Stripe's Auctomatic-to-payments case above.
+        structured_fact={"kind": "founder_experience", "value": "DIRECT", "person_id": "karri_saarinen", "named_entity": "Airbnb"},
+    ),
+    Claim(
+        claim_id="linear-team-track-record-001",
+        company_ref=COMPANY_REF,
+        claim_text="Independent reporting states Karri Saarinen previously co-founded Kippt, a Y Combinator-backed startup, before Linear.",
+        subject_entity="Karri Saarinen",
+        source_url="https://designerfounders.com/karri-saarinen",
+        source_publisher="Designer Founders",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        retrieved_at=RETRIEVED_AT,
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="co-founded Y Combinator backed startup Kippt",
+        assessment_criteria=["public_track_record"],
+        independence_group_id="linear-team-kippt",
+        # Classified PRIOR_VENTURE_ROLE, not PRIOR_EXIT: this research did
+        # not find confirmation of a Kippt exit (acquisition/IPO) -- a
+        # deliberately conservative read rather than assuming one.
+        structured_fact={"kind": "track_record", "value": "PRIOR_VENTURE_ROLE", "person_id": "karri_saarinen", "named_entity": "Kippt"},
+    ),
 ]

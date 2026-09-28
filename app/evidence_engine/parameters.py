@@ -14,7 +14,7 @@ pass, against a much larger cohort, would eventually replace these.
 
 from __future__ import annotations
 
-PARAMETER_VERSION = "evidence_engine.v1-provisional-5"
+PARAMETER_VERSION = "evidence_engine.v1-provisional-6"
 
 # --- Pillar-level publishability gates (spec Part 6.2) ----------------------
 # Unchanged from the first vertical slice -- Task 9's expanded fixture set
@@ -164,6 +164,74 @@ TIMING_CATALYST_LABEL_SCORES: dict[str, float] = {
 COMPETITIVE_LANDSCAPE_LABEL_SCORES: dict[str, float] = {
     "FRAGMENTED": 7.5,
     "CONCENTRATED": 4.5,
+}
+
+# --- Team & Leadership pillar (Task 14; spec Part 3.3) ----------------------
+# All three dimensions are Classified (spec Part 3.3's own table lists no
+# Computed dimension here). Founder Relevant Experience and Public Track
+# Record are documented, FIXED biographical facts -- a prior exit or a
+# prior domain role means the same thing regardless of this company's
+# current stage -- so both are stage-independent, exactly like Market
+# Opportunity's own reasoning, restated here for a different reason (there
+# it was "the market doesn't change meaning by stage"; here it is "a past
+# fact about a person doesn't change meaning by this company's current
+# stage"). Leadership Composition is the one dimension the approved
+# spec's own wording ("explicit confirmation the founder(s) are the only
+# leadership" as a legitimate, non-penalized state) supports genuine stage
+# sensitivity for -- documented in full in team_leadership.py's own
+# module docstring, including the explicit guard against the two
+# prohibited directions (never reward smallness, never punish an
+# early-stage company for an executive bench it would be unreasonable to
+# have yet).
+TEAM_LEADERSHIP_PILLAR = "Team & Leadership"
+
+TEAM_LEADERSHIP_DIMENSION_WEIGHTS: dict[str, float] = {
+    "founder_relevant_experience": 0.40,
+    "leadership_composition": 0.30,
+    "public_track_record": 0.30,
+}
+
+TEAM_LEADERSHIP_STALENESS_DAYS: dict[str, int] = {
+    "founder_relevant_experience": 1095,   # 36 months (spec Part 3.3 -- "biographical facts age slowly")
+    "leadership_composition": 365,          # 12 months (spec Part 3.3)
+    "public_track_record": 1095,             # 36 months (spec Part 3.3)
+}
+
+# Founder Relevant Experience: NONE_DISCLOSED has no table entry (Unscored
+# by construction -- see team_leadership.py's own documented reading of
+# "NONE_DISCLOSED" as "no RELEVANT experience established," covering both
+# a genuine absence of disclosed experience and disclosed-but-topically-
+# unrelated experience, a documented ambiguity resolution per Task 14's
+# own "narrowest reasonable decision" instruction). ADJACENT < DIRECT,
+# reasoned placeholders.
+FOUNDER_EXPERIENCE_LABEL_SCORES: dict[str, float] = {
+    "ADJACENT": 5.5,
+    "DIRECT": 8.0,
+}
+
+# Leadership Composition: stage-tiered, per the reasoning above.
+# NONE_BEYOND_FOUNDERS is pinned to the SAME value across every tier,
+# deliberately -- it is a confirmed structural fact, not evidence of
+# strength or weakness at any stage, and must be neither rewarded nor
+# punished for being small. SOME_HIRES/SUBSTANTIAL_HIRES genuinely vary
+# by tier, in the same direction as every other stage-tiered table in
+# this engine (the same fact is more remarkable, and scores higher, at an
+# earlier stage where it is less expected).
+LEADERSHIP_COMPOSITION_LABEL_SCORES: dict[str, dict[str, float]] = {
+    "NONE_BEYOND_FOUNDERS": {"early": 5.0, "growth": 5.0, "established": 5.0},
+    "SOME_HIRES": {"early": 7.0, "growth": 6.0, "established": 5.0},
+    "SUBSTANTIAL_HIRES": {"early": 9.0, "growth": 8.0, "established": 7.0},
+}
+LEADERSHIP_SOME_HIRES_MIN_COUNT = 1
+LEADERSHIP_SUBSTANTIAL_HIRES_MIN_COUNT = 3
+
+# Public Track Record: an actual prior exit is a stronger, more concrete,
+# more checkable accomplishment than merely having held a role at a
+# venture-backed company -- PRIOR_VENTURE_ROLE < PRIOR_EXIT. Stage-
+# independent (a fixed biographical fact).
+PUBLIC_TRACK_RECORD_LABEL_SCORES: dict[str, float] = {
+    "PRIOR_VENTURE_ROLE": 6.0,
+    "PRIOR_EXIT": 8.5,
 }
 
 # --- Confidence and source reliability (spec Part 6.4) ----------------------

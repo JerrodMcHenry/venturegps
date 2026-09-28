@@ -258,6 +258,16 @@ label definitions, test results, and a small real-evidence sanity check.
 
 #### Team & Leadership (0.18)
 
+**Implemented (Task 14)** — `app/evidence_engine/pillars/team_leadership.py`. All three dimensions
+below are Classified; Founder Relevant Experience and Public Track Record are stage-independent
+(fixed biographical facts), while Leadership Composition is stage-tiered (documented reasoning in
+that module's own docstring — `NONE_BEYOND_FOUNDERS` is pinned flat across every tier and is never
+itself a penalty). Self-disclosed biographies are admissible per this table's own wording; every
+scoring label instead requires a named, checkable entity (`requires_named_entity_fact`,
+`classification.py`) rather than independent sourcing. See
+`docs/methodology/NEW_ENGINE_TEAM_LEADERSHIP_REPORT.md` for closed label definitions, the
+fail-closed identity-resolution mechanism, test results, and a small real-evidence sanity check.
+
 | Dimension | Weight | Category | Admissible evidence | Minimum to score | Staleness bound |
 |---|---|---|---|---|---|
 | Founder Relevant Experience | 0.40 | Classified (`NONE_DISCLOSED` \| `ADJACENT` \| `DIRECT`) | Named prior company/role/customer segment, from a bio, press profile, or public professional-history record | ≥1 named, checkable prior role or company | 36 months (biographical facts age slowly) |
