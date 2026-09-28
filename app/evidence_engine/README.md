@@ -9,7 +9,9 @@ NEW_ENGINE_LIVE_EVALUATION.md`. Remediation of that evaluation's findings (Task 
 `docs/methodology/NEW_ENGINE_MARKET_OPPORTUNITY_REPORT.md`. Team & Leadership pillar (Task 14):
 `docs/methodology/NEW_ENGINE_TEAM_LEADERSHIP_REPORT.md`. Commercial Traction pillar (Task 15):
 `docs/methodology/NEW_ENGINE_COMMERCIAL_TRACTION_REPORT.md`. Execution & Momentum pillar (Task 16):
-`docs/methodology/NEW_ENGINE_EXECUTION_MOMENTUM_REPORT.md`.
+`docs/methodology/NEW_ENGINE_EXECUTION_MOMENTUM_REPORT.md`. Financial & Funding Signals pillar
+(Task 17, the sixth and final individual pillar):
+`docs/methodology/NEW_ENGINE_FINANCIAL_FUNDING_REPORT.md`.
 
 **This package is isolated by design** (architecture doc Part 1) — it imports nothing from
 `app.ai`, `app.database`, `app.api`, `app.models`, or `app.v2`. Confirmed with:
@@ -17,7 +19,7 @@ NEW_ENGINE_LIVE_EVALUATION.md`. Remediation of that evaluation's findings (Task 
 (zero matches as of this writing — re-run this before any future change to confirm the
 boundary still holds).
 
-## What is implemented (Tasks 8-16: five pillars, calibration, reliability, live evaluation, remediation)
+## What is implemented (Tasks 8-17: all six individual pillars, calibration, reliability, live evaluation, remediation)
 
 - **`models.py`** — the `Claim` model, including `structured_fact` (Task 9) and
   `SourceType.COMMUNITY_COMMENTARY` (Task 12 — an anonymous public comment, independent of the
@@ -50,7 +52,11 @@ boundary still holds).
   field** — Commercial Traction's three Classified dimensions reuse `requires_named_entity_fact` and
   `requires_minimum_distinct_facts` unchanged. **Task 16 likewise added no new shared factory or
   field** — Execution & Momentum's two Classified dimensions reuse the same two factories unchanged.
-- **`parameters.py`** — every numeric constant, versioned `evidence_engine.v1-provisional-8`, all
+  **Task 17 also added no new shared factory or field** — Capital Efficiency reuses `requires_
+  named_entity_fact` unchanged, and Funding History calls the already-public
+  `provenance.py::verify_independence()` directly (not a new function) to provenance-verify its own
+  summed total.
+- **`parameters.py`** — every numeric constant, versioned `evidence_engine.v1-provisional-9`, all
   explicitly `CALIBRATION REQUIRED`.
 - **`pillars/product_technology.py`** — the first pillar (Task 8-12): Product Existence & Maturity
   (Computed) plus three Classified dimensions, stage-aware (label scores vary by stage tier), all
@@ -89,6 +95,23 @@ boundary still holds).
   commercial-traction magnitude. Strategic Consistency's own staleness handling required a
   pillar-local fix during the real-evidence sanity check, analogous to Commercial Traction's own
   Growth Trajectory fix — see the Execution & Momentum report §9.
+- **`pillars/financial_funding.py`** (Task 17) — the sixth and final individual pillar: two Computed
+  dimensions (Funding History, Revenue Disclosure — pure deterministic functions, no model call)
+  plus one Classified (Capital Efficiency). A spec conflict (Task 17's own instructions referenced a
+  "previously approved" Capital Efficiency removal not recorded in `NEW_ENGINE_SPEC.md` or
+  `NEW_ENGINE_CALIBRATION.md`) was surfaced to and resolved by the user before implementation — the
+  spec as written (all three dimensions) is authoritative; see the Financial & Funding report §0.
+  Funding History sums every distinct, completed, EQUITY-financed round (debt/grants/tender-offers
+  excluded), provenance-verified via a direct call to the already-public `verify_independence()`, with
+  deliberately NO staleness exclusion at all (a disclosed round is a permanent historical fact, per
+  spec's own wording — the same class of staleness-scoping fix Commercial Traction's Growth
+  Trajectory and Execution & Momentum's Strategic Consistency each needed, resolved here even more
+  simply since this dimension has no "current view" component at all). Revenue Disclosure never
+  re-extracts a figure — it reads the exact same claim Commercial Traction's Disclosed Scale already
+  requires, tagged with one additional `assessment_criteria` entry, proven with real Stripe data to
+  cite the literal same `claim_id` across both pillars. Funding is never financial health: no code
+  path connects a funding/valuation fact to a Capital Efficiency label, and runway is never computed
+  from funding amount or date.
 - **`fixtures/`** — Notion, Linear (real companies), Auroraflow, Pathlight, DupliCo (fictional,
   each built to stress a specific mechanism; offline, hand-authored) — Product & Technology only.
 - **`live_research/`** — genuine, real, dated evidence for Notion, Linear, Stripe, Fish Audio, and
@@ -107,21 +130,31 @@ boundary still holds).
   Stripe and Linear (each file gained a "Task 16 addition" block) — Stripe's own Sessions 2026 recap
   provided a real, clean, dated announced-vs-generally-available distinction; Linear's public
   changelog provided a real, dense `RAPID` shipping-velocity result.
-- **`tests/`** — **238 tests across 13 files**, all script-style (this repo's pytest is scoped to
+  `run_financial_funding_sanity_check.py` (Task 17) does the same for Financial & Funding Signals
+  against Stripe (`stripe.py` gained a "Task 17 addition" block of three real, dated equity rounds
+  totaling $7.35B, plus a `"revenue_disclosure"` tag added to two of its own existing Task 15 revenue
+  claims — the real proof that Revenue Disclosure reuses, not re-extracts, Commercial Traction's own
+  evidence).
+- **`tests/`** — **290 tests across 14 files**, all script-style (this repo's pytest is scoped to
   `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`.
 - **`demo.py`** — prints a human-readable Product & Technology pillar summary for all five offline
   fixtures: `python -m app.evidence_engine.demo`.
 
 ## What remains design-only (not implemented)
 
-The final pillar (Financial & Funding Signals), a real AI-driven Research pass (Assessment's mock
-models stand in for it), overall (cross-pillar) publication gates (not yet meaningful — no
-orchestrator combines pillars yet), the scale-based stage-determination fallback (`stage.py`'s own
-docstring has flagged this as blocked on Commercial Traction's Disclosed Scale since Task 9 — now
-*technically* buildable since Task 15, but deliberately not built as part of any task since;
-see the Commercial Traction report §9), persistence, API contracts, frontend integration, and
-observability beyond `print()`. Retry applies only to validation failures, not to a raised exception.
-**Five open methodological questions flagged, not resolved:** whether `_OBSERVABLE_SOURCE_TYPES`
+**All six individual pillars are now implemented.** What remains: overall (cross-pillar) six-pillar
+scoring, overall coverage, and overall confidence (no orchestrator combines pillars yet — this is
+the explicit next step every pillar task since Task 13 has deferred, per each one's own scope
+constraints); a real AI-driven Research pass (Assessment's mock models stand in for it); the
+scale-based stage-determination fallback (`stage.py`'s own docstring has flagged this as blocked on
+Commercial Traction's Disclosed Scale since Task 9 — technically buildable since Task 15, but
+deliberately not built as part of any task since; see the Commercial Traction report §9);
+persistence; API contracts; frontend integration; and observability beyond `print()`. Retry applies
+only to validation failures, not to a raised exception. A final, real calibration pass against a
+much larger cohort (`NEW_ENGINE_CALIBRATION.md`'s own plan) has also not been attempted — every
+numeric parameter across all six pillars remains an explicitly-flagged placeholder.
+
+**Six open methodological questions flagged, not resolved:** whether `_OBSERVABLE_SOURCE_TYPES`
 (Product & Technology) should ever include `COMMUNITY_COMMENTARY` (`NEW_ENGINE_REMEDIATION_REPORT.md`
 §2.1); whether Competitive Landscape Position's `FRAGMENTED`/`CONCENTRATED` binary needs a third
 state for "many named competitors, one explicitly dominant" markets (`NEW_ENGINE_MARKET_
@@ -129,9 +162,12 @@ OPPORTUNITY_REPORT.md` §9); whether Founder Relevant Experience's `NONE_DISCLOS
 split into a genuine-absence state and a disclosed-but-irrelevant state (`NEW_ENGINE_TEAM_
 LEADERSHIP_REPORT.md` §9); whether Customer Base Breadth's 18-month staleness bound is appropriate
 for a slow-changing directional metric (a total-user-count milestone) versus a fast-changing one
-(`NEW_ENGINE_COMMERCIAL_TRACTION_REPORT.md` §7.4/§9); and whether Shipping Velocity's three-state
+(`NEW_ENGINE_COMMERCIAL_TRACTION_REPORT.md` §7.4/§9); whether Shipping Velocity's three-state
 `announced`/`beta`/`launched` vocabulary should be split further to match item 3's own richer
-four-state progression (`NEW_ENGINE_EXECUTION_MOMENTUM_REPORT.md` §11).
+four-state progression (`NEW_ENGINE_EXECUTION_MOMENTUM_REPORT.md` §11); and whether Funding History's
+equity-only summing rule should be extended to debt-financed companies, and whether the 2023-style
+"real equity round, liquidity-focused proceeds" ambiguity deserves its own explicit sub-classification
+(`NEW_ENGINE_FINANCIAL_FUNDING_REPORT.md` §13).
 
 ## Decisions locked in (see the design docs' own "Decided" boxes)
 

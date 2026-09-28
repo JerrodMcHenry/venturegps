@@ -14,7 +14,7 @@ pass, against a much larger cohort, would eventually replace these.
 
 from __future__ import annotations
 
-PARAMETER_VERSION = "evidence_engine.v1-provisional-8"
+PARAMETER_VERSION = "evidence_engine.v1-provisional-9"
 
 # --- Pillar-level publishability gates (spec Part 6.2) ----------------------
 # Unchanged from the first vertical slice -- Task 9's expanded fixture set
@@ -476,6 +476,111 @@ GTM_MOTION_LABEL_SCORES: dict[str, dict[str, float]] = {
 STRATEGIC_CONSISTENCY_LABEL_SCORES: dict[str, float] = {
     "CONTAINS_CONTRADICTION": 2.0,
     "CONSISTENT": 7.5,
+}
+
+# --- Financial & Funding Signals pillar (spec Part 3.3, Task 17) ------------
+# Central governing principle behind every constant below: funding evidence
+# is not financial-health evidence, and unavailable private financial
+# information is not evidence of poor financial health. Capital Efficiency
+# is IMPLEMENTED here exactly as spec Part 3.3 currently defines it (weight
+# 0.30) -- Task 17's own instructions referenced a "previously approved
+# decision" to remove it that is not recorded anywhere in NEW_ENGINE_SPEC.md
+# or NEW_ENGINE_CALIBRATION.md (both still define/exercise it); this
+# conflict was surfaced to the user, who confirmed the spec as currently
+# written is authoritative. See the Financial & Funding report §0.
+FINANCIAL_FUNDING_PILLAR = "Financial & Funding Signals"
+
+FINANCIAL_FUNDING_DIMENSION_WEIGHTS: dict[str, float] = {
+    "funding_history": 0.45,
+    "revenue_disclosure": 0.25,
+    "capital_efficiency": 0.30,
+}
+
+FINANCIAL_FUNDING_STALENESS_DAYS: dict[str, int] = {
+    # Funding History: NO staleness exclusion is applied to individual
+    # rounds at all (see FUNDING_HISTORY_RESOLUTION_STALENESS_DAYS below)
+    # -- spec Part 3.3's own parenthetical ("a disclosed 2021 round remains
+    # a real, permanent fact") directly contradicts treating its own
+    # "36 months" table value as a per-round exclusion bound the way every
+    # other dimension's staleness value is used; Task 17 item 13 explicitly
+    # instructs against "repeating the prior mistake of applying a
+    # staleness threshold to historical baseline facts required for a
+    # legitimate over-time calculation." Funding History is PURELY
+    # cumulative/historical (unlike Growth Trajectory's "newer point" or
+    # Strategic Consistency's "newest statement," it has no current-view
+    # component at all to anchor a bound to) -- every disclosed, completed,
+    # non-disputed equity round counts toward the total regardless of age.
+    # This key is kept (unused directly) only for documentation symmetry
+    # with every other pillar's staleness dict.
+    "funding_history": 1095,  # the spec's own stated 36-month value, NOT applied as an exclusion (see above)
+    "revenue_disclosure": 548,   # 18 months (spec Part 3.3) -- a "current scale" fact, ordinary per-claim staleness applies
+    "capital_efficiency": 365,   # 12 months (spec Part 3.3) -- a "current financial health" fact, ordinary per-claim staleness applies
+}
+
+# See the "funding_history" comment above: no staleness ceiling at the raw-
+# resolution layer for this dimension (disputed-exclusion and independence-
+# group dedup still apply) -- every completed, admissible equity round
+# counts toward the total regardless of age.
+FUNDING_HISTORY_RESOLUTION_STALENESS_DAYS: int = 36_500  # ~100 years -- effectively "no ceiling" at this layer
+
+# Funding History: only `financing_type == "equity"` rounds count toward
+# the summed total and score (item 6/7's own "do not assume all capital
+# events mean the same thing"). Debt financing and grants/non-dilutive
+# capital remain admissible (retained in the ledger, visible in the
+# rationale) but are structurally excluded from the sum -- "Funding
+# History" in conventional startup/VC usage means equity fundraising; a
+# narrow, documented reading, not a spec-derived rule. A tender offer or
+# other secondary transaction (existing shareholders selling to new
+# investors -- no new primary capital into the company) is excluded for
+# the same reason stage.py already treats Stripe's own real tender offer
+# as a STAGE signal, never a funding-round fact (Task 11/12 precedent).
+FUNDING_HISTORY_COUNTED_FINANCING_TYPES: frozenset[str] = frozenset({"equity"})
+
+# Stage-tiered -- the same total disclosed capital is less expected, and
+# therefore more remarkable, from a younger company (the same reasoning
+# every other magnitude-ish stage-tiered table in this engine already
+# uses). Cutoffs are Financial & Funding Signals' own, deliberately NOT
+# imported from Commercial Traction's Disclosed Scale constants, even
+# though the initial placeholder USD values happen to coincide -- avoiding
+# an unintended coupling between two different pillars' own calibration
+# parameters, the same "pillar-local duplication over cross-pillar
+# coupling" discipline this engine has used throughout.
+FUNDING_HISTORY_SMALL_MAX_USD: float = 1_000_000
+FUNDING_HISTORY_MODERATE_MAX_USD: float = 20_000_000
+FUNDING_HISTORY_LABEL_SCORES: dict[str, dict[str, float]] = {
+    "SMALL": {"early": 6.0, "growth": 5.0, "established": 4.0},
+    "MODERATE": {"early": 8.0, "growth": 7.0, "established": 6.0},
+    "LARGE": {"early": 9.5, "growth": 9.0, "established": 8.0},
+}
+
+# Revenue Disclosure: reuses the SAME money-band shape as Funding History/
+# Commercial Traction's Disclosed Scale (SMALL/MODERATE/LARGE) but as its
+# own, independent constants -- same "no cross-pillar coupling" reasoning
+# as above. Stage-tiered, same direction (a given revenue figure is more
+# remarkable from a younger company).
+REVENUE_DISCLOSURE_SMALL_MAX_USD: float = 1_000_000
+REVENUE_DISCLOSURE_MODERATE_MAX_USD: float = 20_000_000
+REVENUE_DISCLOSURE_LABEL_SCORES: dict[str, dict[str, float]] = {
+    "SMALL": {"early": 6.0, "growth": 5.0, "established": 4.0},
+    "MODERATE": {"early": 8.0, "growth": 7.0, "established": 6.0},
+    "LARGE": {"early": 9.5, "growth": 9.0, "established": 8.0},
+}
+
+# Capital Efficiency: FLAT / stage-independent -- a disclosed quality
+# figure (a 75% gross margin, an 18-month runway) means the same thing
+# regardless of company age, the same reasoning Retention/Renewal Signal
+# (Commercial Traction) and Public Track Record (Team & Leadership)
+# already established for their own quality-not-magnitude dimensions.
+# Never inferred from funding amount, headcount, revenue, customer count,
+# valuation, or general market presence/maturity -- only from a claim
+# whose own structured_fact explicitly carries one of the three
+# recognized metrics (burn_rate/gross_margin/runway), never computed by
+# this engine from any other typed fact (item 8's own explicit
+# prohibition on `funding / guessed_burn`-style runway calculation).
+CAPITAL_EFFICIENCY_LABEL_SCORES: dict[str, float] = {
+    "WEAK": 3.5,
+    "MODERATE": 6.0,
+    "STRONG": 8.5,
 }
 
 # --- Confidence and source reliability (spec Part 6.4) ----------------------

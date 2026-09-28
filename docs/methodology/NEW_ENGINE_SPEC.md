@@ -327,6 +327,23 @@ supersession mechanism, test results, and a small real-evidence sanity check.
 
 #### Financial & Funding Signals (0.10)
 
+**Implemented (Task 17)** — `app/evidence_engine/pillars/financial_funding.py`, all three
+dimensions below exactly as this table defines them (Capital Efficiency's own removal, referenced in
+Task 17's initial instructions, is not recorded in this document or in `NEW_ENGINE_CALIBRATION.md`;
+the conflict was surfaced to and resolved by the user before implementation — see the Financial &
+Funding report §0). Funding History and Revenue Disclosure are Computed, pure deterministic
+functions with no model call, matching Commercial Traction's own precedent (Task 15). Funding
+History's own staleness cell below is **not** applied as a per-round exclusion — its own parenthetical
+("a disclosed 2021 round remains a real, permanent fact") is taken literally; every disclosed,
+completed, equity round counts toward a summed total regardless of age, provenance-verified against
+double-counting via `provenance.py::verify_independence()` called directly. Revenue Disclosure never
+re-extracts a figure — it reads the exact same claim Commercial Traction's own Disclosed Scale
+already requires, tagged with an additional `assessment_criteria` entry at claim-authoring time (spec
+Part 3.1's own reuse mechanism), proven with real Stripe data to cite the literal same `claim_id`
+across both pillars. See `docs/methodology/NEW_ENGINE_FINANCIAL_FUNDING_REPORT.md` for closed label
+definitions, the equity-only funding-summation rule, test results, and a small real-evidence sanity
+check.
+
 | Dimension | Weight | Category | Admissible evidence | Minimum to score | Staleness bound |
 |---|---|---|---|---|---|
 | Funding History | 0.45 | Computed | Disclosed round(s) — size, date, named investors — from company disclosure, independent reporting, or a funding-database aggregator | ≥1 disclosed round with a size and date | 36 months (a disclosed 2021 round remains a real, permanent fact) |
