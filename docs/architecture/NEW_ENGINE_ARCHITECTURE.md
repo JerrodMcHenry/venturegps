@@ -74,24 +74,34 @@ Research → Evidence Ledger → Assessment → Deterministic Scoring → Report
 
 ### 2.1 Research
 
-Reuses existing ingestion utilities unmodified: `app/pdf_extractor.py` for an uploaded pitch
-deck, `app/website_scrapper.py` for a submitted URL, and a new Tavily-based research step
-modeled on (not importing) `app/ai/research_enrichment.py`'s existing category-search pattern —
-modeled on it because the *pattern* (a fixed set of named research categories, dispatched
-concurrently via `run_concurrently`, assembled in a deterministic fixed order) is sound general
-infrastructure; the actual category list and prompts are new, since the new engine's evidence
-needs (named customers, disclosed figures, named executives) differ from the legacy pipeline's
-narrative-research needs.
+**Implemented, isolated, offline-tested (Task 20):** `app/evidence_engine/acquisition/` — a
+deterministic, methodology-aware research plan (`research_plan.py`, one topic per pillar, a fixed,
+reviewable query-template table, never an LLM-authored open-ended search), dispatched through three
+Protocol boundaries (`SearchProvider`/`SourceRetriever`/`EvidenceExtractor`, `providers.py`) with
+explicit call budgets (`AcquisitionBudget`). See `docs/architecture/EVIDENCE_ACQUISITION_
+PIPELINE.md` for the full design. **No real provider is implemented** — this task's own isolation
+decision was to model the pattern this section originally described (below) rather than import
+`app/pdf_extractor.py`/`app/website_scrapper.py`/`app/ai/research_enrichment.py` directly, keeping
+`acquisition/` inside the exact same zero-legacy-import boundary the rest of `app/evidence_engine/`
+already guarantees. Concurrency (`run_concurrently`) was NOT wired in this task (sequential
+execution; a documented, deliberate scope limit, not an oversight — same evaluation doc §16).
+
+*Original design intent, retained for reference:* reuse existing ingestion utilities unmodified —
+`app/pdf_extractor.py` for an uploaded pitch deck (still out of scope, Task 20 item 3), `app/
+website_scrapper.py` for a submitted URL, and a Tavily-based research step modeled on (not
+importing) `app/ai/research_enrichment.py`'s existing category-search pattern.
 
 ### 2.2 Evidence Ledger construction
 
-One or more schema-constrained LLM calls (dispatched concurrently, one per research category or
-per pillar — an implementation-time choice, not fixed here) turn raw research text plus any
-submitted document/website text into typed `Claim` records (spec Part 2.1), each validated
-against a Pydantic model before being written to the ledger. **No claim is written without a
-`source.type`, `source.publisher`, and `retrieved_at`** (spec Part 2.2) — a call that cannot
-produce a valid claim for a given piece of text simply produces no claim, never a
-partially-filled one.
+**Implemented, isolated, offline-tested (Task 20):** `acquisition/extraction.py` (grounding
+validation — an extracted claim candidate must cite a real, retrieved source and a verbatim-present
+excerpt, or it is rejected, never repaired) and `acquisition/claim_identity.py` (canonical
+`independence_group_id` assignment from the typed fact itself, never from source URL, plus the
+automatic revenue cross-pillar reuse tag, spec Part 3.1) turn `ExtractedClaimCandidate`s into real,
+validated `Claim` records exactly as this section originally specified. **No claim is written
+without a `source.type`, `source.publisher`, and `retrieved_at`** (spec Part 2.2, unchanged,
+enforced by the existing `Claim` Pydantic model itself, not re-implemented) — a candidate that
+cannot produce a valid, grounded claim simply produces no claim, never a partially-filled one.
 
 ### 2.3 Assessment
 

@@ -16,7 +16,11 @@ evaluation (Task 18 — all six pillars run together for the first time):
 `docs/methodology/NEW_ENGINE_FULL_EVALUATION.md`. Methodology calibration & company-level
 aggregation (Task 19 — sensitivity analysis, controlled Confidence fixtures, and the company-level
 Coverage/Confidence layer; explicitly answers whether an overall 0-100 score is justified):
-`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md`.
+`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md`. Evidence acquisition pipeline architecture
+(Task 20 — the bridge from a raw company/website input to a canonical Evidence Ledger, without a
+developer hand-authoring it): `docs/architecture/EVIDENCE_ACQUISITION_PIPELINE.md`, with offline
+end-to-end test results and the live-run readiness assessment in
+`docs/methodology/NEW_ENGINE_E2E_EVALUATION.md`.
 
 **This package is isolated by design** (architecture doc Part 1) — it imports nothing from
 `app.ai`, `app.database`, `app.api`, `app.models`, or `app.v2`. Confirmed with:
@@ -24,7 +28,7 @@ Coverage/Confidence layer; explicitly answers whether an overall 0-100 score is 
 (zero matches as of this writing — re-run this before any future change to confirm the
 boundary still holds).
 
-## What is implemented (Tasks 8-19: all six pillars, full-engine assembly, methodology calibration, company-level aggregation, reliability, live evaluation, remediation)
+## What is implemented (Tasks 8-20: all six pillars, full-engine assembly, methodology calibration, company-level aggregation, an offline-tested evidence acquisition pipeline, reliability, live evaluation, remediation)
 
 - **`models.py`** — the `Claim` model, including `structured_fact` (Task 9) and
   `SourceType.COMMUNITY_COMMENTARY` (Task 12 — an anonymous public comment, independent of the
@@ -61,7 +65,9 @@ boundary still holds).
   named_entity_fact` unchanged, and Funding History calls the already-public
   `provenance.py::verify_independence()` directly (not a new function) to provenance-verify its own
   summed total.
-- **`parameters.py`** — every numeric constant, versioned `evidence_engine.v1-provisional-10`, all
+- **`parameters.py`** — every numeric constant, versioned `evidence_engine.v1-provisional-11`
+  (**Task 20** added one new, additive constant, `CONTRADICTION_AMOUNT_TOLERANCE_PCT`, used only by
+  the new `acquisition/contradiction.py` module — no pillar-level parameter was changed), all
   explicitly `CALIBRATION REQUIRED`. **Task 19** added `PILLAR_WEIGHTS` (taken directly from spec
   Part 3.3's own header rows, not invented) and the company-level gate values
   `MIN_OVERALL_COVERAGE_PCT`/`MIN_PUBLISHABLE_PILLARS` (set equal to their pillar-level counterparts,
@@ -145,6 +151,26 @@ boundary still holds).
   findings if they ever fire. Zero shared-layer code was changed to build either of these two
   modules — see the Full Evaluation report §9 for the one bug found (in this audit code itself, not
   in any pillar) and fixed before the cohort evaluation.
+- **`acquisition/`** (Task 20) — the bridge from a raw `CompanyAnalysisInput` (company name +
+  website) to the canonical `EvidenceLedger` every pillar already consumes, so a developer no
+  longer has to hand-author it. A deterministic, methodology-aware research plan (`research_
+  plan.py`, one topic per pillar, a fixed query-template table, never an LLM-authored open-ended
+  search) dispatched through three Protocol boundaries (`providers.py`:
+  `SearchProvider`/`SourceRetriever`/`EvidenceExtractor`, mirroring `classification.py`'s own
+  `ClassificationModel`/`ExtractionModel` pattern) with explicit call budgets
+  (`AcquisitionBudget`). `extraction.py` grounds every extracted claim candidate against its own
+  cited source (an excerpt not verbatim-present in the source is rejected, never repaired);
+  `claim_identity.py` computes canonical `independence_group_id`s from the typed fact itself (never
+  the source URL) and automatically tags a specifically-revenue claim for Financial & Funding
+  Signals' own Revenue Disclosure dimension (the same cross-pillar reuse rule Task 17 proved with
+  real Stripe data, now applied automatically); `contradiction.py` marks genuinely conflicting
+  typed facts `disputed` BEFORE ledger construction, so the already-existing dispute-exclusion rule
+  is what fails a dimension closed, not a new mechanism. **No real (networked) provider is
+  implemented** — `providers.py::NotConfiguredProvider` raises immediately if ever actually called;
+  a live run needs paid Tavily/OpenAI calls this task was explicitly told not to make without
+  approval. See `docs/architecture/EVIDENCE_ACQUISITION_PIPELINE.md` for the full design and
+  `docs/methodology/NEW_ENGINE_E2E_EVALUATION.md` for the offline test results and live-run
+  readiness assessment.
 - **`fixtures/`** — Notion, Linear (real companies), Auroraflow, Pathlight, DupliCo (fictional,
   each built to stress a specific mechanism; offline, hand-authored) — Product & Technology only.
   **Task 18** added two more fictional, fully-offline companies spanning all six pillars: `beacon_
@@ -176,13 +202,17 @@ boundary still holds).
   fictional ones) — see `docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` for the full matrix and
   findings, updated in Task 19 to also print company-level Coverage/Confidence/publishability per
   company (`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` for the analysis of those results).
-- **`tests/`** — **357 tests across 17 files**, all script-style (this repo's pytest is scoped to
+- **`tests/`** — **379 tests across 18 files**, all script-style (this repo's pytest is scoped to
   `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 19** added
   `test_calibration_aggregation.py` (29 tests): the six controlled Confidence fixtures item 9 of that
   task asked for (proving Low/Medium/High correspond to meaningfully different evidence states, not
   just that the mechanism runs), the new company-level Coverage/Confidence/publishability
   computations, and the aggregation invariant/counterfactual tests (more unknown evidence cannot
   improve a result; duplication changes nothing; company identity/brand cannot change results; etc.).
+  **Task 20** added `test_acquisition_pipeline.py` (22 tests): the real pipeline run end-to-end
+  against deterministic fakes, covering evidence-rich/sparse/contradictory/duplicate/prompt-
+  injection/partial-failure/revenue-reuse/identity-invariance scenarios plus grounding rejection,
+  budget enforcement, extraction recovery, and canonical-identity determinism.
 - **`demo.py`** — prints a human-readable Product & Technology pillar summary for all five offline
   fixtures: `python -m app.evidence_engine.demo`.
 

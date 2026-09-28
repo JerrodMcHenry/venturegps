@@ -14,7 +14,7 @@ pass, against a much larger cohort, would eventually replace these.
 
 from __future__ import annotations
 
-PARAMETER_VERSION = "evidence_engine.v1-provisional-10"
+PARAMETER_VERSION = "evidence_engine.v1-provisional-11"
 
 # --- Pillar-level publishability gates (spec Part 6.2) ----------------------
 # Unchanged from the first vertical slice -- Task 9's expanded fixture set
@@ -70,6 +70,24 @@ PILLAR_WEIGHTS: dict[str, float] = {
 # fully close (two maximally-weighted, maximally-covered pillars alone).
 MIN_OVERALL_COVERAGE_PCT: float = 40.0
 MIN_PUBLISHABLE_PILLARS: int = 2
+
+# --- Evidence acquisition pipeline (Task 20) ---------------------------------
+# Numeric-value materiality tolerance for acquisition-time contradiction
+# detection (`acquisition/contradiction.py`) -- two candidate claims
+# describing the same identified fact (same company, same canonical
+# independence_group_id) whose numeric values differ by at least this
+# percentage are marked disputed/contradicts before ledger construction,
+# rather than silently deduplicated. Deliberately the SAME value as
+# `cross_pillar_audit.py`'s own private `_DUPLICATE_EXTRACTION_AMOUNT_
+# TOLERANCE_PCT` (Task 18) -- not imported from it (this engine's own
+# "pillar-local duplication over cross-module coupling" convention,
+# applied here to two acquisition-adjacent modules solving a related but
+# distinct problem: cross_pillar_audit detects likely duplicate
+# EXTRACTION after the fact; this constant governs whether acquisition
+# marks two ALREADY-DISTINCT-by-identity-key claims as a genuine,
+# unresolved disagreement). CALIBRATION REQUIRED like every other value
+# in this module.
+CONTRADICTION_AMOUNT_TOLERANCE_PCT: float = 15.0
 
 # --- Product & Technology pillar (spec Part 3.3) ----------------------------
 PRODUCT_TECHNOLOGY_PILLAR = "Product & Technology"
