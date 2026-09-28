@@ -110,15 +110,33 @@ tested. **Task 10** added evidence-independence verification (a deterministic pa
 claims' content/provenance, `app/evidence_engine/provenance.py`, run as part of dimension
 evaluation before a Classified response is accepted — not itself an AI call) and one retry with
 validation feedback before failing closed (Part 5 below). Concurrent dispatch across
-dimensions/pillars via `run_concurrently` is not yet wired in (only four dimensions exist so far,
-run sequentially in the current code — revisit once more
-pillars exist and concurrency is actually worth the complexity).
+dimensions/pillars via `run_concurrently` is not yet wired in (all six pillars' dimensions run
+sequentially in the current code — revisit once real, non-mock AI calls make concurrency actually
+worth the complexity; each pillar's own default `WellBehaved*` mocks are fast enough that
+sequential evaluation across all six pillars is not a real bottleneck yet).
+
+**Task 18 (assembly):** `app/evidence_engine/full_analysis.py::assemble_full_analysis()` is the
+first code to run Assessment for all six pillars against one shared, canonical `EvidenceLedger` and
+one shared, once-resolved `stage` value — see `docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` for
+the resulting `FullCompanyAnalysis` contract and a cross-pillar audit pass
+(`app/evidence_engine/cross_pillar_audit.py`) that re-verifies evidence-reuse and traceability
+invariants across all six pillars' own outputs. Still no concurrent dispatch, no Research step
+(pillars are evaluated against ledgers this session's own live/offline research already
+populated), and no overall-score gates (Part 2.4 below) — those remain design-only.
 
 ### 2.4 Deterministic Scoring
 
 Pure Python, no I/O, over the completed Assessment output for all dimensions of one company's
 analysis: dimension scoring → pillar aggregation/gates → coverage → confidence → overall-score
 gates (spec Part 6, in that order, each a separately testable pure function).
+
+**Implemented through pillar aggregation/gates/coverage/confidence, for all six pillars (Task
+18):** every step up to and including each pillar's own `PillarResult` (Strength/Coverage/
+Confidence/publishable, spec Part 6.2-6.4) is real and assembled together by
+`full_analysis.py`. **Not implemented:** spec Part 6.5's own overall-score gates
+(`MIN_OVERALL_COVERAGE_PCT`, `MIN_PUBLISHABLE_PILLARS`, overall Confidence) and any resulting
+single overall number — deliberately out of Task 18's own scope; see
+`docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` §14.
 
 ### 2.5 Report
 

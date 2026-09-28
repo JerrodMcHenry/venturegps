@@ -560,6 +560,13 @@ HIGH, a finding flagged as ambiguous, not resolved).
 
 ### 6.5 Minimum scoreability and overall-score publication
 
+**Status (Task 18):** all six pillars now run together against one canonical evidence ledger and
+produce one assembled `FullCompanyAnalysis` (`app/evidence_engine/full_analysis.py`,
+`docs/methodology/NEW_ENGINE_FULL_EVALUATION.md`) — but the three gates below, and the resulting
+single overall number, remain unimplemented by design; Task 18's own scope was assembly and
+cross-pillar diagnosis, not aggregation. This part's own requirements are unchanged and still
+govern whatever implements them next.
+
 Overall Startup Power (the top-level number) is published only when, simultaneously:
 
 1. **Overall weighted coverage** clears `MIN_OVERALL_COVERAGE_PCT` (**CALIBRATION REQUIRED**).
