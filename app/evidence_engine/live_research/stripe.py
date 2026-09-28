@@ -183,4 +183,146 @@ CLAIMS: list[Claim] = [
         independence_group_id="stripe-team-university",
         structured_fact=None,
     ),
+    # --- Task 15 addition: Commercial Traction evidence, real live
+    # research, 2026-09-28 retrieval. Notable real finding: Stripe's own
+    # 2025 annual letter/press discloses total payment volume (TPV) --
+    # $1.9T in 2025 -- prominently, but its actual REVENUE ($6.8B) is
+    # available only via third-party reporting (The Information, via
+    # Axios and SaaStr), never as a first-party figure. This is the exact
+    # real-world "GMV vs revenue confusion" risk item 6 warns against:
+    # TPV is ~280x larger than revenue for the same company in the same
+    # year -- treating one as a stand-in for the other would be a severe,
+    # concrete error. Retention/renewal and a named customer *count* are
+    # both genuinely undisclosed -- Stripe is private and does not publish
+    # either -- so both remain honestly Unscored (see the Commercial
+    # Traction report's sanity-check section).
+    Claim(
+        claim_id="stripe-traction-revenue-2024",
+        company_ref=COMPANY_REF,
+        claim_text="Axios, citing The Information, reports Stripe's 2024 net revenue grew 28% to $5.1 billion, with $2.2 billion in free cash flow.",
+        subject_entity="Stripe",
+        source_url="https://www.axios.com/pro/fintech-deals/newsletters/2025/03/27/fintech-stripe-s-revenue-jump",
+        source_publisher="Axios (citing The Information)",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        published_at=date(2025, 3, 27),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Stripe grew revenue 28%, to $5.1 billion, last year, and doubled free-cash flow to $2.2 billion",
+        assessment_criteria=["disclosed_scale", "growth_trajectory"],
+        independence_group_id="stripe-traction-revenue-2024",
+        structured_fact={
+            "kind": "traction_metric", "metric": "revenue", "amount": "5100000000",
+            "currency": "USD", "value_type": "actual", "period_date": "2024-12-31",
+        },
+    ),
+    Claim(
+        claim_id="stripe-traction-revenue-2025",
+        company_ref=COMPANY_REF,
+        claim_text="The Information, via SaaStr's coverage of Stripe's 2025 annual letter, reports 2025 revenue of $6.8 billion, up 33% year-over-year.",
+        subject_entity="Stripe",
+        source_url="https://www.saastr.com/5-interesting-learnings-from-stripe-at-6-8-billion-in-revenue-33-growth-47-free-cash-flow-margins-and-a-53b-bid-for-paypal/",
+        source_publisher="SaaStr (citing The Information)",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        published_at=date(2026, 7, 22),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Stripe's 2025 revenue hit $6.8 billion, up roughly a third year-over-year, its fastest growth since 2021",
+        assessment_criteria=["disclosed_scale", "growth_trajectory"],
+        independence_group_id="stripe-traction-revenue-2025",
+        structured_fact={
+            "kind": "traction_metric", "metric": "revenue", "amount": "6800000000",
+            "currency": "USD", "value_type": "actual", "period_date": "2025-12-31",
+        },
+    ),
+    # Total payment volume (TPV) -- deliberately tagged metric="gmv" (a
+    # pass-through transaction-value figure, not Stripe's own take-rate
+    # revenue) and NOT tagged assessment_criteria including
+    # "disclosed_scale" together with the revenue claims above in a way
+    # that would let TRACTION_METRIC_PREFERENCE_ORDER's own revenue-first
+    # ordering be the only thing preventing confusion -- it is included
+    # specifically so the sanity check can show the engine choosing
+    # revenue over TPV/GMV on the merits, not by omission.
+    Claim(
+        claim_id="stripe-traction-tpv-2025",
+        company_ref=COMPANY_REF,
+        claim_text="Stripe's own 2025 annual letter reports total payment volume of $1.9 trillion in 2025, up 34% year-over-year from $1.4 trillion in 2024.",
+        subject_entity="Stripe",
+        source_url="https://stripe.com/newsroom/news/stripe-2025-update",
+        source_publisher="Stripe (company disclosure)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 7, 21),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="total payment volume of $1.9T in 2025, up 34% year-over-year from $1.4T in 2024",
+        assessment_criteria=["disclosed_scale"],
+        independence_group_id="stripe-traction-tpv-2025",
+        structured_fact={
+            "kind": "traction_metric", "metric": "gmv", "amount": "1900000000000",
+            "currency": "USD", "value_type": "actual", "period_date": "2025-12-31",
+        },
+    ),
+    # Named enterprise commercial relationships -- Commercial Validation,
+    # never Customer Base Breadth: a handful of named logos in one article
+    # is not the same claim as a disclosed customer COUNT/band (item 5's
+    # "existence vs. magnitude" -- Stripe discloses no overall customer
+    # count, so Customer Base Breadth stays honestly Unscored below). Each
+    # named company is its own distinct, separately-checkable fact (spec
+    # Part 2.1's own independence_group_id semantics: a shared group id is
+    # for restatements of the SAME event, not for multiple different facts
+    # co-mentioned in one article) -- NOT collapsed into one claim, so the
+    # real count of named relationships is what the dimension actually
+    # counts, not an artificially deflated "one source, one fact."
+    Claim(
+        claim_id="stripe-traction-validation-openai",
+        company_ref=COMPANY_REF,
+        claim_text="Among the named AI labs billing on Stripe, The Information specifically calls out OpenAI's subscription products.",
+        subject_entity="Stripe",
+        source_url="https://www.saastr.com/5-interesting-learnings-from-stripe-at-6-8-billion-in-revenue-33-growth-47-free-cash-flow-margins-and-a-53b-bid-for-paypal/",
+        source_publisher="SaaStr (citing The Information)",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        published_at=date(2026, 7, 22),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="OpenAI, Anthropic, Confluent, and NVIDIA (for billing services)",
+        assessment_criteria=["commercial_validation"],
+        independence_group_id="stripe-traction-openai-billing",
+        structured_fact={"kind": "commercial_commitment", "named_entity": "OpenAI (Stripe Billing)"},
+    ),
+    Claim(
+        claim_id="stripe-traction-validation-anthropic",
+        company_ref=COMPANY_REF,
+        claim_text="The Information reports Anthropic uses Stripe's billing infrastructure for its own subscription products.",
+        subject_entity="Stripe",
+        source_url="https://www.saastr.com/5-interesting-learnings-from-stripe-at-6-8-billion-in-revenue-33-growth-47-free-cash-flow-margins-and-a-53b-bid-for-paypal/",
+        source_publisher="SaaStr (citing The Information)",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        published_at=date(2026, 7, 22),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="OpenAI, Anthropic, Confluent, and NVIDIA (for billing services)",
+        assessment_criteria=["commercial_validation"],
+        independence_group_id="stripe-traction-anthropic-billing",
+        structured_fact={"kind": "commercial_commitment", "named_entity": "Anthropic (Stripe Billing)"},
+    ),
+    Claim(
+        claim_id="stripe-traction-validation-orb",
+        company_ref=COMPANY_REF,
+        claim_text="The Information reports Vercel, Glean, Replit, and Supabase run usage-based billing on Stripe's Orb product.",
+        subject_entity="Stripe",
+        source_url="https://www.saastr.com/5-interesting-learnings-from-stripe-at-6-8-billion-in-revenue-33-growth-47-free-cash-flow-margins-and-a-53b-bid-for-paypal/",
+        source_publisher="SaaStr (citing The Information)",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        published_at=date(2026, 7, 22),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Vercel, Glean, Replit, and Supabase (for Orb billing)",
+        assessment_criteria=["commercial_validation"],
+        independence_group_id="stripe-traction-orb-customers",
+        structured_fact={"kind": "commercial_commitment", "named_entity": "Vercel, Glean, Replit, and Supabase (Orb billing)"},
+    ),
+    # Retention/renewal and an overall customer COUNT/band: deliberately
+    # NOT added. Real research found neither disclosed anywhere for
+    # Stripe -- both remain honestly Unscored, the expected, structurally
+    # correct outcome for a private company's genuinely undisclosed
+    # metrics (this pillar's own central rule).
 ]

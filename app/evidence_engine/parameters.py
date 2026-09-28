@@ -14,7 +14,7 @@ pass, against a much larger cohort, would eventually replace these.
 
 from __future__ import annotations
 
-PARAMETER_VERSION = "evidence_engine.v1-provisional-6"
+PARAMETER_VERSION = "evidence_engine.v1-provisional-7"
 
 # --- Pillar-level publishability gates (spec Part 6.2) ----------------------
 # Unchanged from the first vertical slice -- Task 9's expanded fixture set
@@ -232,6 +232,167 @@ LEADERSHIP_SUBSTANTIAL_HIRES_MIN_COUNT = 3
 PUBLIC_TRACK_RECORD_LABEL_SCORES: dict[str, float] = {
     "PRIOR_VENTURE_ROLE": 6.0,
     "PRIOR_EXIT": 8.5,
+}
+
+# --- Commercial Traction pillar (spec Part 3.3, Task 15) --------------------
+# Central governing principle behind every constant below: unknown PRIVATE
+# metrics are Unscored, never a low score. Stage-tiering (documented per
+# dimension) only changes which band maps to which score for evidence that
+# already cleared its own minimum-to-score bar -- it never lowers that bar
+# and never invents evidence for a company that disclosed nothing.
+COMMERCIAL_TRACTION_PILLAR = "Commercial Traction"
+
+COMMERCIAL_TRACTION_DIMENSION_WEIGHTS: dict[str, float] = {
+    "disclosed_scale": 0.25,
+    "growth_trajectory": 0.25,
+    "customer_base_breadth": 0.20,
+    "commercial_validation": 0.15,
+    "retention_renewal_signal": 0.15,
+}
+
+COMMERCIAL_TRACTION_STALENESS_DAYS: dict[str, int] = {
+    "disclosed_scale": 548,           # 18 months (spec Part 3.3)
+    # 18 months -- but per spec Part 3.3's own wording ("newer point <=18
+    # months old"), applied ONLY to the newer of a qualifying pair by
+    # commercial_traction.py's own dedicated check, never as a blanket
+    # per-claim admissibility filter for this dimension (see
+    # GROWTH_TRAJECTORY_RESOLUTION_STALENESS_DAYS below).
+    "growth_trajectory": 548,
+    "customer_base_breadth": 548,     # 18 months
+    "commercial_validation": 730,     # 24 months
+    "retention_renewal_signal": 365,  # 12 months
+}
+
+# Disclosed Scale / Growth Trajectory: which metric wins when more than one
+# qualifying metric type is admissible for the same company (Task 15 item 6:
+# "do not compare incompatible metrics as though they were the same"; item
+# 10: "do not automatically choose the larger number"). Ordered by how
+# directly the metric reflects the company's own realized commercial scale:
+# revenue/ARR are the most direct and comparable signal; GMV/bookings are
+# structurally the LARGEST and least directly comparable to a company's
+# actual scale (a marketplace's $50M GMV can coexist with single-digit-
+# million-dollar revenue) and are ranked last specifically so they can never
+# out-rank a smaller, more meaningful revenue/ARR figure merely by being a
+# bigger raw number. A reasoned, documented ordering -- not derived from
+# data, CALIBRATION REQUIRED like everything else in this module.
+TRACTION_METRIC_PREFERENCE_ORDER: tuple[str, ...] = (
+    "revenue",
+    "arr",
+    "paying_customers",
+    "active_users",
+    "bookings",
+    "gmv",
+)
+
+TRACTION_MONEY_METRICS: frozenset[str] = frozenset({"revenue", "arr", "gmv", "bookings"})
+TRACTION_COUNT_METRICS: frozenset[str] = frozenset({"active_users", "paying_customers"})
+
+# No FX normalization exists in this engine. A money figure in any other
+# currency is retained in the ledger for transparency but does not
+# currently contribute to Disclosed Scale or Growth Trajectory -- a
+# conservative, fail-closed limitation, not a defect (see the Commercial
+# Traction report's "Remaining limitations").
+TRACTION_SUPPORTED_CURRENCY: str = "USD"
+
+# Disclosed Scale: stage-tiered -- the same absolute magnitude is less
+# expected, and therefore more remarkable, from a younger company (the
+# same reasoning Product & Technology's and Team & Leadership's own
+# stage-indexed tables already use). Money and count cutoffs are
+# deliberately separate scales (a user count and a dollar figure are not
+# comparable magnitudes). CALIBRATION REQUIRED throughout.
+DISCLOSED_SCALE_MONEY_SMALL_MAX_USD: float = 1_000_000
+DISCLOSED_SCALE_MONEY_MODERATE_MAX_USD: float = 20_000_000
+DISCLOSED_SCALE_COUNT_SMALL_MAX: float = 10_000
+DISCLOSED_SCALE_COUNT_MODERATE_MAX: float = 1_000_000
+
+DISCLOSED_SCALE_LABEL_SCORES: dict[str, dict[str, float]] = {
+    "SMALL": {"early": 6.0, "growth": 5.0, "established": 4.0},
+    "MODERATE": {"early": 8.0, "growth": 7.0, "established": 6.0},
+    "LARGE": {"early": 9.5, "growth": 9.0, "established": 8.0},
+}
+
+# Growth Trajectory: kept FLAT / stage-independent -- a genuine, documented
+# ambiguity (Task 15's own "narrowest reasonable decision" instruction, the
+# same discipline team_leadership.py already applied to Founder Relevant
+# Experience's own label-set ambiguity). Two directions are each
+# defensible -- high percentage growth off a small base is the unremarkable
+# NORM at early stage (arguing to score it lower there), but a growth
+# *rate* is simultaneously the primary signal investable at that stage
+# (arguing the opposite) -- and this methodology has no calibrated basis to
+# choose between them. Deferred to a future calibration pass, not decided
+# here (see the Commercial Traction report §3).
+GROWTH_MIN_WINDOW_DAYS: int = 180          # ~2 quarters (spec Part 3.3's own stated structural floor)
+GROWTH_ANNUALIZE_MIN_WINDOW_DAYS: int = 350  # ~1 year; below this, raw (non-annualized) period growth is used,
+                                              # per spec Part 3.3's own "a shorter window is not annualized"
+# Spec Part 3.3's own staleness column for Growth Trajectory reads "Newer
+# point <=18 months old" -- deliberately about the NEWER point only, not a
+# blanket per-claim bound on both points (the older point exists only to
+# establish a rate's starting baseline; its own age is not what "stale"
+# means for a trajectory). commercial_traction.py therefore resolves this
+# dimension's raw admissibility with NO staleness ceiling (this sentinel,
+# effectively unlimited) and applies the real 18-month bound itself, only
+# to whichever point ends up chosen as the newer one of a qualifying pair
+# -- a genuine spec-fidelity fix surfaced by the Task 15 real-evidence
+# sanity check (see the Commercial Traction report), not a calibration
+# change.
+GROWTH_TRAJECTORY_RESOLUTION_STALENESS_DAYS: int = 36_500  # ~100 years -- effectively "no ceiling" at this layer
+GROWTH_SLOW_MAX_PCT: float = 20.0
+GROWTH_MODERATE_MAX_PCT: float = 100.0
+# DECLINING is not a spec-given label but a necessary, documented addition
+# (Task 15 item 6/10's own "do not calculate growth from incomparable
+# periods" discipline extended honestly to a real outcome the spec's prose
+# does not name): a company whose own metric fell between two admissible,
+# confirmed-actual points is a materially different, more concerning signal
+# than "grew slowly," and folding it into SLOW would misrepresent the
+# evidence -- so it gets its own label and the lowest score in this table.
+GROWTH_TRAJECTORY_LABEL_SCORES: dict[str, float] = {
+    "DECLINING": 2.0,
+    "SLOW": 4.0,
+    "MODERATE": 6.5,
+    "FAST": 8.5,
+}
+
+# Customer Base Breadth: stage-tiered, same reasoning as Disclosed Scale.
+# Segment mix (enterprise/SMB/consumer) is retained on the claim's own
+# structured_fact and surfaced in the dimension's rationale for
+# transparency, but the approved spec gives no explicit rule for how mix
+# should independently move the score beyond the band itself -- so, per
+# this engine's own "do not invent an unspecified scoring axis" discipline,
+# mix is documentary context only here, not a second scoring input.
+# Flagged as a deferred calibration item, not an oversight.
+CUSTOMER_BASE_BREADTH_LABEL_SCORES: dict[str, dict[str, float]] = {
+    "SMALL": {"early": 6.0, "growth": 5.0, "established": 4.0},
+    "MODERATE": {"early": 8.0, "growth": 7.0, "established": 6.0},
+    "LARGE": {"early": 9.5, "growth": 9.0, "established": 8.0},
+}
+
+# Commercial Validation: counts distinct named contracts/renewals/
+# partnership-announcement facts -- the identical provenance-verified
+# counting mechanism Leadership Composition (Team & Leadership, Task 14)
+# already established for named hires, reused here for named commercial
+# commitments. Stage-tiered, same direction as Disclosed Scale/Customer
+# Base Breadth.
+COMMERCIAL_VALIDATION_SOME_MIN_COUNT: int = 1
+COMMERCIAL_VALIDATION_SUBSTANTIAL_MIN_COUNT: int = 3
+COMMERCIAL_VALIDATION_LABEL_SCORES: dict[str, dict[str, float]] = {
+    "SOME_VALIDATION": {"early": 7.0, "growth": 6.0, "established": 5.0},
+    "SUBSTANTIAL_VALIDATION": {"early": 9.0, "growth": 8.0, "established": 7.0},
+}
+
+# Retention/Renewal Signal: FLAT / stage-independent -- a retention-quality
+# band means the same thing regardless of company age. The spec's own
+# explicit instruction that this dimension must never be inferred from
+# company age reinforces treating age/stage as irrelevant to its score
+# entirely (unlike Disclosed Scale/Customer Base Breadth/Commercial
+# Validation, which measure absolute achieved scale where a younger
+# company's identical figure is legitimately more remarkable, retention
+# QUALITY -- e.g. a 95% net revenue retention figure -- carries the same
+# meaning at any age, the same reasoning Team & Leadership already applied
+# to Founder Relevant Experience/Public Track Record).
+RETENTION_LABEL_SCORES: dict[str, float] = {
+    "WEAK": 3.5,
+    "MODERATE": 6.0,
+    "STRONG": 8.5,
 }
 
 # --- Confidence and source reliability (spec Part 6.4) ----------------------

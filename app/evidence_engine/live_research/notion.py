@@ -218,4 +218,64 @@ CLAIMS: list[Claim] = [
         independence_group_id="notion-market-catalyst-gartner",
         structured_fact={"kind": "catalyst_name", "value": "enterprise AI agent adoption (Gartner forecast)"},
     ),
+    # --- Task 15 addition: Commercial Traction evidence, real live
+    # research, 2026-09-28 retrieval. Notable real finding: Notion's ARR
+    # is reported very inconsistently across secondary/aggregator sources
+    # found during this pass ($300M/$500M/$600M/$610M/$865M all appear for
+    # overlapping late-2025 periods across different low-quality SEO
+    # aggregator sites) -- exactly the "conflicting metrics" risk this
+    # pillar is designed to resist. Rather than manufacture a growth-
+    # trajectory pair from that noise, only the single best-sourced figure
+    # (CNBC, on the record, attributed to a named co-founder) is entered
+    # as a ledger claim; the weaker aggregator figures are deliberately
+    # NOT entered (a research-quality judgment made before the ledger, not
+    # a disputed pair for the engine to resolve). Growth Trajectory,
+    # Commercial Validation, and Retention/Renewal Signal are left
+    # honestly Unscored for Notion in this small pass -- reflecting this
+    # pass's own limited research scope, not a claim that no such evidence
+    # exists in the wild (the same honest distinction Task 11 §5.4/Task 13
+    # §7.3 already drew for their own scope-limited absences).
+    Claim(
+        claim_id="notion-traction-revenue-2025",
+        company_ref=COMPANY_REF,
+        claim_text="CNBC reports Notion crossed $500 million in annualized revenue in September 2025, confirmed on the record by co-founder Akshay Kothari.",
+        subject_entity="Notion",
+        source_url="https://www.cnbc.com/2025/09/18/notion-launches-ai-agent-as-it-crosses-500-million-in-annual-revenue.html",
+        source_publisher="CNBC",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        published_at=date(2025, 9, 18),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Notion rides AI boom to $500 million in annual revenue",
+        assessment_criteria=["disclosed_scale"],
+        independence_group_id="notion-traction-cnbc-revenue-2025",
+        structured_fact={
+            "kind": "traction_metric", "metric": "revenue", "amount": "500000000",
+            "currency": "USD", "value_type": "actual", "period_date": "2025-09-18",
+        },
+    ),
+    # Customer Base Breadth: 100M total registered USERS -- deliberately
+    # NOT described as "paying customers" or "customer count" (item 13's
+    # own explicit "user count vs paying-customer count" distinction).
+    # Notion's own blog post does not disclose a paying-customer count at
+    # all, so this claim honestly names what it actually establishes.
+    Claim(
+        claim_id="notion-traction-users-2024",
+        company_ref=COMPANY_REF,
+        claim_text="Notion's own blog announces the platform passed 100 million total registered users in August 2024.",
+        subject_entity="Notion",
+        source_url="https://www.notion.com/blog/100-million-of-you",
+        source_publisher="Notion (company blog)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2024, 9, 3),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Last month, Notion passed 100M users!",
+        assessment_criteria=["customer_base_breadth"],
+        independence_group_id="notion-traction-100m-users",
+        structured_fact={
+            "kind": "customer_band", "value": "LARGE",
+            "named_entity": "100 million total registered users (not specifically paying customers)",
+        },
+    ),
 ]

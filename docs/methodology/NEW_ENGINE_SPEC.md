@@ -276,6 +276,23 @@ fail-closed identity-resolution mechanism, test results, and a small real-eviden
 
 #### Commercial Traction (0.20)
 
+**Implemented (Task 15)** — `app/evidence_engine/pillars/commercial_traction.py`. Two Computed
+dimensions (Disclosed Scale, Growth Trajectory — pure deterministic functions over an already-typed
+`structured_fact`, no model call at all) and three Classified. Growth Trajectory's own staleness
+column below ("newer point ≤18 months old") is applied literally — only the newer of a qualifying
+pair must be current; the older baseline point carries no separate staleness bound of its own, a
+distinction a real-evidence sanity check surfaced was initially implemented incorrectly and then
+fixed (see the Commercial Traction report §4). Disclosed Scale, Customer Base Breadth, and
+Commercial Validation are stage-tiered (the same magnitude/count is more remarkable earlier);
+Growth Trajectory and Retention/Renewal Signal are deliberately flat/stage-independent (documented,
+narrow ambiguity resolutions in that module's own docstring). No dimension requires independent
+sourcing — company disclosures are admissible per this table's own wording — but every scoring
+label requires a named, checkable fact (`requires_named_entity_fact`) or a provenance-verified
+minimum distinct-fact count (`requires_minimum_distinct_facts`), both reused unchanged from Team &
+Leadership. See `docs/methodology/NEW_ENGINE_COMMERCIAL_TRACTION_REPORT.md` for closed label
+definitions, the metric-preference tie-break mechanism, test results, and a small real-evidence
+sanity check that includes a real ~280x GMV-vs-revenue magnitude gap resolved correctly.
+
 | Dimension | Weight | Category | Admissible evidence | Minimum to score | Staleness bound |
 |---|---|---|---|---|---|
 | Disclosed Scale | 0.25 | Computed | One dated, disclosed absolute figure (revenue, GMV, ARR, active users, paying customers) | Exactly one admissible dated figure — unlike Growth Trajectory below, this dimension deliberately needs no second point | 18 months |

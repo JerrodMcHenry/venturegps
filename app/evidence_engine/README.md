@@ -7,7 +7,8 @@ Live evaluation (Task 11, real companies, unchanged): `docs/methodology/
 NEW_ENGINE_LIVE_EVALUATION.md`. Remediation of that evaluation's findings (Task 12):
 `docs/methodology/NEW_ENGINE_REMEDIATION_REPORT.md`. Market Opportunity pillar (Task 13):
 `docs/methodology/NEW_ENGINE_MARKET_OPPORTUNITY_REPORT.md`. Team & Leadership pillar (Task 14):
-`docs/methodology/NEW_ENGINE_TEAM_LEADERSHIP_REPORT.md`.
+`docs/methodology/NEW_ENGINE_TEAM_LEADERSHIP_REPORT.md`. Commercial Traction pillar (Task 15):
+`docs/methodology/NEW_ENGINE_COMMERCIAL_TRACTION_REPORT.md`.
 
 **This package is isolated by design** (architecture doc Part 1) — it imports nothing from
 `app.ai`, `app.database`, `app.api`, `app.models`, or `app.v2`. Confirmed with:
@@ -15,7 +16,7 @@ NEW_ENGINE_LIVE_EVALUATION.md`. Remediation of that evaluation's findings (Task 
 (zero matches as of this writing — re-run this before any future change to confirm the
 boundary still holds).
 
-## What is implemented (Tasks 8-14: three pillars, calibration, reliability, live evaluation, remediation)
+## What is implemented (Tasks 8-15: four pillars, calibration, reliability, live evaluation, remediation)
 
 - **`models.py`** — the `Claim` model, including `structured_fact` (Task 9) and
   `SourceType.COMMUNITY_COMMENTARY` (Task 12 — an anonymous public comment, independent of the
@@ -44,8 +45,10 @@ boundary still holds).
   from `requires_independent_source`, needed because Team & Leadership's own evidence bar (self-
   disclosed bios are admissible; vague unsupported claims are not) is not about source
   independence. Product & Technology and Market Opportunity use neither the field nor the factory
-  and are unaffected. See the Team & Leadership report §5.
-- **`parameters.py`** — every numeric constant, versioned `evidence_engine.v1-provisional-6`, all
+  and are unaffected. See the Team & Leadership report §5. **Task 15 added no new shared factory or
+  field** — Commercial Traction's three Classified dimensions reuse `requires_named_entity_fact` and
+  `requires_minimum_distinct_facts` unchanged.
+- **`parameters.py`** — every numeric constant, versioned `evidence_engine.v1-provisional-7`, all
   explicitly `CALIBRATION REQUIRED`.
 - **`pillars/product_technology.py`** — the first pillar (Task 8-12): Product Existence & Maturity
   (Computed) plus three Classified dimensions, stage-aware (label scores vary by stage tier), all
@@ -64,6 +67,16 @@ boundary still holds).
   `NONE_BEYOND_FOUNDERS` deliberately pinned flat across every tier. No dimension scores founder
   intelligence, charisma, prestige, or any subjective judgment — see the Team & Leadership report
   §4 for the structural (not just narrative) mechanism.
+- **`pillars/commercial_traction.py`** (Task 15) — the fourth pillar: two Computed dimensions
+  (Disclosed Scale, Growth Trajectory — pure deterministic functions over `structured_fact`, no
+  model call) plus three Classified (Customer Base Breadth, Commercial Validation, Retention/
+  Renewal Signal). No dimension requires independent sourcing; every scoring label instead requires
+  a named, checkable fact or a provenance-verified minimum distinct-fact count. `TRACTION_METRIC_
+  PREFERENCE_ORDER` resolves multi-metric ambiguity (revenue/ARR before GMV/bookings) without ever
+  picking the larger raw number. Growth Trajectory's own staleness handling required a genuine,
+  pillar-local fix during the real-evidence sanity check (spec's "newer point ≤18mo" applies to the
+  newer point only, not both) — see the Commercial Traction report §4. The central, non-negotiable
+  rule: unknown private metrics are Unscored, never a weak score.
 - **`fixtures/`** — Notion, Linear (real companies), Auroraflow, Pathlight, DupliCo (fictional,
   each built to stress a specific mechanism; offline, hand-authored) — Product & Technology only.
 - **`live_research/`** — genuine, real, dated evidence for Notion, Linear, Stripe, Fish Audio, and
@@ -74,26 +87,33 @@ boundary still holds).
   never touches `run_evaluation.py`'s own reproducibility. `run_team_leadership_sanity_check.py`
   (Task 14) likewise runs a small, additional, genuinely-researched Team & Leadership pass against
   Stripe and Linear (`stripe.py`/`linear.py` each gained a "Task 14 addition" block), kept as its
-  own script for the same reason.
-- **`tests/`** — **147 tests across 11 files**, all script-style (this repo's pytest is scoped to
+  own script for the same reason. `run_commercial_traction_sanity_check.py` (Task 15) does the same
+  for Commercial Traction against Stripe and Notion (each file gained a "Task 15 addition" block) —
+  Stripe's real revenue/payment-volume/named-customer data was chosen specifically as an established,
+  privately-held company with meaningful observable adoption but incomplete public disclosure.
+- **`tests/`** — **193 tests across 12 files**, all script-style (this repo's pytest is scoped to
   `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`.
 - **`demo.py`** — prints a human-readable Product & Technology pillar summary for all five offline
   fixtures: `python -m app.evidence_engine.demo`.
 
 ## What remains design-only (not implemented)
 
-The other three pillars (Commercial Traction, Execution & Momentum, Financial & Funding Signals), a
-real AI-driven Research pass (Assessment's mock models stand in for it), overall (cross-pillar)
-publication gates (not yet meaningful — no orchestrator combines pillars yet), the scale-based
-stage-determination fallback (needs Commercial Traction), persistence, API contracts, frontend
-integration, and observability beyond `print()`. Retry applies only to validation failures, not to
-a raised exception. **Three open methodological questions flagged, not resolved:** whether
-`_OBSERVABLE_SOURCE_TYPES` (Product & Technology) should ever include `COMMUNITY_COMMENTARY`
-(`NEW_ENGINE_REMEDIATION_REPORT.md` §2.1); whether Competitive Landscape Position's
-`FRAGMENTED`/`CONCENTRATED` binary needs a third state for "many named competitors, one explicitly
-dominant" markets (`NEW_ENGINE_MARKET_OPPORTUNITY_REPORT.md` §9); and whether Founder Relevant
-Experience's `NONE_DISCLOSED` label should be split into a genuine-absence state and a disclosed-
-but-irrelevant state (`NEW_ENGINE_TEAM_LEADERSHIP_REPORT.md` §9).
+The other two pillars (Execution & Momentum, Financial & Funding Signals), a real AI-driven Research
+pass (Assessment's mock models stand in for it), overall (cross-pillar) publication gates (not yet
+meaningful — no orchestrator combines pillars yet), the scale-based stage-determination fallback
+(`stage.py`'s own docstring has flagged this as blocked on Commercial Traction's Disclosed Scale
+since Task 9 — now *technically* buildable since Task 15, but deliberately not built as part of this
+task; see the Commercial Traction report §9), persistence, API contracts, frontend integration, and
+observability beyond `print()`. Retry applies only to validation failures, not to a raised exception.
+**Four open methodological questions flagged, not resolved:** whether `_OBSERVABLE_SOURCE_TYPES`
+(Product & Technology) should ever include `COMMUNITY_COMMENTARY` (`NEW_ENGINE_REMEDIATION_REPORT.md`
+§2.1); whether Competitive Landscape Position's `FRAGMENTED`/`CONCENTRATED` binary needs a third
+state for "many named competitors, one explicitly dominant" markets (`NEW_ENGINE_MARKET_
+OPPORTUNITY_REPORT.md` §9); whether Founder Relevant Experience's `NONE_DISCLOSED` label should be
+split into a genuine-absence state and a disclosed-but-irrelevant state (`NEW_ENGINE_TEAM_
+LEADERSHIP_REPORT.md` §9); and whether Customer Base Breadth's 18-month staleness bound is
+appropriate for a slow-changing directional metric (a total-user-count milestone) versus a
+fast-changing one (`NEW_ENGINE_COMMERCIAL_TRACTION_REPORT.md` §7.4/§9).
 
 ## Decisions locked in (see the design docs' own "Decided" boxes)
 
