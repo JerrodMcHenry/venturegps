@@ -6,6 +6,12 @@ every one of the six pillars already consumes (Tasks 8-19) — `app/evidence_eng
 a new subpackage inside the existing isolated evidence engine. **Not production integration** — no
 production route, no frontend change, no connection to VentureGPS's existing user-facing reports.
 
+**Task 21 update:** real (but still never-invoked) provider adapters, batching, bounded concurrency,
+dedup, and deterministic source-type classification were added on top of this pipeline —
+`PROVIDER_ADAPTERS_AND_CALL_BUDGET.md` is the record of that work; this document's own stage-by-stage
+description below remains accurate (updated in place at §15/§16 where this task changed the picture) and
+is not restated there.
+
 **The one rule this pipeline exists to enforce structurally:** AI helps discover and structure
 evidence; deterministic software decides what that evidence means under the methodology. No stage
 in this pipeline ever asks a model for a score, a label the methodology doesn't define, or a
@@ -294,43 +300,34 @@ exercise the SECOND question directly (six dedicated partial-failure scenarios, 
 touching a single pillar-level parameter to compensate — no gate was loosened, no label mapping was
 changed, anywhere in this task.
 
-## 15. What a real, live-approved provider implementation would need to do
+## 15. Real provider implementations (Task 21 — superseded, kept for history)
 
-Not written this task (no paid call was made) — described here so a future, explicitly-approved task
-has a concrete starting point:
-
-- **`SearchProvider`** — wrap the Tavily search API (the same provider `app/ai/research_enrichment.
-  py` already uses for the legacy pipeline, per `NEW_ENGINE_ARCHITECTURE.md` Part 2.1's own "modeled
-  on, not importing" precedent): one call per `ResearchQuery.query_text`, mapping Tavily's own result
-  shape into `SearchResult`.
-- **`SourceRetriever`** — fetch each result's own `url` (an HTTP GET, bounded content length),
-  classify `source_type` deterministically from the domain/URL shape (company's own domain →
-  `COMPANY_DISCLOSURE`, a known aggregator domain → `AGGREGATOR_OR_DIRECTORY`, else →
-  `INDEPENDENT_REPORTING`, falling back to `OTHER` when genuinely uncertain — item 7's own "if a
-  source cannot be confidently categorized, preserve uncertainty," never guessed as a stronger type
-  than the evidence supports).
-- **`EvidenceExtractor`** — one OpenAI structured-output call per retained source, using the SAME
-  schema-constrained pattern (`classification.py`'s own `ClassificationRequest`/`ExtractionRequest`
-  shape, Design Principle 7) every pillar's own real-model integration would eventually use, prompted
-  with the source's own content plus the target dimensions, constrained to return only
-  `ExtractedClaimCandidate`-shaped JSON.
+**This section originally described what a future task would need to build. That task has happened.**
+`app/evidence_engine/acquisition/providers_live.py` now implements all three adapters exactly as
+anticipated here (Tavily search, hardened HTTP fetch via `app/website_scrapper.py`, OpenAI structured
+extraction) — plus batching, bounded concurrency, deterministic domain-based `source_type` classification,
+and stronger structured-extraction validation, none of which this section originally scoped. See
+`PROVIDER_ADAPTERS_AND_CALL_BUDGET.md` for the full record: what was reused vs. newly implemented (§1),
+each adapter's own responsibilities (§2), and the current implementation-status ledger (§17). **Still true,
+unchanged since Task 20:** no test in this repository invokes any of the three against a real endpoint, no
+paid call has been made, and no live run has happened — that document's own §15 states exactly what an
+explicitly-approved dry run would require.
 
 ## 16. Known limitations
 
-- **No concurrency** (§5) — every stage runs sequentially; a future task may add bounded concurrent
-  dispatch once real network latency makes it worth the added complexity.
-- **The AI-call budget (24, worst case 48) is comparable to, not dramatically below, "the old
-  ~20-call sequential workflow"** this task explicitly warns against — a real, known tradeoff of
-  covering all six pillars' worth of dimensions from a bounded, deterministic plan, not smoothed
-  over.
-- **`source_type` classification for a real provider (§15) is not yet implemented or tested** — the
-  offline tests configure `source_type` directly on each fake `RetrievedSource`, sidestepping the
-  real, non-trivial question of reliably inferring source type from a real URL/domain at scale.
+Several of Task 20's own original limitations were addressed by Task 21 — see
+`PROVIDER_ADAPTERS_AND_CALL_BUDGET.md` §16 for the current, up-to-date list (concurrency now exists; the
+extraction-call budget is materially reduced via batching; `source_type` classification is now
+implemented, though still genuinely untested against real page content). Still true, unchanged:
+
 - **Contradiction detection's own tolerance (`CONTRADICTION_AMOUNT_TOLERANCE_PCT = 15.0`) is an
   unvalidated placeholder**, deliberately kept identical to `cross_pillar_audit.py`'s own private
   constant (Task 18) for consistency, not because either has been measured against a real corpus.
 - **PDF/pitch-deck ingestion is out of scope**, per item 3's own instruction — this pipeline handles
   website/company-name input only.
-- **No cost/token accounting is populated** (`ExternalCallRecord` exists but carries no real data) —
-  there is nothing to report honestly until a real provider is wired in (item 19's own "do not
-  invent a cost number").
+- **No real cost/token accounting exists yet** — `ExternalCallRecord` now has real fields a real
+  adapter populates (`tokens` from OpenAI's own `response.usage`, `cost_usd` only via an explicitly
+  supplied `ProviderPricing`), but no test or run has ever exercised this against a real call, so no
+  real number exists anywhere in this repository yet (item 19's own "do not invent a cost number").
+- **Early stopping remains explicitly deferred** (Task 21 item 11) — judged unsafe to implement
+  conservatively within that task's own scope; see `PROVIDER_ADAPTERS_AND_CALL_BUDGET.md` §8.

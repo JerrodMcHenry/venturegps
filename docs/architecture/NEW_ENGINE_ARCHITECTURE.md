@@ -74,22 +74,28 @@ Research → Evidence Ledger → Assessment → Deterministic Scoring → Report
 
 ### 2.1 Research
 
-**Implemented, isolated, offline-tested (Task 20):** `app/evidence_engine/acquisition/` — a
-deterministic, methodology-aware research plan (`research_plan.py`, one topic per pillar, a fixed,
-reviewable query-template table, never an LLM-authored open-ended search), dispatched through three
-Protocol boundaries (`SearchProvider`/`SourceRetriever`/`EvidenceExtractor`, `providers.py`) with
-explicit call budgets (`AcquisitionBudget`). See `docs/architecture/EVIDENCE_ACQUISITION_
-PIPELINE.md` for the full design. **No real provider is implemented** — this task's own isolation
-decision was to model the pattern this section originally described (below) rather than import
-`app/pdf_extractor.py`/`app/website_scrapper.py`/`app/ai/research_enrichment.py` directly, keeping
-`acquisition/` inside the exact same zero-legacy-import boundary the rest of `app/evidence_engine/`
-already guarantees. Concurrency (`run_concurrently`) was NOT wired in this task (sequential
-execution; a documented, deliberate scope limit, not an oversight — same evaluation doc §16).
+**Implemented, isolated, offline-tested (Task 20; real provider adapters added Task 21):**
+`app/evidence_engine/acquisition/` — a deterministic, methodology-aware research plan
+(`research_plan.py`, one topic per pillar, a fixed, reviewable query-template table, never an
+LLM-authored open-ended search), dispatched through three Protocol boundaries (`SearchProvider`/
+`SourceRetriever`/`EvidenceExtractor`, `providers.py`) with explicit call budgets
+(`AcquisitionBudget`). See `docs/architecture/EVIDENCE_ACQUISITION_PIPELINE.md` for the full stage
+design and `docs/architecture/PROVIDER_ADAPTERS_AND_CALL_BUDGET.md` for the provider/efficiency
+layer.
 
-*Original design intent, retained for reference:* reuse existing ingestion utilities unmodified —
-`app/pdf_extractor.py` for an uploaded pitch deck (still out of scope, Task 20 item 3), `app/
-website_scrapper.py` for a submitted URL, and a Tavily-based research step modeled on (not
-importing) `app/ai/research_enrichment.py`'s existing category-search pattern.
+**Real (but still never live-invoked) providers now exist** in `acquisition/providers_live.py` —
+this corrects Task 20's own over-conservative isolation choice: `HttpSourceRetriever` imports
+`app/website_scrapper.py::extract_text_from_website` DIRECTLY, and `acquisition/concurrency_
+helpers.py` imports `app/ai/concurrency.py::run_concurrently` DIRECTLY, both exactly per the four
+explicitly-approved exceptions Part 1.2's own table above already listed — Task 20 had simply not
+yet exploited them. Part 1.2's own suggestion of "a dedicated architecture test... assert this
+import boundary mechanically" is also now implemented (`tests/test_isolation_boundary.py`, Task 21)
+rather than left as a per-task manual, restated grep. `TavilySearchProvider`/`OpenAIEvidenceExtractor` still MODEL (not import) the
+legacy `app/ai/research_enrichment.py`/`app/ai/pillar_shared.py` call shapes, since neither of those
+two specific modules is one of the four exceptions. Bounded concurrency IS now wired in (Task 21,
+`concurrency_helpers.py`, three stages, explicit per-stage caps) — no longer sequential-only.
+`app/pdf_extractor.py` remains unused (PDF ingestion stays out of scope, unchanged since Task 20 item
+3).
 
 ### 2.2 Evidence Ledger construction
 

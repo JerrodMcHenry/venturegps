@@ -68,7 +68,7 @@ def compute_claim_id(claim_text: str, source_url: str) -> str:
 # different facts entirely, defeating both deduplication and contradiction
 # detection. Extending this table is the correct way to add a new kind,
 # not a fallback path.
-_IDENTITY_KEY_FIELDS: dict[str, tuple[str, ...]] = {
+IDENTITY_KEY_FIELDS: dict[str, tuple[str, ...]] = {
     "traction_metric": ("metric", "period_date"),
     "funding_round": ("round_date", "financing_type"),
     "product_release": ("named_entity",),
@@ -108,8 +108,8 @@ def compute_independence_group_id(candidate: ExtractedClaimCandidate, company_re
     match whenever one is available."""
     fact = candidate.structured_fact or {}
     kind = fact.get("kind")
-    if kind and kind in _IDENTITY_KEY_FIELDS:
-        key_fields = _IDENTITY_KEY_FIELDS[kind]
+    if kind and kind in IDENTITY_KEY_FIELDS:
+        key_fields = IDENTITY_KEY_FIELDS[kind]
         sub_values = tuple(_normalize_text(fact.get(f, "")) for f in key_fields)
         return _hash(company_ref, kind, *sub_values)
     return _hash(company_ref, "text", _normalize_text(candidate.claim_text))

@@ -6,8 +6,8 @@ already-approved vocabulary, never a score.** `EvidenceExtractor`
 (`providers.py`) returns `ExtractedClaimCandidate`s -- a `structured_fact`
 with a `kind`/label from the SAME closed vocabularies every pillar's own
 `classify_with_recovery()` already validates against, never a numeric
-score, never a free-form quality judgment. This module's own `_KNOWN_
-DIMENSIONS` set is the same dimension-name vocabulary `cross_pillar_
+score, never a free-form quality judgment. This module's own
+`KNOWN_DIMENSIONS` set is the same dimension-name vocabulary `cross_pillar_
 audit.py` already builds from `parameters.py` -- extraction cannot
 invent a dimension the methodology does not define.
 
@@ -39,6 +39,7 @@ from __future__ import annotations
 import re
 
 from app.evidence_engine import parameters as P
+from app.evidence_engine.acquisition.claim_identity import IDENTITY_KEY_FIELDS
 from app.evidence_engine.acquisition.models import (
     ClaimRejectionReason,
     ExtractedClaimCandidate,
@@ -51,6 +52,31 @@ from app.evidence_engine.acquisition.providers import EvidenceExtractor
 
 _WHITESPACE = re.compile(r"\s+")
 
+# The complete, closed `structured_fact.kind` vocabulary -- reused
+# directly from claim_identity.py's own identity-key table (the single
+# place every recognized kind is already enumerated) rather than a
+# second, hand-maintained list that could drift from it (Task 21 item 14:
+# "reject an unrecognized fact kind").
+KNOWN_FACT_KINDS: frozenset[str] = frozenset(IDENTITY_KEY_FIELDS.keys())
+
+# The complete, closed set of `structured_fact` VALUE fields any pillar
+# anywhere in this engine actually reads (verified by grepping every
+# `pillars/*.py` file's own `fact.get(...)`/`fact[...]` accesses -- "kind"
+# plus these 12). Deliberately a single global allowlist rather than a
+# per-kind field table: every `_parse_*` function downstream already
+# ignores any key it does not itself look for, so the real protection
+# this closes is a field NO pillar recognizes at all -- most pointedly
+# something like "score"/"rating"/"grade"/"confidence"/"quality", which
+# would otherwise be a structurally-valid-looking but semantically
+# score-like field a compromised or credulous extractor could try to
+# smuggle in even though `ExtractedClaimCandidate` has no top-level score
+# field (item 14's own "no model-provided score accepted").
+ALLOWED_STRUCTURED_FACT_FIELDS: frozenset[str] = frozenset({
+    "kind", "amount", "currency", "financing_type", "metric", "named_entity",
+    "period_date", "person_id", "role", "round_date", "status", "value",
+    "value_type", "topic",
+})
+
 
 def _normalize(text: str) -> str:
     return _WHITESPACE.sub(" ", text.lower()).strip()
@@ -62,7 +88,7 @@ def _normalize(text: str) -> str:
 # criteria` values. Built directly from the same `*_DIMENSION_WEIGHTS`
 # dicts every pillar's own evaluator already uses -- never a second,
 # hand-maintained list that could drift from the real one.
-_KNOWN_DIMENSIONS: frozenset[str] = frozenset(
+KNOWN_DIMENSIONS: frozenset[str] = frozenset(
     {
         *P.PRODUCT_TECHNOLOGY_DIMENSION_WEIGHTS,
         *P.MARKET_OPPORTUNITY_DIMENSION_WEIGHTS,
@@ -105,7 +131,7 @@ def validate_candidate(
             "the cited excerpt does not appear verbatim in the source's own retrieved content",
         )
 
-    if not candidate.assessment_criteria or not any(d in _KNOWN_DIMENSIONS for d in candidate.assessment_criteria):
+    if not candidate.assessment_criteria or not any(d in KNOWN_DIMENSIONS for d in candidate.assessment_criteria):
         return RejectedClaimCandidate(
             candidate, ClaimRejectionReason.NO_RECOGNIZED_DIMENSION,
             f"assessment_criteria {candidate.assessment_criteria!r} names no dimension this methodology defines",
@@ -117,7 +143,46 @@ def validate_candidate(
             "structured_fact is present but carries no 'kind' -- fails closed rather than guessing one",
         )
 
+    # Task 21 item 14's own fuller validation: an unrecognized `kind`
+    # fails closed rather than flowing through to claim_identity.py's own
+    # fallback text-based grouping, which would silently downgrade a
+    # fabricated-but-plausible-looking kind to weaker, approximate
+    # dedup instead of rejecting it outright.
+    if candidate.structured_fact is not None:
+        kind = candidate.structured_fact.get("kind")
+        if kind not in KNOWN_FACT_KINDS:
+            return RejectedClaimCandidate(
+                candidate, ClaimRejectionReason.INVALID_FACT_KIND,
+                f"structured_fact.kind {kind!r} is not one of this methodology's recognized fact kinds",
+            )
+        unexpected_fields = set(candidate.structured_fact) - ALLOWED_STRUCTURED_FACT_FIELDS
+        if unexpected_fields:
+            return RejectedClaimCandidate(
+                candidate, ClaimRejectionReason.DISALLOWED_FACT_FIELD,
+                f"structured_fact carries unrecognized field(s) {sorted(unexpected_fields)!r} "
+                "-- no pillar in this engine reads them, and a score-like field "
+                "(e.g. 'score'/'rating'/'grade') is never accepted from an extractor",
+            )
+
     return None
+
+
+def _sanitize_assessment_criteria(candidate: ExtractedClaimCandidate) -> ExtractedClaimCandidate:
+    """Filters `assessment_criteria` down to only recognized dimension
+    names before a candidate is finalized into a `Claim` (Task 21 item
+    14). `validate_candidate` above only requires that AT LEAST ONE
+    listed criterion be recognized (item 9's own original rule, unchanged
+    -- a candidate genuinely relevant to one real dimension should not be
+    rejected outright for also carrying one unrecognized label); this
+    function is the separate, additive step that then drops the
+    unrecognized ones rather than letting them ride along into the
+    ledger, where `cross_pillar_audit.py`/pillar evaluators would either
+    silently ignore them (harmless) or, worse, be extended later by code
+    that trusts `assessment_criteria` as already-validated."""
+    kept = [d for d in candidate.assessment_criteria if d in KNOWN_DIMENSIONS]
+    if kept == candidate.assessment_criteria:
+        return candidate
+    return candidate.model_copy(update={"assessment_criteria": kept})
 
 
 def extract_with_recovery(
@@ -151,7 +216,7 @@ def extract_with_recovery(
         for candidate in response.candidates:
             rejection = validate_candidate(candidate, request.source)
             if rejection is None:
-                accepted_this_attempt.append(candidate)
+                accepted_this_attempt.append(_sanitize_assessment_criteria(candidate))
             else:
                 rejected_this_attempt.append(rejection)
 
@@ -167,3 +232,108 @@ def extract_with_recovery(
             break
 
     return accepted, rejected, attempts_used
+
+
+def extract_many(
+    extractor: EvidenceExtractor,
+    requests: tuple[ExtractionRequest, ...],
+    max_attempts: int = 2,
+) -> tuple[
+    dict[str, tuple[ExtractedClaimCandidate, ...]],
+    dict[str, tuple[RejectedClaimCandidate, ...]],
+    dict[str, Exception],
+    int,
+]:
+    """Task 21 item 6's own batching entry point. `EvidenceExtractor`
+    (providers.py) is unchanged -- still one `.extract(request)` method,
+    one source per call, exactly Task 20's own Protocol. A provider that
+    ALSO wants to serve several sources in one real external call
+    (`providers_live.py::OpenAIEvidenceExtractor`) additionally exposes
+    an `extract_batch(requests) -> ExtractionResponse` method (duck-typed,
+    not part of the Protocol itself -- see that module's own docstring
+    for why); this function is the ONE place that checks for it and
+    prefers it when present, falling back to per-request `extract_with_
+    recovery()` calls otherwise.
+
+    This preserves EVERY existing fake in `fakes.py` (none of which
+    implement `extract_batch`) and every one of Task 20's 22 pipeline
+    tests' own OBSERVABLE behavior unchanged -- they all go through the
+    fallback path, which is a per-request loop functionally identical to
+    calling `extract_with_recovery()` directly, EXCEPT that this function
+    additionally isolates a single request's own raised exception from
+    every OTHER request in the same batch (see `errors_by_source` below)
+    -- a real correctness requirement once several sources can share one
+    batch/task, not merely a Task 20 carry-over: Task 20's own version
+    called `extract_with_recovery()` once per source, in its own
+    independent try/except, so one source's exception could never have
+    affected another source's result either; this function's fallback
+    path now explicitly reproduces that same per-source isolation itself,
+    rather than relying on the (now batched) caller to provide it.
+
+    Returns ({source_id: accepted_candidates}, {source_id:
+    rejected_candidates}, {source_id: raised_exception}, total_attempts_
+    used) -- keyed by source_id so callers never have to worry about
+    response-vs-request ordering (item 6's own "source attribution
+    preserved"). A source_id appears in AT MOST ONE of the first three
+    dicts: `errors_by_source` for a request whose extraction call itself
+    raised (as opposed to merely proposing a candidate that failed
+    grounding validation, which lands in `rejected_by_source` instead).
+    """
+    accepted_by_source: dict[str, tuple[ExtractedClaimCandidate, ...]] = {}
+    rejected_by_source: dict[str, tuple[RejectedClaimCandidate, ...]] = {}
+    errors_by_source: dict[str, Exception] = {}
+    total_attempts = 0
+
+    batch_extract = getattr(extractor, "extract_batch", None)
+    if callable(batch_extract) and requests:
+        for attempt in range(1, max_attempts + 1):
+            total_attempts += 1
+            pending = [r for r in requests if r.source.source_id not in accepted_by_source]
+            if not pending:
+                break
+            responses = batch_extract(tuple(pending))
+            for request, response in zip(pending, responses):
+                sid = request.source.source_id
+                acc: list[ExtractedClaimCandidate] = []
+                rej: list[RejectedClaimCandidate] = []
+                for candidate in response.candidates:
+                    rejection = validate_candidate(candidate, request.source)
+                    if rejection is None:
+                        acc.append(_sanitize_assessment_criteria(candidate))
+                    else:
+                        rej.append(rejection)
+                if acc or not response.candidates:
+                    accepted_by_source[sid] = tuple(acc)
+                    rejected_by_source[sid] = tuple(rej)
+                else:
+                    # Every proposed candidate failed grounding on this
+                    # attempt -- keep this source in `pending` for the
+                    # next attempt (mirrors extract_with_recovery's own
+                    # single-source retry condition), but always record
+                    # the latest rejection detail for observability even
+                    # if this is not the final attempt.
+                    rejected_by_source[sid] = tuple(rej)
+        # Anything never accepted after max_attempts stays recorded only
+        # in rejected_by_source, exactly like extract_with_recovery's own
+        # "give up, report why" contract. `errors_by_source` stays empty
+        # on this path -- a batch-capable provider makes exactly ONE real
+        # external call per attempt for the whole batch, so a raised
+        # exception here is a genuine whole-batch failure, correctly left
+        # to propagate to this function's own caller (which already
+        # treats one batch/task's exception as that one batch's own
+        # failure, isolated from every OTHER concurrently-run batch).
+        return accepted_by_source, rejected_by_source, errors_by_source, total_attempts
+
+    for request in requests:
+        sid = request.source.source_id
+        try:
+            accepted, rejected, attempts = extract_with_recovery(extractor, request, max_attempts=max_attempts)
+        except Exception as exc:  # noqa: BLE001 -- isolated per-source so it never destroys sibling requests in this batch
+            errors_by_source[sid] = exc
+            total_attempts += 1
+            continue
+        accepted_by_source[sid] = accepted
+        rejected_by_source[sid] = rejected
+        total_attempts += attempts
+
+    return accepted_by_source, rejected_by_source, errors_by_source, total_attempts

@@ -154,6 +154,9 @@ class ClaimRejectionReason(str, Enum):
     EXCERPT_NOT_GROUNDED_IN_SOURCE = "excerpt_not_grounded_in_source"
     NO_RECOGNIZED_DIMENSION = "no_recognized_dimension"
     MALFORMED_STRUCTURED_FACT = "malformed_structured_fact"
+    # Task 21 item 14's own fuller structured-extraction validation list:
+    INVALID_FACT_KIND = "invalid_fact_kind"
+    DISALLOWED_FACT_FIELD = "disallowed_fact_field"
 
 
 @dataclass(frozen=True)
@@ -199,6 +202,36 @@ class AcquisitionBudget:
     max_search_retries: int = 1
     max_retrieval_retries: int = 1
 
+    # --- Task 21: batching / per-source content bounds (item 6) ---------
+    # A batch-capable EvidenceExtractor (providers_live.py::
+    # OpenAIEvidenceExtractor) groups up to `max_sources_per_batch`
+    # retained sources into ONE model call rather than one call per
+    # source -- see extraction.py::extract_many(). A non-batching
+    # provider (every fake in fakes.py, and NotConfiguredProvider) is
+    # unaffected; these fields are simply unused on that path.
+    max_sources_per_batch: int = 4
+    # Conservative, character-based bound (item 6's own "acceptable if no
+    # tokenizer is already used" -- this project's `tiktoken` dependency
+    # is unused anywhere in app/ today, so a character bound is the
+    # existing convention, not a new one). ~6000 chars is comfortably
+    # inside gpt-4.1-mini's context window even at 4 sources/batch plus
+    # prompt overhead, with wide margin -- see PROVIDER_ADAPTERS_AND_
+    # CALL_BUDGET.md's own worked-example arithmetic.
+    max_chars_per_source: int = 6_000
+    max_total_input_chars_per_batch: int = 20_000
+
+    # --- Task 21: bounded concurrency (item 10) --------------------------
+    # Each cap is independent and explicit; None (never a caller default)
+    # means "reuse app.ai.concurrency.run_concurrently's own no-cap-given
+    # behavior," which itself defaults to len(tasks) for that one call --
+    # still a real, explicit-at-call-time bound, never unbounded fan-out.
+    # Defaults here are deliberately modest: a handful of topics/sources
+    # per company, not the "thousands of independent rows" scale
+    # run_concurrently's own docstring anticipates.
+    max_concurrent_searches: int = 3
+    max_concurrent_retrievals: int = 4
+    max_concurrent_extraction_batches: int = 2
+
 
 # --- 6. Telemetry (item 18/19) -----------------------------------------------
 
@@ -225,6 +258,12 @@ class ExternalCallRecord:
     tokens: int | None = None
     cost_usd: float | None = None
     succeeded: bool = True
+    # Task 21: how many sources this ONE external call covered -- 1 for
+    # search/retrieval and for a non-batching extractor, >1 for a batched
+    # OpenAIEvidenceExtractor call. Lets the call-graph report state
+    # "N extraction calls covering M sources" honestly rather than
+    # implying one-call-per-source always holds.
+    sources_covered: int = 1
 
 
 @dataclass(frozen=True)

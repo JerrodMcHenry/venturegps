@@ -33,6 +33,7 @@ from datetime import date
 from typing import Protocol
 
 from app.evidence_engine.acquisition.models import (
+    ExternalCallRecord,
     ExtractionRequest,
     ExtractionResponse,
     ResearchQuery,
@@ -51,6 +52,34 @@ class SourceRetriever(Protocol):
 
 class EvidenceExtractor(Protocol):
     def extract(self, request: ExtractionRequest) -> ExtractionResponse: ...
+
+    # Task 21 item 6: NOT part of this Protocol's required shape --
+    # deliberately duck-typed rather than declared here, so every
+    # existing single-source extractor (every fake in fakes.py,
+    # NotConfiguredProvider below) remains a complete, valid
+    # EvidenceExtractor without implementing it. A provider that DOES
+    # define `extract_batch(requests: tuple[ExtractionRequest, ...]) ->
+    # tuple[ExtractionResponse, ...]` (same order as `requests`) lets
+    # `extraction.py::extract_many()` batch several sources into one real
+    # external call; see `providers_live.py::OpenAIEvidenceExtractor`.
+
+
+def drain_call_log(provider: object) -> tuple[ExternalCallRecord, ...]:
+    """Duck-typed accessor `pipeline.py` uses on ANY provider after a
+    stage completes (Task 21 item 19). A real adapter
+    (`providers_live.py`) exposes a `_call_logger` with its own
+    `drain()`; a fake (`fakes.py`) or `NotConfiguredProvider` does not,
+    so this returns an empty tuple for them -- an honest "no real
+    external call happened," which is true. Deliberately lives here
+    (the neutral Protocol module), not in `providers_live.py`, so
+    `pipeline.py` -- imported by every offline, fake-only test in this
+    package -- never has to import `providers_live.py`'s own real SDK
+    dependencies (openai/tavily/app.website_scrapper) just to drain
+    telemetry from a fake that never populates any."""
+    logger = getattr(provider, "_call_logger", None)
+    if logger is None:
+        return ()
+    return logger.drain()
 
 
 class ProviderNotConfiguredError(RuntimeError):

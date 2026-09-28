@@ -20,15 +20,19 @@ Coverage/Confidence layer; explicitly answers whether an overall 0-100 score is 
 (Task 20 — the bridge from a raw company/website input to a canonical Evidence Ledger, without a
 developer hand-authoring it): `docs/architecture/EVIDENCE_ACQUISITION_PIPELINE.md`, with offline
 end-to-end test results and the live-run readiness assessment in
-`docs/methodology/NEW_ENGINE_E2E_EVALUATION.md`.
+`docs/methodology/NEW_ENGINE_E2E_EVALUATION.md`. Production provider adapters & acquisition
+efficiency (Task 21 — real, still never-invoked Tavily/HTTP/OpenAI adapters, batching, bounded
+concurrency, dedup, deterministic source-type classification, and the call-graph/model/readiness
+report): `docs/architecture/PROVIDER_ADAPTERS_AND_CALL_BUDGET.md`.
 
-**This package is isolated by design** (architecture doc Part 1) — it imports nothing from
-`app.ai`, `app.database`, `app.api`, `app.models`, or `app.v2`. Confirmed with:
-`grep -rn "^from app\.\|^import app\." app/evidence_engine/ | grep -v app.evidence_engine`
-(zero matches as of this writing — re-run this before any future change to confirm the
-boundary still holds).
+**This package is isolated by design** (architecture doc Part 1.2) — it imports nothing from
+`app.ai.*` (except the one explicitly-approved `app.ai.concurrency::run_concurrently`),
+`app.database`, `app.api`, `app.models`, or `app.v2`, plus the two other explicitly-approved
+legacy imports (`app.website_scrapper`, `app.pdf_extractor`, the latter currently unused) and
+`app.auth` (also currently unused). Automated, not just a manual grep, since Task 21:
+`python -m app.evidence_engine.tests.test_isolation_boundary` (an AST scan asserting exactly this).
 
-## What is implemented (Tasks 8-20: all six pillars, full-engine assembly, methodology calibration, company-level aggregation, an offline-tested evidence acquisition pipeline, reliability, live evaluation, remediation)
+## What is implemented (Tasks 8-21: all six pillars, full-engine assembly, methodology calibration, company-level aggregation, an offline-tested evidence acquisition pipeline with real provider adapters, reliability, live evaluation, remediation)
 
 - **`models.py`** — the `Claim` model, including `structured_fact` (Task 9) and
   `SourceType.COMMUNITY_COMMENTARY` (Task 12 — an anonymous public comment, independent of the
@@ -165,12 +169,31 @@ boundary still holds).
   Signals' own Revenue Disclosure dimension (the same cross-pillar reuse rule Task 17 proved with
   real Stripe data, now applied automatically); `contradiction.py` marks genuinely conflicting
   typed facts `disputed` BEFORE ledger construction, so the already-existing dispute-exclusion rule
-  is what fails a dimension closed, not a new mechanism. **No real (networked) provider is
-  implemented** — `providers.py::NotConfiguredProvider` raises immediately if ever actually called;
-  a live run needs paid Tavily/OpenAI calls this task was explicitly told not to make without
-  approval. See `docs/architecture/EVIDENCE_ACQUISITION_PIPELINE.md` for the full design and
-  `docs/methodology/NEW_ENGINE_E2E_EVALUATION.md` for the offline test results and live-run
-  readiness assessment.
+  is what fails a dimension closed, not a new mechanism. `providers.py::NotConfiguredProvider`
+  remains the pipeline's own built-in default and still raises immediately if ever actually called.
+  See `docs/architecture/EVIDENCE_ACQUISITION_PIPELINE.md` for the full design and
+  `docs/methodology/NEW_ENGINE_E2E_EVALUATION.md` for the offline test results and Task 20's own
+  live-run readiness assessment.
+- **`acquisition/providers_live.py`, `source_classification.py`, `dedup.py`, `concurrency_
+  helpers.py`** (Task 21) — real (but still never live-invoked) implementations of the three
+  Protocols above: `TavilySearchProvider`, `HttpSourceRetriever` (wraps `app/website_scrapper.py`
+  directly), `OpenAIEvidenceExtractor` (`gpt-4.1-mini`, batches up to 4 sources into one real call
+  via a duck-typed `extract_batch()` extension, never requests or accepts a model-provided score).
+  `source_classification.py` assigns `source_type` deterministically from the URL/domain alone,
+  before any extraction call ever sees the content — a company's own domain cannot self-declare
+  independence regardless of what the page says. `dedup.py` collapses exact-duplicate search-result
+  URLs and (as an available, unit-tested, but deliberately NOT pipeline-wired utility)
+  byte-identical retrieved content — wiring the latter in by default would have broken
+  `test_duplicate_syndicated_reporting_does_not_inflate_evidence`'s own spec-level guarantee that
+  five outlets restating one fact survive to the ledger as five distinct, provenanced claims.
+  `concurrency_helpers.py` wraps `app/ai/concurrency.py::run_concurrently` so search/retrieval/
+  extraction-batch calls run under an explicit, bounded cap while still degrading gracefully on a
+  single failure (the opposite of `run_concurrently`'s own "fail loud" contract, reconciled by
+  catching each task's own exception before it ever reaches that function). **Still no real network
+  call in any test** — every provider-level test replaces the adapter's own SDK client with an
+  in-memory stub after construction. See `docs/architecture/PROVIDER_ADAPTERS_AND_CALL_BUDGET.md`
+  for the full record, including the live-run readiness update and the call-graph comparison against
+  Task 20's own worst-case figures.
 - **`fixtures/`** — Notion, Linear (real companies), Auroraflow, Pathlight, DupliCo (fictional,
   each built to stress a specific mechanism; offline, hand-authored) — Product & Technology only.
   **Task 18** added two more fictional, fully-offline companies spanning all six pillars: `beacon_
@@ -202,7 +225,7 @@ boundary still holds).
   fictional ones) — see `docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` for the full matrix and
   findings, updated in Task 19 to also print company-level Coverage/Confidence/publishability per
   company (`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` for the analysis of those results).
-- **`tests/`** — **379 tests across 18 files**, all script-style (this repo's pytest is scoped to
+- **`tests/`** — **432 tests across 21 files**, all script-style (this repo's pytest is scoped to
   `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 19** added
   `test_calibration_aggregation.py` (29 tests): the six controlled Confidence fixtures item 9 of that
   task asked for (proving Low/Medium/High correspond to meaningfully different evidence states, not
@@ -212,7 +235,14 @@ boundary still holds).
   **Task 20** added `test_acquisition_pipeline.py` (22 tests): the real pipeline run end-to-end
   against deterministic fakes, covering evidence-rich/sparse/contradictory/duplicate/prompt-
   injection/partial-failure/revenue-reuse/identity-invariance scenarios plus grounding rejection,
-  budget enforcement, extraction recovery, and canonical-identity determinism.
+  budget enforcement, extraction recovery, and canonical-identity determinism. **Task 21** added
+  three files (53 tests): `test_provider_adapters.py` (41) — mocked-SDK provider-level tests for all
+  three real adapters, deterministic source-type classification, `dedup.py`, and
+  `concurrency_helpers.py`; `test_isolation_boundary.py` (3) — the automated AST-based import scan
+  described above; `test_acquisition_efficiency.py` (9) — batching-through-the-real-pipeline call
+  count and attribution, sequential-vs-concurrent equivalence, five realistic prompt-injection
+  payloads each individually proven unable to manufacture a ledger entry, and a call-graph
+  budget-arithmetic regression guard.
 - **`demo.py`** — prints a human-readable Product & Technology pillar summary for all five offline
   fixtures: `python -m app.evidence_engine.demo`.
 
