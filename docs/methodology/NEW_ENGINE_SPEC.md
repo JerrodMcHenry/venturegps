@@ -560,14 +560,43 @@ HIGH, a finding flagged as ambiguous, not resolved).
 
 ### 6.5 Minimum scoreability and overall-score publication
 
-**Status (Task 18):** all six pillars now run together against one canonical evidence ledger and
-produce one assembled `FullCompanyAnalysis` (`app/evidence_engine/full_analysis.py`,
-`docs/methodology/NEW_ENGINE_FULL_EVALUATION.md`) — but the three gates below, and the resulting
-single overall number, remain unimplemented by design; Task 18's own scope was assembly and
-cross-pillar diagnosis, not aggregation. This part's own requirements are unchanged and still
-govern whatever implements them next.
+**Status (Task 19):** company-level Coverage and Confidence are implemented
+(`app/evidence_engine/full_analysis.py`); **an overall 0-100 Strength ("Startup Power") is
+deliberately NOT implemented** — Task 19 evaluated this part's own original proposal directly against
+real evidence and concluded the pillar weights it would require are still too provisional to justify
+the added precision (full reasoning: `docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` §8). This is
+an explicit, evidence-backed decision, not a placeholder for a number nobody has gotten to yet — a
+future task may revisit it once a larger calibration pass validates `PILLAR_WEIGHTS` (Part 3.3's own
+header rows) against real comparative judgment.
 
-Overall Startup Power (the top-level number) is published only when, simultaneously:
+**What Task 19 actually built, using this part's own two-gate shape (adapted for the absence of a
+Strength number):**
+
+```
+company_coverage_pct = Σ (PILLAR_WEIGHTS[pillar] × pillar.coverage_pct)   -- always computed
+company_confidence   = weighted-ordinal average of PUBLISHED pillars' own Confidence -- None if zero published
+company_publishable  = company_coverage_pct >= MIN_OVERALL_COVERAGE_PCT (40.0)
+                        AND published_pillar_count >= MIN_PUBLISHABLE_PILLARS (2)
+```
+
+A withheld pillar's own partial `coverage_pct` still contributes to `company_coverage_pct` (Coverage
+answers "how much was assessable," and a withheld pillar still contains that information) but is
+excluded from `company_confidence` (a withheld pillar's own default-Low placeholder would conflate
+"no evidence" with "unreliable evidence," two different concepts) and counts against, never toward,
+`MIN_PUBLISHABLE_PILLARS`. `MIN_OVERALL_COVERAGE_PCT`/`MIN_PUBLISHABLE_PILLARS` are both
+**CALIBRATION REQUIRED** like every other number in this document, currently set equal to the
+pillar-level `MIN_PILLAR_COVERAGE_PCT`/`MIN_SCORED_DIMENSIONS_PER_PILLAR` values for structural
+consistency, justified by the sensitivity analysis in the calibration results document §4/§9-10, not
+by intuition.
+
+**The original three-gate proposal below is retained for historical/design reference** — it describes
+what a future Overall Strength, if and when adopted, would still need to satisfy; gate 3 in particular
+("Overall Confidence is not the lowest category") was not re-implemented as a company-level gate this
+task, since `company_confidence` is now always separately visible for a reader's own judgment rather
+than gating a number that does not yet exist.
+
+Overall Startup Power (the top-level number), if and when implemented, would be published only when,
+simultaneously:
 
 1. **Overall weighted coverage** clears `MIN_OVERALL_COVERAGE_PCT` (**CALIBRATION REQUIRED**).
 2. **At least `MIN_PUBLISHABLE_PILLARS` pillars** (of six) independently clear their own
@@ -577,12 +606,13 @@ Overall Startup Power (the top-level number) is published only when, simultaneou
 3. **Overall Confidence is not the lowest category** (mirrors the same principle both prior
    engines already implemented; adopted here as sound).
 
-When any gate fails, the overall score is withheld (`None`) with a disclosed reason, and — per
+When any gate fails, the overall score would be withheld (`None`) with a disclosed reason, and — per
 Design Principle 9 — the report still shows every pillar's own individually-publishable
 Strength/Coverage/Confidence, never collapsing to a blank result. A pillar can be individually
-publishable even when the overall score is withheld; this is the intended, honest behavior for a
-company with excellent evidence in two or three pillars and none in the rest, and it is
-distinguished in the report from a blanket "not enough evidence anywhere" state.
+publishable even when the overall score is withheld (or, as currently implemented, even when no
+overall score exists at all); this is the intended, honest behavior for a company with excellent
+evidence in two or three pillars and none in the rest, and it is distinguished in the report from a
+blanket "not enough evidence anywhere" state.
 
 ### 6.6 The firewall property
 

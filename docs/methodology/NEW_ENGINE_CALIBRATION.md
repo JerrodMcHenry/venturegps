@@ -14,6 +14,20 @@ real, passing offline tests, spanning 7 files and 77 tests total — including 4
 beyond what this plan originally specified. This document remains the real plan for eventually
 setting the numbers themselves against the much larger cohort in Part 2.
 
+**Task 19 update:** after all six pillars were assembled (Task 18), a sensitivity-analysis pass was
+run against the resulting 7-company cohort (`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md`) —
+publication-gate behavior across the pillar-level 35-50% coverage range, and a controlled-fixture
+investigation of Confidence's Low/Medium/High boundaries. **This is still not the large-cohort
+calibration plan below** — it is a smaller, evidence-conditions-focused pass (per that task's own
+explicit "do not build a massive benchmarking project" instruction), and it changed no pillar-level
+parameter (the sensitivity evidence did not justify a change to any of them). It did add one new,
+narrow layer: company-level Coverage/Confidence/publishability (spec Part 6.5, now partially
+implemented) using `PILLAR_WEIGHTS` taken directly from this document's own Part 3.3 header rows —
+still exactly as provisional as everything else here. An overall 0-100 Strength was evaluated and
+explicitly NOT adopted (`NEW_ENGINE_CALIBRATION_RESULTS.md` §8) — the real, large-cohort calibration
+plan below remains the actual path to validating `PILLAR_WEIGHTS` (and every other number in this
+document) before that decision would be revisited.
+
 Companion documents: `docs/methodology/NEW_ENGINE_SPEC.md` (the methodology this calibrates)
 and `docs/architecture/NEW_ENGINE_ARCHITECTURE.md` (the system this runs against).
 

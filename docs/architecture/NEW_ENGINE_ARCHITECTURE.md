@@ -133,10 +133,16 @@ gates (spec Part 6, in that order, each a separately testable pure function).
 **Implemented through pillar aggregation/gates/coverage/confidence, for all six pillars (Task
 18):** every step up to and including each pillar's own `PillarResult` (Strength/Coverage/
 Confidence/publishable, spec Part 6.2-6.4) is real and assembled together by
-`full_analysis.py`. **Not implemented:** spec Part 6.5's own overall-score gates
-(`MIN_OVERALL_COVERAGE_PCT`, `MIN_PUBLISHABLE_PILLARS`, overall Confidence) and any resulting
-single overall number — deliberately out of Task 18's own scope; see
-`docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` §14.
+`full_analysis.py`. **Task 19** added company-level Coverage and Confidence (`compute_company_
+coverage_pct()`, `compute_company_confidence()`, `PILLAR_WEIGHTS`-weighted, taken directly from
+spec Part 3.3's own header rows) and a company-level two-gate publishability contract
+(`evaluate_company_publishability()`, mirroring spec Part 6.2's own pillar-level gate shape) — see
+`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` for the sensitivity analysis behind the
+threshold values and the full reasoning. **Deliberately still not implemented:** a single overall
+0-100 Strength number — evaluated directly against real evidence and explicitly not adopted (same
+document, §8), not merely deferred for lack of time. Spec Part 6.5's own original three-gate
+"Overall Startup Power" proposal is retained there for design reference should a future task revisit
+this decision once `PILLAR_WEIGHTS` are validated by a larger calibration pass.
 
 ### 2.5 Report
 

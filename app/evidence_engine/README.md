@@ -13,7 +13,10 @@ NEW_ENGINE_LIVE_EVALUATION.md`. Remediation of that evaluation's findings (Task 
 (Task 17, the sixth and final individual pillar):
 `docs/methodology/NEW_ENGINE_FINANCIAL_FUNDING_REPORT.md`. Full-engine assembly & cross-pillar
 evaluation (Task 18 — all six pillars run together for the first time):
-`docs/methodology/NEW_ENGINE_FULL_EVALUATION.md`.
+`docs/methodology/NEW_ENGINE_FULL_EVALUATION.md`. Methodology calibration & company-level
+aggregation (Task 19 — sensitivity analysis, controlled Confidence fixtures, and the company-level
+Coverage/Confidence layer; explicitly answers whether an overall 0-100 score is justified):
+`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md`.
 
 **This package is isolated by design** (architecture doc Part 1) — it imports nothing from
 `app.ai`, `app.database`, `app.api`, `app.models`, or `app.v2`. Confirmed with:
@@ -21,7 +24,7 @@ evaluation (Task 18 — all six pillars run together for the first time):
 (zero matches as of this writing — re-run this before any future change to confirm the
 boundary still holds).
 
-## What is implemented (Tasks 8-18: all six pillars, full-engine assembly, calibration, reliability, live evaluation, remediation)
+## What is implemented (Tasks 8-19: all six pillars, full-engine assembly, methodology calibration, company-level aggregation, reliability, live evaluation, remediation)
 
 - **`models.py`** — the `Claim` model, including `structured_fact` (Task 9) and
   `SourceType.COMMUNITY_COMMENTARY` (Task 12 — an anonymous public comment, independent of the
@@ -58,8 +61,13 @@ boundary still holds).
   named_entity_fact` unchanged, and Funding History calls the already-public
   `provenance.py::verify_independence()` directly (not a new function) to provenance-verify its own
   summed total.
-- **`parameters.py`** — every numeric constant, versioned `evidence_engine.v1-provisional-9`, all
-  explicitly `CALIBRATION REQUIRED`.
+- **`parameters.py`** — every numeric constant, versioned `evidence_engine.v1-provisional-10`, all
+  explicitly `CALIBRATION REQUIRED`. **Task 19** added `PILLAR_WEIGHTS` (taken directly from spec
+  Part 3.3's own header rows, not invented) and the company-level gate values
+  `MIN_OVERALL_COVERAGE_PCT`/`MIN_PUBLISHABLE_PILLARS` (set equal to their pillar-level counterparts,
+  justified by sensitivity analysis — see the calibration results report §4/§9). No pillar-level
+  dimension weight, label score, or gate value was changed — the sensitivity analysis found no
+  parameter needing to move.
 - **`pillars/product_technology.py`** — the first pillar (Task 8-12): Product Existence & Maturity
   (Computed) plus three Classified dimensions, stage-aware (label scores vary by stage tier), all
   routed through the classification/extraction interface with recovery.
@@ -114,13 +122,19 @@ boundary still holds).
   cite the literal same `claim_id` across both pillars. Funding is never financial health: no code
   path connects a funding/valuation fact to a Capital Efficiency label, and runway is never computed
   from funding amount or date.
-- **`full_analysis.py`** (Task 18) — the full-engine orchestrator: `assemble_full_analysis(ledger,
-  company_ref, as_of, ...)` calls `determine_stage()` exactly once and runs all six pillars'
-  `evaluate_pillar_for_company()` against the identical ledger and stage value, returning one typed
-  `FullCompanyAnalysis` (all six `PillarResult`s, the resolved stage, methodology version, and the
-  cross-pillar audit findings below). Contains no scoring logic of its own and creates no overall
-  0-100 score, grade, or ranking — that remains explicitly out of scope (Task 18's own instruction;
-  Task 19's own work).
+- **`full_analysis.py`** (Task 18, extended Task 19) — the full-engine orchestrator:
+  `assemble_full_analysis(ledger, company_ref, as_of, ...)` calls `determine_stage()` exactly once
+  and runs all six pillars' `evaluate_pillar_for_company()` against the identical ledger and stage
+  value, returning one typed `FullCompanyAnalysis` (all six `PillarResult`s, the resolved stage,
+  methodology version, and the cross-pillar audit findings). **Task 19** added three company-level
+  fields, all pure functions of the six `PillarResult`s (the firewall property, extended one level
+  up): `company_coverage_pct` (`PILLAR_WEIGHTS`-weighted, always computed, a withheld pillar's own
+  partial coverage still contributes), `company_confidence` (weighted-ordinal average of only
+  *published* pillars' own Confidence, `None` if zero published), and `company_publishable`/
+  `company_withhold_reasons` (the same two-gate shape spec Part 6.2 already proved at the pillar
+  level, scaled up). **Still creates no overall 0-100 score, grade, or ranking** — evaluated directly
+  against real evidence in Task 19 and explicitly not adopted, not merely deferred; see the
+  calibration results report §8 for the full reasoning.
 - **`cross_pillar_audit.py`** (Task 18) — a read-only, deterministic verification pass over six
   already-computed `PillarResult`s: detects legitimate cross-pillar evidence reuse (`INFO`) versus
   likely accidental duplicate extraction of the same underlying fact under two different claim ids
@@ -160,49 +174,67 @@ boundary still holds).
   evidence). `run_full_engine_cohort_evaluation.py` (Task 18) is the first script to assemble all six
   pillars together, run against a 7-company cohort (the five real companies above plus the two new
   fictional ones) — see `docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` for the full matrix and
-  findings.
-- **`tests/`** — **328 tests across 16 files**, all script-style (this repo's pytest is scoped to
-  `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`.
+  findings, updated in Task 19 to also print company-level Coverage/Confidence/publishability per
+  company (`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` for the analysis of those results).
+- **`tests/`** — **357 tests across 17 files**, all script-style (this repo's pytest is scoped to
+  `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 19** added
+  `test_calibration_aggregation.py` (29 tests): the six controlled Confidence fixtures item 9 of that
+  task asked for (proving Low/Medium/High correspond to meaningfully different evidence states, not
+  just that the mechanism runs), the new company-level Coverage/Confidence/publishability
+  computations, and the aggregation invariant/counterfactual tests (more unknown evidence cannot
+  improve a result; duplication changes nothing; company identity/brand cannot change results; etc.).
 - **`demo.py`** — prints a human-readable Product & Technology pillar summary for all five offline
   fixtures: `python -m app.evidence_engine.demo`.
 
 ## What remains design-only (not implemented)
 
-**All six individual pillars are implemented and, as of Task 18, assembled into one coherent
-`FullCompanyAnalysis` per company.** What remains: spec Part 6.5's own overall ("Startup Power")
-0-100 score, its own three publication gates (`MIN_OVERALL_COVERAGE_PCT`, `MIN_PUBLISHABLE_PILLARS`,
-overall Confidence), and pillar-weight aggregation into that single number — Task 18 deliberately
-assembles the six pillars' own results side by side without computing any of this, per its own
-explicit scope constraints; this is Task 19's own work. Also not yet implemented: a real AI-driven
-Research pass (every pillar's `WellBehaved*` mock models stand in for it); the scale-based
-stage-determination fallback (`stage.py`'s own docstring has flagged this as blocked on Commercial
-Traction's Disclosed Scale since Task 9 — technically buildable since Task 15, but deliberately not
-built as part of any task since; see the Commercial Traction report §9); persistence; API contracts;
-frontend integration; and observability beyond `print()`. Retry applies only to validation failures,
-not to a raised exception. A final, real calibration pass against a much larger cohort
-(`NEW_ENGINE_CALIBRATION.md`'s own plan) has also not been attempted — every numeric parameter across
-all six pillars remains an explicitly-flagged placeholder; Task 18's own cohort evaluation
-(`NEW_ENGINE_FULL_EVALUATION.md` §13) names the specific parameters Task 19 should look at first.
+**All six individual pillars are implemented and assembled** (Task 18) **with a company-level
+Coverage/Confidence/publishability layer on top** (Task 19). **An overall 0-100 Strength was
+evaluated directly against real evidence and explicitly not adopted** — `PILLAR_WEIGHTS` remain
+exactly as `CALIBRATION REQUIRED` as every other number in this engine, and the real cohort is too
+thin (only one company reaches 5 of 6 published pillars) to show how an aggregated number would
+actually behave; see `docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` §8 for the complete
+reasoning. This is a decision, not a gap — spec Part 6.5's own original three-gate proposal remains
+on record for a future task to revisit once a larger calibration pass validates the pillar weights.
+Also not yet implemented: a real AI-driven Research pass (every pillar's `WellBehaved*` mock models
+stand in for it); the scale-based stage-determination fallback (`stage.py`'s own docstring has
+flagged this as blocked on Commercial Traction's Disclosed Scale since Task 9 — technically buildable
+since Task 15, but deliberately not built as part of any task since; see the Commercial Traction
+report §9); persistence; API contracts; frontend integration; and observability beyond `print()`.
+Retry applies only to validation failures, not to a raised exception. **A final, real calibration
+pass against a much larger cohort** (`NEW_ENGINE_CALIBRATION.md`'s own plan) **has also not been
+attempted** — Task 19's own sensitivity analysis (7-company cohort, `NEW_ENGINE_CALIBRATION_
+RESULTS.md`) is a smaller, evidence-conditions-focused pass, not that larger plan; no pillar-level
+numeric parameter was changed, since the sensitivity evidence available did not justify moving any of
+them.
 
-**Eight open methodological questions flagged, not resolved:** whether `_OBSERVABLE_SOURCE_TYPES`
-(Product & Technology) should ever include `COMMUNITY_COMMENTARY` (`NEW_ENGINE_REMEDIATION_REPORT.md`
-§2.1); whether Competitive Landscape Position's `FRAGMENTED`/`CONCENTRATED` binary needs a third
-state for "many named competitors, one explicitly dominant" markets (`NEW_ENGINE_MARKET_
-OPPORTUNITY_REPORT.md` §9); whether Founder Relevant Experience's `NONE_DISCLOSED` label should be
-split into a genuine-absence state and a disclosed-but-irrelevant state (`NEW_ENGINE_TEAM_
-LEADERSHIP_REPORT.md` §9); whether Customer Base Breadth's 18-month staleness bound is appropriate
-for a slow-changing directional metric (a total-user-count milestone) versus a fast-changing one
-(`NEW_ENGINE_COMMERCIAL_TRACTION_REPORT.md` §7.4/§9); whether Shipping Velocity's three-state
-`announced`/`beta`/`launched` vocabulary should be split further to match item 3's own richer
-four-state progression (`NEW_ENGINE_EXECUTION_MOMENTUM_REPORT.md` §11); whether Funding History's
-equity-only summing rule should be extended to debt-financed companies, and whether the 2023-style
-"real equity round, liquidity-focused proceeds" ambiguity deserves its own explicit sub-classification
-(`NEW_ENGINE_FINANCIAL_FUNDING_REPORT.md` §13); whether a `stage_signal` ↔ `funding_history` evidence-
-reuse relationship should exist, analogous to the one already implemented for revenue, given every
-real company fixture with both independently re-describes the same financing event twice
-(`NEW_ENGINE_FULL_EVALUATION.md` §12); and whether Confidence's HIGH/MEDIUM thresholds are simply too
-strict, now observed unreachable across two separate evaluations spanning twelve total fixtures
-(`NEW_ENGINE_CALIBRATION_REPORT.md` Part 5 and `NEW_ENGINE_FULL_EVALUATION.md` §12/§13).
+**Seven open methodological questions flagged, not resolved** (one, Confidence's own HIGH/MEDIUM
+thresholds, was investigated directly in Task 19 and confirmed correctly-calibrated, not too strict
+— removed from this list; see below): whether `_OBSERVABLE_SOURCE_TYPES` (Product & Technology)
+should ever include `COMMUNITY_COMMENTARY` (`NEW_ENGINE_REMEDIATION_REPORT.md` §2.1); whether
+Competitive Landscape Position's `FRAGMENTED`/`CONCENTRATED` binary needs a third state for "many
+named competitors, one explicitly dominant" markets (`NEW_ENGINE_MARKET_OPPORTUNITY_REPORT.md` §9);
+whether Founder Relevant Experience's `NONE_DISCLOSED` label should be split into a genuine-absence
+state and a disclosed-but-irrelevant state (`NEW_ENGINE_TEAM_LEADERSHIP_REPORT.md` §9); whether
+Customer Base Breadth's 18-month staleness bound is appropriate for a slow-changing directional
+metric versus a fast-changing one (`NEW_ENGINE_COMMERCIAL_TRACTION_REPORT.md` §7.4/§9); whether
+Shipping Velocity's three-state vocabulary should be split further (`NEW_ENGINE_EXECUTION_
+MOMENTUM_REPORT.md` §11); whether Funding History's equity-only summing rule should be extended to
+debt-financed companies (`NEW_ENGINE_FINANCIAL_FUNDING_REPORT.md` §13); and whether a `stage_signal`
+↔ `funding_history` evidence-reuse relationship should exist, analogous to the one already
+implemented for revenue (`NEW_ENGINE_FULL_EVALUATION.md` §12). **One new open question from Task 19:**
+whether `SOURCE_RELIABILITY_WEIGHT["company_disclosure"]` (0.4) should be higher specifically for a
+company's own dated, specific, independently-checkable artifact (e.g. a public changelog entry) than
+for a generic first-party marketing claim, both currently weighted identically — real data (Linear's
+own genuinely `RAPID`, entirely-first-party-sourced shipping result still reporting `Low` confidence)
+raised this question honestly; not changed without comparison data
+(`NEW_ENGINE_CALIBRATION_RESULTS.md` §5.3).
+
+**Confirmed, not merely re-asserted, in Task 19:** Confidence's `HIGH` threshold is genuinely
+reachable and the Low/Medium/High progression is meaningfully ordered (six controlled fixtures,
+`NEW_ENGINE_CALIBRATION_RESULTS.md` §5.2) — its rarity in the real cohort (2-3 of ~43 real dimension
+results) reflects that cohort's own evidence density and source mix, not a miscalibrated or
+unreachable threshold. Not lowered.
 
 ## Decisions locked in (see the design docs' own "Decided" boxes)
 

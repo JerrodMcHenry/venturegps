@@ -14,15 +14,62 @@ pass, against a much larger cohort, would eventually replace these.
 
 from __future__ import annotations
 
-PARAMETER_VERSION = "evidence_engine.v1-provisional-9"
+PARAMETER_VERSION = "evidence_engine.v1-provisional-10"
 
 # --- Pillar-level publishability gates (spec Part 6.2) ----------------------
 # Unchanged from the first vertical slice -- Task 9's expanded fixture set
 # (Notion, Linear, Pathlight, DupliCo, Auroraflow) did not surface a reason
-# to move either gate; see the calibration report's "Gate sensitivity"
-# section for what was actually checked.
+# to move either gate; Task 19's own sensitivity analysis (against the
+# larger, six-pillar-assembled cohort) re-confirmed this: MIN_SCORED_
+# DIMENSIONS_PER_PILLAR (not MIN_PILLAR_COVERAGE_PCT) is the actually-
+# binding gate across the full 35-50% coverage range tested for this
+# cohort's real pillar evaluations -- see
+# `docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` §4. Kept at 40.0/2,
+# unchanged, since the sensitivity evidence did not surface a reason to
+# move either value, not because they were re-derived from new data.
 MIN_PILLAR_COVERAGE_PCT: float = 40.0
 MIN_SCORED_DIMENSIONS_PER_PILLAR: int = 2
+
+# --- Company-level aggregation (Task 19; spec Part 3.3's own header rows / --
+# --- Part 6.5) ----------------------------------------------------------
+# Pillar weights, taken directly from NEW_ENGINE_SPEC.md Part 3.3's own
+# header rows ("Market Opportunity (pillar weight: CALIBRATION REQUIRED,
+# shown as 0.20)", etc.) -- NOT invented for this task. The spec already
+# made this decision (per-pillar weights, not equal weighting); Task 19
+# only encodes the literal values the spec already states, still exactly
+# as CALIBRATION REQUIRED as every other number in this module. Sums to
+# 1.0 by construction (spec's own values already summed cleanly).
+PILLAR_WEIGHTS: dict[str, float] = {
+    "Market Opportunity": 0.20,
+    "Product & Technology": 0.18,
+    "Team & Leadership": 0.18,
+    "Commercial Traction": 0.20,
+    "Execution & Momentum": 0.14,
+    "Financial & Funding Signals": 0.10,
+}
+
+# Company-level publishability gates (spec Part 6.5's own two-gate shape,
+# scaled up from the pillar level -- see full_analysis.py's own
+# `evaluate_company_publishability()`). MIN_OVERALL_COVERAGE_PCT is kept
+# identical to MIN_PILLAR_COVERAGE_PCT (40.0) for the same "structural
+# consistency, not an invented number" reasoning already used throughout
+# this engine -- Task 19's own sensitivity analysis found this threshold
+# is the genuinely discriminating one in the real cohort (unlike the
+# pillar-level coverage floor, which was inert across 35-50% for this
+# cohort's real pillar evaluations): one real company (Notion, 38.5%
+# company coverage) sits immediately below it and is excluded, an honest,
+# non-manipulated boundary case, not adjusted to change that outcome.
+# MIN_PUBLISHABLE_PILLARS is set to 2, mirroring MIN_SCORED_DIMENSIONS_
+# PER_PILLAR's own "prevent one item from carrying the whole result"
+# principle one level up (structural consistency); the real cohort's own
+# sensitivity data did not distinguish 1 vs. 2 (every company with exactly
+# 1 published pillar also failed the coverage floor), so this value is
+# justified by architectural consistency, not by this cohort's own data
+# alone -- see the calibration results report §4/§10 for the full
+# reasoning and the known, accepted edge case this combination does not
+# fully close (two maximally-weighted, maximally-covered pillars alone).
+MIN_OVERALL_COVERAGE_PCT: float = 40.0
+MIN_PUBLISHABLE_PILLARS: int = 2
 
 # --- Product & Technology pillar (spec Part 3.3) ----------------------------
 PRODUCT_TECHNOLOGY_PILLAR = "Product & Technology"

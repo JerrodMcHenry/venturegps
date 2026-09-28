@@ -53,6 +53,13 @@ _COHORT = (
 
 def _print_matrix_row(company_label: str, analysis: FullCompanyAnalysis) -> None:
     print(f"\n=== {company_label} (stage: {analysis.stage.value}) ===")
+    conf_display = analysis.company_confidence.value if analysis.company_confidence else "--"
+    print(
+        f"  COMPANY-LEVEL: publishable={analysis.company_publishable}  "
+        f"coverage={analysis.company_coverage_pct:5.1f}%  confidence={conf_display}"
+    )
+    if not analysis.company_publishable:
+        print(f"      withheld because: {'; '.join(analysis.company_withhold_reasons)}")
     for pr in analysis.pillar_results:
         scored = sum(1 for d in pr.dimension_results if d.score is not None)
         unscored = len(pr.dimension_results) - scored
