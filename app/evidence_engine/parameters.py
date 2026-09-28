@@ -14,7 +14,7 @@ pass, against a much larger cohort, would eventually replace these.
 
 from __future__ import annotations
 
-PARAMETER_VERSION = "evidence_engine.v1-provisional-7"
+PARAMETER_VERSION = "evidence_engine.v1-provisional-8"
 
 # --- Pillar-level publishability gates (spec Part 6.2) ----------------------
 # Unchanged from the first vertical slice -- Task 9's expanded fixture set
@@ -393,6 +393,89 @@ RETENTION_LABEL_SCORES: dict[str, float] = {
     "WEAK": 3.5,
     "MODERATE": 6.0,
     "STRONG": 8.5,
+}
+
+# --- Execution & Momentum pillar (spec Part 3.3, Task 16) -------------------
+# Central governing principle behind every constant below: activity is not
+# execution, and execution is not commercial traction. A dimension score
+# never moves from announcements, funding, general hiring, or adoption
+# magnitude -- only from admissible evidence that a specific, named thing
+# actually happened (a shipped release, a named GTM fact, a genuine
+# consistency check over the company's own disclosed statements).
+EXECUTION_MOMENTUM_PILLAR = "Execution & Momentum"
+
+EXECUTION_MOMENTUM_DIMENSION_WEIGHTS: dict[str, float] = {
+    "shipping_velocity": 0.35,
+    "gtm_motion_evidence": 0.35,
+    "strategic_consistency": 0.30,
+}
+
+EXECUTION_MOMENTUM_STALENESS_DAYS: dict[str, int] = {
+    "shipping_velocity": 365,      # 12 months (spec Part 3.3)
+    "gtm_motion_evidence": 548,    # 18 months (spec Part 3.3)
+    # Strategic Consistency's own spec row gives NO staleness-bound value
+    # at all (the table cell is simply blank) -- a genuine spec gap, not
+    # an oversight in this implementation. Resolved narrowly: 24 months,
+    # reasoned analogous to Team & Leadership's Public Track Record
+    # (a slow-changing, biographical-like fact about the company itself,
+    # not a fast-moving operational metric) -- an invented placeholder,
+    # explicitly flagged as such, not derived from the spec text. As with
+    # Growth Trajectory (Commercial Traction, Task 15), this bound is
+    # applied only to whichever statement is the MOST RECENT of the set
+    # being compared, never to every individual historical statement --
+    # the dimension's entire purpose is comparing the company's own
+    # statements "over time" (spec's own wording), so a real, older
+    # statement is exactly what the check needs, not evidence to discard.
+    # See execution_momentum.py's own module docstring and
+    # STRATEGIC_CONSISTENCY_RESOLUTION_STALENESS_DAYS below.
+    "strategic_consistency": 730,
+}
+
+# See the comment on "strategic_consistency" above: no staleness ceiling
+# at the raw-resolution layer (disputed-exclusion and independence-group
+# dedup still apply) -- the real 730-day bound is applied explicitly, only
+# to the most recent statement on record, by execution_momentum.py itself.
+STRATEGIC_CONSISTENCY_RESOLUTION_STALENESS_DAYS: int = 36_500  # ~100 years -- effectively "no ceiling" at this layer
+
+# Shipping Velocity: stage-tiered -- the same release cadence is less
+# expected, and therefore more remarkable, from a younger company (the
+# same reasoning every other magnitude-ish stage-tiered table in this
+# engine already uses). Only a claim whose CURRENT (most-recent, per the
+# named-release supersession rule -- see commercial_traction.py's own
+# precedent and this pillar's module docstring) status is "launched"
+# counts toward these thresholds; "announced" and "beta" never do.
+SHIPPING_VELOCITY_STEADY_MIN_COUNT: int = 2
+SHIPPING_VELOCITY_RAPID_MIN_COUNT: int = 4
+SHIPPING_VELOCITY_LABEL_SCORES: dict[str, dict[str, float]] = {
+    "STEADY": {"early": 7.0, "growth": 6.0, "established": 5.0},
+    "RAPID": {"early": 9.0, "growth": 8.0, "established": 7.0},
+}
+
+# Go-to-Market Motion Evidence: the spec's own wording asks only for
+# presence of >=1 named, checkable GTM fact -- no magnitude/count band is
+# described (unlike Shipping Velocity's explicit "release-cadence band"
+# or Commercial Validation's "presence/count band" wording). Per this
+# engine's own "do not invent an unspecified scoring axis" discipline,
+# this dimension is therefore the narrowest defensible two-state label
+# set: presence or absence, nothing further. Stage-tiered, same direction
+# as Shipping Velocity (a real GTM motion fact is more remarkable earlier).
+GTM_MOTION_LABEL_SCORES: dict[str, dict[str, float]] = {
+    "GTM_FACT_PRESENT": {"early": 7.5, "growth": 6.5, "established": 5.5},
+}
+
+# Strategic Consistency: FLAT / stage-independent -- this is a mechanical
+# contradiction check over the company's own disclosed statements, not a
+# magnitude signal; a genuine contradiction (or its absence) means the
+# same thing regardless of company age, the same reasoning Retention/
+# Renewal Signal (Commercial Traction) and Public Track Record (Team &
+# Leadership) already established for their own quality-not-magnitude
+# dimensions. CONTAINS_CONTRADICTION is a real, scored (low) outcome, not
+# Unscored -- the spec's own wording lists only "insufficient history" as
+# leading to Unscored, confirming a detected contradiction is itself
+# meaningful, checkable evidence, not an absence of evidence.
+STRATEGIC_CONSISTENCY_LABEL_SCORES: dict[str, float] = {
+    "CONTAINS_CONTRADICTION": 2.0,
+    "CONSISTENT": 7.5,
 }
 
 # --- Confidence and source reliability (spec Part 6.4) ----------------------

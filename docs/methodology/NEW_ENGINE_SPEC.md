@@ -303,6 +303,22 @@ sanity check that includes a real ~280x GMV-vs-revenue magnitude gap resolved co
 
 #### Execution & Momentum (0.14)
 
+**Implemented (Task 16)** — `app/evidence_engine/pillars/execution_momentum.py`. Two Classified
+dimensions plus one Computed (Strategic Consistency — a pure, rule-based mechanical contradiction
+check over the company's own disclosed statements, no model call). Shipping Velocity introduces a
+new, narrow mechanism this engine did not previously need: named-release supersession — a single
+release described by multiple dated claims over time (announced, then later launched, delayed, or
+cancelled) resolves to its most-recent status, never letting an early favorable "announced" claim
+outlive a later correction. Strategic Consistency's own staleness bound (this table's own cell,
+below, is intentionally left blank by the spec) is a documented, invented placeholder (24 months),
+applied only to the most recent statement on record — an old-but-real statement is exactly what a
+"compared... over time" check needs, never discarded for its own age. Shipping Velocity and
+Go-to-Market Motion Evidence are stage-tiered; Strategic Consistency is flat/stage-independent
+(a mechanical quality check, not a magnitude signal). No dimension scores from funding, general
+headcount, investor prestige, or commercial-traction magnitude. See
+`docs/methodology/NEW_ENGINE_EXECUTION_MOMENTUM_REPORT.md` for closed label definitions, the
+supersession mechanism, test results, and a small real-evidence sanity check.
+
 | Dimension | Weight | Category | Admissible evidence | Minimum to score | Staleness bound |
 |---|---|---|---|---|---|
 | Shipping Velocity | 0.35 | Classified (release-cadence band) | Named product releases/launches from a changelog, press, or the product's own release notes, over a trailing window | ≥2 named, dated releases in the trailing window (one shipped feature is Product Existence, Part above; a *cadence* needs at least two dated points, mirroring Growth Trajectory's own two-point discipline) | 12 months |

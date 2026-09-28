@@ -239,4 +239,96 @@ CLAIMS: list[Claim] = [
         # deliberately conservative read rather than assuming one.
         structured_fact={"kind": "track_record", "value": "PRIOR_VENTURE_ROLE", "person_id": "karri_saarinen", "named_entity": "Kippt"},
     ),
+    # --- Task 16 addition: Execution & Momentum evidence, real live
+    # research, 2026-09-28 retrieval. Linear's own public changelog is a
+    # genuinely rich, first-party, dated source of real shipped features
+    # -- five distinct entries within the trailing 12-month window are
+    # used below. Notable real finding: this pass's own GTM research
+    # turned up only an open job POSTING (Developer Relations, under
+    # Marketing) and a general product-led-growth strategy description --
+    # neither is a confirmed, named GTM fact (a job posting is explicitly
+    # NOT admissible per Task 16 item 3's own "a job posting" exclusion),
+    # so no gtm_motion_evidence claim is added for Linear at all; GTM
+    # Motion Evidence stays honestly Unscored (see the sanity-check
+    # report).
+    Claim(
+        claim_id="linear-exec-release-001",
+        company_ref=COMPANY_REF,
+        claim_text="Linear's own changelog announces 'Releases', integrating with CI/CD to track deployment environment, version, and status directly on issues.",
+        subject_entity="Linear",
+        source_url="https://linear.app/changelog/2026-04-30-releases",
+        source_publisher="Linear (company changelog)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 4, 30),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Releases: track the deployment environment, version, and status of every issue",
+        assessment_criteria=["shipping_velocity"],
+        independence_group_id="linear-exec-releases-changelog",
+        structured_fact={"kind": "product_release", "status": "launched", "named_entity": "Releases (CI/CD tracking)", "event_date": "2026-04-30"},
+    ),
+    Claim(
+        claim_id="linear-exec-release-002",
+        company_ref=COMPANY_REF,
+        claim_text="Linear's own changelog announces 'Code Intelligence', giving Linear Agent controlled access to a team's codebase.",
+        subject_entity="Linear",
+        source_url="https://linear.app/changelog/2026-05-14-code-intelligence",
+        source_publisher="Linear (company changelog)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 5, 14),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Code Intelligence gives Linear Agent controlled access to your codebase",
+        assessment_criteria=["shipping_velocity"],
+        independence_group_id="linear-exec-code-intelligence-changelog",
+        structured_fact={"kind": "product_release", "status": "launched", "named_entity": "Code Intelligence", "event_date": "2026-05-14"},
+    ),
+    Claim(
+        claim_id="linear-exec-release-003",
+        company_ref=COMPANY_REF,
+        claim_text="Linear's own changelog announces 'Linear Diffs', making code review fast and fluid directly within Linear.",
+        subject_entity="Linear",
+        source_url="https://linear.app/changelog/2026-05-27-linear-diffs",
+        source_publisher="Linear (company changelog)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 5, 27),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Linear Diffs: review diffs from any issue with a PR and ship code directly from Linear",
+        assessment_criteria=["shipping_velocity"],
+        independence_group_id="linear-exec-diffs-changelog",
+        structured_fact={"kind": "product_release", "status": "launched", "named_entity": "Linear Diffs", "event_date": "2026-05-27"},
+    ),
+    Claim(
+        claim_id="linear-exec-release-004",
+        company_ref=COMPANY_REF,
+        claim_text="Linear's own changelog announces 'Coding sessions', letting Linear Agent write code via Claude Code and Codex from an assigned issue.",
+        subject_entity="Linear",
+        source_url="https://linear.app/changelog/2026-06-11-coding-sessions",
+        source_publisher="Linear (company changelog)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 6, 11),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Coding sessions: Linear Agent can now write code using Claude Code and Codex",
+        assessment_criteria=["shipping_velocity"],
+        independence_group_id="linear-exec-coding-sessions-changelog",
+        structured_fact={"kind": "product_release", "status": "launched", "named_entity": "Coding sessions", "event_date": "2026-06-11"},
+    ),
+    Claim(
+        claim_id="linear-exec-release-005",
+        company_ref=COMPANY_REF,
+        claim_text="Linear's own changelog announces 'Initiative properties', adding proposed/canceled statuses, priority, and labels to initiatives.",
+        subject_entity="Linear",
+        source_url="https://linear.app/changelog/2026-07-02-initiative-properties",
+        source_publisher="Linear (company changelog)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 7, 2),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Initiative properties: proposed and canceled statuses, priority levels, and labels",
+        assessment_criteria=["shipping_velocity"],
+        independence_group_id="linear-exec-initiative-props-changelog",
+        structured_fact={"kind": "product_release", "status": "launched", "named_entity": "Initiative properties", "event_date": "2026-07-02"},
+    ),
 ]

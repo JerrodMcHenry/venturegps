@@ -325,4 +325,146 @@ CLAIMS: list[Claim] = [
     # Stripe -- both remain honestly Unscored, the expected, structurally
     # correct outcome for a private company's genuinely undisclosed
     # metrics (this pillar's own central rule).
+
+    # --- Task 16 addition: Execution & Momentum evidence, real live
+    # research, 2026-09-28 retrieval. Stripe's own "Everything we
+    # announced at Sessions 2026" post (2026-04-29) explicitly and
+    # cleanly distinguishes generally-available features from previewed/
+    # roadmap ones -- a genuine real-world instance of exactly the
+    # announced/launched distinction this pillar's own governing
+    # principle requires. Several previewed (not GA) features from the
+    # same event were found and deliberately NOT entered as
+    # "launched" -- see the sanity-check report for the specific
+    # previewed-but-excluded list.
+    Claim(
+        claim_id="stripe-exec-release-workflows",
+        company_ref=COMPANY_REF,
+        claim_text="Among the Sessions 2026 announcements, Stripe Workflows reached general availability, per Stripe's own recap.",
+        subject_entity="Stripe",
+        source_url="https://stripe.com/blog/everything-we-announced-at-sessions-2026",
+        source_publisher="Stripe (company blog)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 4, 29),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Stripe Workflows is now generally available",
+        assessment_criteria=["shipping_velocity"],
+        independence_group_id="stripe-exec-workflows-ga",
+        structured_fact={"kind": "product_release", "status": "launched", "named_entity": "Stripe Workflows", "event_date": "2026-04-29"},
+    ),
+    Claim(
+        claim_id="stripe-exec-release-managed-payments",
+        company_ref=COMPANY_REF,
+        claim_text="Stripe's own Sessions 2026 recap states Managed Payments is now available to all digital businesses.",
+        subject_entity="Stripe",
+        source_url="https://stripe.com/blog/everything-we-announced-at-sessions-2026",
+        source_publisher="Stripe (company blog)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 4, 29),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="All digital businesses can now use Managed Payments",
+        assessment_criteria=["shipping_velocity"],
+        independence_group_id="stripe-exec-managed-payments-ga",
+        structured_fact={"kind": "product_release", "status": "launched", "named_entity": "Managed Payments", "event_date": "2026-04-29"},
+    ),
+    Claim(
+        claim_id="stripe-exec-release-stablecoin-cards",
+        company_ref=COMPANY_REF,
+        claim_text="Stripe's own Sessions 2026 recap states stablecoin-backed cards can now be enabled in 30 countries.",
+        subject_entity="Stripe",
+        source_url="https://stripe.com/blog/everything-we-announced-at-sessions-2026",
+        source_publisher="Stripe (company blog)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 4, 29),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="You can now enable consumer or commercial stablecoin-backed cards in 30 countries",
+        assessment_criteria=["shipping_velocity"],
+        independence_group_id="stripe-exec-stablecoin-cards-ga",
+        structured_fact={"kind": "product_release", "status": "launched", "named_entity": "Stablecoin-backed cards", "event_date": "2026-04-29"},
+    ),
+    # Deliberately NOT entered as launched (real, previewed-only per the
+    # same source): Checkout Studio, Stripe Database, Stripe Console,
+    # custom objects, Issuing for agents, custom Radar models -- all
+    # explicitly "previewed"/"announced" with no GA date, per the same
+    # article. Included here as a claim specifically to prove the
+    # announced/preview distinction is preserved on REAL data.
+    Claim(
+        claim_id="stripe-exec-release-checkout-studio-preview",
+        company_ref=COMPANY_REF,
+        claim_text="Stripe's own Sessions 2026 recap states Checkout studio was previewed, not generally available.",
+        subject_entity="Stripe",
+        source_url="https://stripe.com/blog/everything-we-announced-at-sessions-2026",
+        source_publisher="Stripe (company blog)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 4, 29),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="We previewed Checkout studio, a new way for you to configure, analyze, and optimize",
+        assessment_criteria=["shipping_velocity"],
+        independence_group_id="stripe-exec-checkout-studio-preview",
+        structured_fact={"kind": "product_release", "status": "announced", "named_entity": "Checkout Studio", "event_date": "2026-04-29"},
+    ),
+    # Go-to-Market Motion Evidence: a real, named distribution partnership
+    # (Google/Gemini surfacing Stripe-powered agentic checkout to
+    # consumers) -- a GTM channel fact, distinct from Commercial
+    # Validation's own OpenAI/Anthropic paying-customer relationships
+    # above (this is about REACHING customers, not about who already pays).
+    Claim(
+        claim_id="stripe-exec-gtm-google-partnership",
+        company_ref=COMPANY_REF,
+        claim_text="Stripe's own Sessions 2026 recap announces a partnership with Google enabling businesses to sell to consumers inside AI Mode and the Gemini app.",
+        subject_entity="Stripe",
+        source_url="https://www.investing.com/news/analyst-ratings/stripe-unveils-288-products-at-sessions-2026-focused-on-ai-commerce-93CH-4656455",
+        source_publisher="Investing.com",
+        source_type=SourceType.INDEPENDENT_REPORTING,
+        published_at=date(2026, 4, 29),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="partnerships with Google that will allow businesses to sell to consumers inside AI Mode and the Gemini app",
+        assessment_criteria=["gtm_motion_evidence"],
+        independence_group_id="stripe-exec-google-gtm-partnership",
+        structured_fact={"kind": "gtm_evidence", "gtm_type": "partnership", "named_entity": "Google (AI Mode / Gemini distribution)"},
+    ),
+    # Strategic Consistency: two real, dated public statements of
+    # Stripe's own mission, ~5 years apart. Judgment call, documented
+    # honestly: both frame Stripe as economic/growth infrastructure for
+    # online commerce, applied to AI as the newest frontier in the more
+    # recent statement -- read as a consistent evolution of the same
+    # stated mission, not a contradiction. This research pass did not
+    # find any genuine, real conflicting mission/strategy statement for
+    # Stripe.
+    Claim(
+        claim_id="stripe-exec-strategy-2021",
+        company_ref=COMPANY_REF,
+        claim_text="Stripe co-founder and CEO Patrick Collison states publicly that Stripe's mission and strategy is to 'increase the GDP of the internet.'",
+        subject_entity="Stripe",
+        source_url="https://x.com/patrickc/status/1371506254359752708",
+        source_publisher="Patrick Collison (via X/Twitter)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2021, 3, 15),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="\"Increase the GDP of the internet\" is our mission statement but also, importantly, our *strategy*",
+        assessment_criteria=["strategic_consistency"],
+        independence_group_id="stripe-exec-strategy-2021-gdp",
+        structured_fact={"kind": "strategic_statement", "topic": "mission", "named_entity": "increase the GDP of the internet"},
+    ),
+    Claim(
+        claim_id="stripe-exec-strategy-2026",
+        company_ref=COMPANY_REF,
+        claim_text="Stripe's own newsroom describes Sessions 2026 as building out the economic infrastructure for AI commerce.",
+        subject_entity="Stripe",
+        source_url="https://stripe.com/newsroom/news/sessions-2026",
+        source_publisher="Stripe (company newsroom)",
+        source_type=SourceType.COMPANY_DISCLOSURE,
+        published_at=date(2026, 4, 29),
+        retrieved_at=date(2026, 9, 28),
+        support_status=SupportStatus.DIRECTLY_SUPPORTED,
+        excerpt="Stripe builds out the economic infrastructure for AI with 288 launches",
+        assessment_criteria=["strategic_consistency"],
+        independence_group_id="stripe-exec-strategy-2026-ai-infra",
+        structured_fact={"kind": "strategic_statement", "topic": "mission", "named_entity": "economic infrastructure for AI commerce"},
+    ),
 ]
