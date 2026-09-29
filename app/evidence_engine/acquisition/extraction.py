@@ -255,6 +255,18 @@ def extract_many(
     prefers it when present, falling back to per-request `extract_with_
     recovery()` calls otherwise.
 
+    **Task 21A item 4 (retry ownership):** the batch-capable path below
+    calls `extract_batch()` EXACTLY ONCE and never loops itself -- retry
+    (both transient-failure and validation-driven) is now owned entirely
+    by the provider's own `extract_batch()` implementation (see
+    `providers_live.py::OpenAIEvidenceExtractor`'s own "Retry ownership"
+    section), so it is not duplicated or multiplied here. `validate_
+    candidate()` still runs again on whatever comes back, unconditionally
+    -- item 3's own "do not weaken downstream validation just because the
+    API validates syntax/schema" -- this is a second, cheap, pure-function
+    check, not a retry. `max_attempts` is therefore only meaningful for
+    the FALLBACK (non-batch-capable) path below, unchanged from Task 20.
+
     This preserves EVERY existing fake in `fakes.py` (none of which
     implement `extract_batch`) and every one of Task 20's 22 pipeline
     tests' own OBSERVABLE behavior unchanged -- they all go through the
@@ -282,48 +294,33 @@ def extract_many(
     accepted_by_source: dict[str, tuple[ExtractedClaimCandidate, ...]] = {}
     rejected_by_source: dict[str, tuple[RejectedClaimCandidate, ...]] = {}
     errors_by_source: dict[str, Exception] = {}
-    total_attempts = 0
 
     batch_extract = getattr(extractor, "extract_batch", None)
     if callable(batch_extract) and requests:
-        for attempt in range(1, max_attempts + 1):
-            total_attempts += 1
-            pending = [r for r in requests if r.source.source_id not in accepted_by_source]
-            if not pending:
-                break
-            responses = batch_extract(tuple(pending))
-            for request, response in zip(pending, responses):
-                sid = request.source.source_id
-                acc: list[ExtractedClaimCandidate] = []
-                rej: list[RejectedClaimCandidate] = []
-                for candidate in response.candidates:
-                    rejection = validate_candidate(candidate, request.source)
-                    if rejection is None:
-                        acc.append(_sanitize_assessment_criteria(candidate))
-                    else:
-                        rej.append(rejection)
-                if acc or not response.candidates:
-                    accepted_by_source[sid] = tuple(acc)
-                    rejected_by_source[sid] = tuple(rej)
+        responses = batch_extract(tuple(requests))
+        for request, response in zip(requests, responses):
+            sid = request.source.source_id
+            acc: list[ExtractedClaimCandidate] = []
+            rej: list[RejectedClaimCandidate] = []
+            for candidate in response.candidates:
+                rejection = validate_candidate(candidate, request.source)
+                if rejection is None:
+                    acc.append(_sanitize_assessment_criteria(candidate))
                 else:
-                    # Every proposed candidate failed grounding on this
-                    # attempt -- keep this source in `pending` for the
-                    # next attempt (mirrors extract_with_recovery's own
-                    # single-source retry condition), but always record
-                    # the latest rejection detail for observability even
-                    # if this is not the final attempt.
-                    rejected_by_source[sid] = tuple(rej)
-        # Anything never accepted after max_attempts stays recorded only
-        # in rejected_by_source, exactly like extract_with_recovery's own
-        # "give up, report why" contract. `errors_by_source` stays empty
-        # on this path -- a batch-capable provider makes exactly ONE real
-        # external call per attempt for the whole batch, so a raised
-        # exception here is a genuine whole-batch failure, correctly left
-        # to propagate to this function's own caller (which already
-        # treats one batch/task's exception as that one batch's own
-        # failure, isolated from every OTHER concurrently-run batch).
-        return accepted_by_source, rejected_by_source, errors_by_source, total_attempts
+                    rej.append(rejection)
+            accepted_by_source[sid] = tuple(acc)
+            rejected_by_source[sid] = tuple(rej)
+        # `errors_by_source` stays empty on this path -- a batch-capable
+        # provider makes its own, internally-bounded number of real calls
+        # for the whole batch and is responsible for its own graceful
+        # degradation (providers_live.py); an exception escaping it here
+        # is a genuine whole-batch failure, correctly left to propagate to
+        # this function's own caller (which already treats one batch/
+        # task's exception as that one batch's own failure, isolated from
+        # every OTHER concurrently-run batch).
+        return accepted_by_source, rejected_by_source, errors_by_source, 1
 
+    total_attempts = 0
     for request in requests:
         sid = request.source.source_id
         try:

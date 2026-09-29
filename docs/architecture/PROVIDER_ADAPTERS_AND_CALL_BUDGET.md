@@ -1,19 +1,38 @@
-# Provider Adapters & Acquisition Call Budget (Task 21)
+# Provider Adapters & Acquisition Call Budget (Task 21, hardened by Task 21A)
 
-**Status: real (but never-invoked) provider adapters for all three Task 20 Protocols now exist
-(`app/evidence_engine/acquisition/providers_live.py`), plus batching, dedup, deterministic source-type
-classification, bounded concurrency, and stronger structured-extraction validation on top of Task 20's
-pipeline. 91 new tests (53 provider/isolation/efficiency tests below + extended `test_acquisition_
-pipeline.py` coverage), 432 total across 21 files, all passing against deterministic fakes and mocked
-SDK clients only. No Tavily call, no OpenAI call, no live HTTP fetch, and no analysis of a real company
-was performed or attempted at any point in this task.**
+**Status: real (but never-invoked) provider adapters for all three Task 20 Protocols exist
+(`app/evidence_engine/acquisition/providers_live.py`), now including a deterministic batch
+character-budget enforcer, an explicit OpenAI output-token ceiling, API-enforced JSON-schema
+structured output (replacing free-form `.create()` + `json.loads()`), and a single combined
+OpenAI retry-attempt owner (worst case cut from 36 to 12 real HTTP attempts). 445 tests across 21
+files, all passing against deterministic fakes and mocked SDK clients only. No Tavily call, no
+OpenAI call, no live HTTP fetch, and no analysis of a real company was performed or attempted at
+any point in either task.**
 
 This document does not restate `EVIDENCE_ACQUISITION_PIPELINE.md` (Task 20's own pipeline-stage
-reference, still accurate and updated in place where this task changed a stage's shape) or
-`NEW_ENGINE_E2E_EVALUATION.md` (Task 20's own scenario/readiness record, superseded only in its §5/§7
-live-run figures, updated there). This document covers what is genuinely new: the three real adapters,
-the efficiency work around them, and the call-graph/model/readiness accounting item 21's own instructions
-require.
+reference, still accurate) or `NEW_ENGINE_E2E_EVALUATION.md` (Task 20's own scenario/readiness
+record). Sections 1-9, 11-12, 16-17 below are Task 21's own original record, left as written except
+where a cross-reference to §0 was added. **§0 is Task 21A's own addendum** — a read-only preflight
+review of Task 21's committed configuration surfaced five concrete provider-boundary gaps (an
+unenforced character budget, no output-token ceiling, free-form JSON parsing where the installed
+SDK actually supports schema-enforced structured output, and an excessive 36-call retry worst
+case); §0 records exactly what changed to close them. §10 (retry ownership), §13 (token/cost
+accounting), §14 (call-graph), and §15 (live-run readiness) are updated in place with the new
+figures; every other section describes Task 21's original, still-accurate work.
+
+## 0. Task 21A addendum — live-run preflight hardening
+
+A read-only preflight review (no code change, no network call) of the Task 21 configuration as
+committed found five gaps worth closing before any live run: (1) a declared but unenforced batch
+character budget; (2) no output-token ceiling on the OpenAI request at all; (3) free-form
+`.create()` + regex/`json.loads()` parsing where the installed SDK cleanly supports API-enforced
+structured output; (4) a 36-real-call worst case per full run from two independently-multiplying
+retry layers; (5) no per-batch usage/truncation/attempt telemetry. All five are now fixed,
+`app/evidence_engine/parameters.py` (methodology) was not touched, and nothing else about Task 21's
+own scope (the 12-query research plan, Tavily configuration, retrieval cap, source prioritization,
+source classification, concurrency caps, pillar behavior, publication gates, scoring, or company
+aggregation) was changed. Full detail in each updated section below (§10/§13/§14/§15) and item-by-
+item in the Task 21A completion report delivered alongside this document.
 
 ## 1. Infrastructure inspected and reuse decisions (item 1)
 
@@ -73,15 +92,23 @@ exactly ONE real call per batch instead of one per source. With the defaults abo
 batches -> **at most 6 real extraction calls**, a **4x reduction** from Task 20's own worst case, before
 any other efficiency measure in this document is even applied.
 
-Source attribution is preserved by construction: `_parse_batch_response()` groups parsed candidates by
-`source_id`, drops anything whose `source_id` does not belong to a request in that specific batch (so a
-model hallucinating or a malicious page trying to attribute a candidate to a *different* source in the
-batch is caught the same way `UNKNOWN_SOURCE_ID` already catches it for a single-source call), and returns
-one `ExtractionResponse` per input request in the SAME order as `requests` -- proven end-to-end (not just
-at the `extract_many()` unit level) by
+Source attribution is preserved by construction: the per-batch loop inside `OpenAIEvidenceExtractor.
+extract_batch()` (Task 21A: `_schema_candidate_to_extracted()` plus its own `by_source` grouping,
+superseding Task 21's original free-form `_parse_batch_response()` once structured output removed the
+need for JSON-text parsing, §6a) groups parsed candidates by `source_id`, drops anything whose
+`source_id` does not belong to a request in that specific batch (so a model hallucinating or a malicious
+page trying to attribute a candidate to a *different* source in the batch is caught the same way
+`UNKNOWN_SOURCE_ID` already catches it for a single-source call), and returns one `ExtractionResponse`
+per input request in the SAME order as `requests` -- proven end-to-end (not just at the unit level) by
 `test_acquisition_efficiency.py::test_batching_preserves_per_source_attribution_with_distinct_facts`,
 which runs 4 batched sources each carrying a genuinely distinct fact through the real pipeline and confirms
 every fact traces back to its own, correct source URL.
+
+**Retry ownership within a batch (Task 21A item 4):** originally, `extract_many()` owned a grounding-retry
+loop calling `extract_batch()` up to twice, each of THOSE calls internally retrying transient failures up
+to three more times -- 6 real calls per batch. This is now ONE combined loop entirely inside
+`extract_batch()` itself (§10), bounded at 2 real calls per batch regardless of which failure class
+(transient or validation) triggered the retry.
 
 **Per-source-failure isolation inside a batch (a real bug found and fixed during this task, not merely
 anticipated):** the first version of `extract_many()`'s non-batching fallback path called
@@ -146,6 +173,38 @@ codebase (item 20's own instruction). `providers_live.py::OpenAIEvidenceExtracto
 override for a future task that wants to benchmark an alternative, but the shipped default is this one,
 with this rationale recorded in the module's own docstring.
 
+**Task 21A update:** the call mechanism changed (§below), the model did not. `EXTRACTION_MODEL`
+is still `"gpt-4.1-mini"`; `client.chat.completions.parse(model=self._model, ...)` uses the exact
+same configured model, just through the structured-output method instead of free-form `.create()`.
+
+## 6a. Structured output mechanism (Task 21A item 3)
+
+**Investigated, implemented, no network call.** Local introspection of the installed `openai==2.37.0`
+SDK (confirmed via `inspect`, not the live API) found `client.chat.completions.parse()` available,
+accepting a Pydantic model as `response_format` and returning a typed `.message.parsed`, plus two
+real, locally-confirmed exception classes for its own documented non-success outcomes:
+`openai.LengthFinishReasonError` (output cut off by the token ceiling, §13/§6a below) and
+`openai.ContentFilterFinishReasonError` (refused by a content filter). Both are caught inside
+`OpenAIEvidenceExtractor._call_once()` and treated as legitimate, telemetry-recorded degradations
+(never a crash, never a pointless identical retry), not exceptions that propagate.
+
+`ExtractedClaimCandidate`'s own `structured_fact: dict[str, str] | None` field is NOT directly
+usable as a strict-mode schema (a free-form dict has no fixed key set, which OpenAI's strict
+structured-outputs mode requires). A narrower, strict-mode-compatible schema
+(`_StructuredFactSchema`/`_CandidateSchema`/`_ExtractionResponseSchema`, all in
+`providers_live.py`) restates the exact same contract with `structured_fact` as a fixed set of
+optional named fields matching `ALLOWED_STRUCTURED_FACT_FIELDS` exactly, converted back into a
+real `ExtractedClaimCandidate` (`_schema_candidate_to_extracted()`) before `validate_candidate()`
+ever runs -- so downstream grounding validation is completely unaware anything changed.
+
+**What is NOT verified, and why:** whether the OpenAI server actually accepts this schema for
+`gpt-4.1-mini` specifically cannot be confirmed without a live call, which this task makes none of.
+What IS verified, locally: the installed SDK does not reject the model/parameter combination
+client-side, and the schema itself uses only documented Structured-Outputs-compatible constructs.
+This is the same category of "cannot verify without a live call" already named in Task 20's own
+live-run readiness section, now narrowed to one specific, well-defined question a future approved
+dry run would answer directly.
+
 ## 7. Deterministic source-type classification (item 13)
 
 New module `acquisition/source_classification.py::classify_source_type(url, company_website_url)`. A pure
@@ -200,22 +259,35 @@ fully-sequential budget (every concurrency cap set to 1) and a fully-concurrent 
 `claim_id`s, `company_coverage_pct`, and `company_publishable` -- the specific equivalence test item 18
 asks for.
 
-## 10. Retry ownership audit (item 15)
+## 10. Retry ownership audit (item 15, revised by Task 21A item 4)
+
+**Task 21's original design had two independently-multiplying layers for extraction** (a
+grounding-retry loop in `extract_many()` wrapping a separate transient-retry loop inside
+`OpenAIEvidenceExtractor`) -- 2 x 3 = 6 real calls per batch, 36 across 6 batches. Task 21A's own
+preflight review flagged this as excessive ("a logical extraction batch should not be able to
+silently trigger six provider calls through stacked retry loops unless there is an exceptionally
+strong reason") and it was replaced with ONE combined owner:
 
 | Retry class | Owner | Bound |
 |---|---|---|
 | Search (transient provider failure) | `pipeline.py::_search_one()`, one query's own loop | `budget.max_search_retries` (default 1) => up to 2 attempts/query |
 | Retrieval (transient fetch failure) | `pipeline.py::_retrieve_one()`, one source's own loop | `budget.max_retrieval_retries` (default 1) => up to 2 attempts/source |
-| Extraction grounding-only retry (candidate proposed but ungrounded) | `extraction.py::extract_with_recovery()` / `extract_many()`'s batch branch | `budget.max_extraction_retries` (default 1) => up to 2 attempts/source-or-batch |
-| OpenAI transient HTTP failure (connection/timeout/429/5xx) | `providers_live.py::OpenAIEvidenceExtractor._call_with_retry()`, its own internal loop, BELOW the grounding-retry layer above | `EXTRACTION_MAX_ATTEMPTS = 3` (1 + 2), independent of the grounding-retry count |
+| Extraction (BOTH transient HTTP failure AND validation/grounding-driven re-attempt, combined) | `providers_live.py::OpenAIEvidenceExtractor.extract_batch()`, ONE loop, the single owner of every real OpenAI HTTP attempt for a batch | `EXTRACTION_MAX_PROVIDER_ATTEMPTS_PER_BATCH = 2` -- covers EITHER failure class, never multiplied by a second independent layer |
+| `extraction.py::extract_many()`'s own grounding-retry loop | **Removed for the batch-capable path** -- now calls `extract_batch()` exactly once, re-runs `validate_candidate()` on the result (item 3's own "do not weaken downstream validation"), never loops itself. Still governs the FALLBACK (non-batch-capable) path unchanged, via `budget.max_extraction_retries`. | N/A for the batch path |
 | OpenAI SDK's own built-in retry | Explicitly disabled (`max_retries=0`) | N/A -- one retry policy, one place, mirroring `pillar_shared.py`'s own documented reasoning |
 | Tavily client's own built-in retry | Not disabled (no equivalent flag exposed by `tavily-python`); `TavilySearchProvider` itself adds no retry of its own | Bounded entirely by `pipeline.py`'s own `_search_one()` retry loop above -- whatever the underlying `requests`-based HTTP call does internally is opaque but still wrapped by exactly one outer bound |
 
-**Worst-case real external attempts for one company, default budget:** search up to `12 queries x 2
-attempts = 24`; retrieval up to `24 sources x 2 attempts = 48`; extraction up to `6 batches x 2 grounding
-attempts x 3 OpenAI-transient attempts = 36` (in practice far lower -- the 3-attempt OpenAI retry only
-fires on an actual transient HTTP failure, not on every call). No retry class is multiplicatively stacked
-with another beyond what this table states explicitly.
+**New formula and worst case:** `6 batches x EXTRACTION_MAX_PROVIDER_ATTEMPTS_PER_BATCH (2) = 12`
+real OpenAI HTTP attempts absolute maximum for a full run -- down from 36 (a 3x reduction), directly
+verified by `test_openai_extractor_worst_case_matches_the_documented_formula`. Search remains up to
+`12 queries x 2 attempts = 24`; retrieval remains up to `24 sources x 2 attempts = 48` (both
+unchanged -- Task 21A item 7 explicitly leaves the retrieval cap and Tavily configuration alone).
+Recovery is not removed: a genuine transient blip OR a genuinely-correctable grounding issue still
+gets one real second chance, within the same small combined budget, per batch --
+`test_openai_extractor_transient_failure_then_success_uses_two_attempts` and `..._validation_
+failure_then_success_uses_two_attempts` both prove recovery still works; `..._validation_failure_
+plus_transient_failure_still_bounded` proves the two failure classes never independently stack past
+2 attempts even when a batch hits both in sequence.
 
 ## 11. Structured-extraction validation, extended (item 14)
 
@@ -240,6 +312,18 @@ vocabulary rather than a second, driftable list:
 entry," Task 20's own original rule, unchanged) -- `_sanitize_assessment_criteria()` drops any unrecognized
 entry from a candidate that otherwise passes validation, so a partially-plausible label never rides into
 the ledger alongside a genuinely recognized one.
+
+**Task 21A note:** switching `OpenAIEvidenceExtractor` to API-enforced structured output (§3 of the
+addendum, §6 below) makes a `MALFORMED_STRUCTURED_FACT`/malformed-JSON failure structurally
+impossible on that path -- the SDK's own strict schema now guarantees every parsed candidate is
+already syntactically well-formed before `validate_candidate()` ever runs. This does NOT weaken
+`validate_candidate()` itself, which still runs, unconditionally, on every candidate regardless of
+how it was produced (`test_openai_extractor_grounding_validation_still_runs_after_schema_
+validation` proves a SCHEMA-valid but UNGROUNDED excerpt is still rejected) -- it simply means the
+`INVALID_FACT_KIND`/`DISALLOWED_FACT_FIELD`/`EXCERPT_NOT_GROUNDED_IN_SOURCE` checks are now the
+ONLY way a real OpenAI-sourced candidate can be rejected, `MALFORMED_STRUCTURED_FACT` having become
+unreachable from that specific path (still reachable from the fallback/non-structured path and from
+any other future provider).
 
 ## 12. Stronger prompt-injection resistance (item 12)
 
@@ -266,73 +350,77 @@ defense-in-depth, not the actual security boundary: "grounding alone is not a se
 12's own words) is answered by the STRUCTURAL checks in §11, which run identically regardless of what any
 model said or why.
 
-## 13. Token/cost accounting (item 19)
+## 13. Token/cost accounting (item 19, extended by Task 21A item 6)
 
-- **Tokens:** `OpenAIEvidenceExtractor` records `response.usage.total_tokens` -- real, provider-reported
-  data, never estimated. `TavilySearchProvider`/`HttpSourceRetriever` record `tokens=None` (neither call is
+- **Tokens:** `OpenAIEvidenceExtractor` now records `input_tokens`/`output_tokens` SEPARATELY (from
+  `response.usage.prompt_tokens`/`completion_tokens`), summed across every real attempt a batch call
+  made, plus `tokens` (the total) -- all real, provider-reported data, never estimated.
+  `TavilySearchProvider`/`HttpSourceRetriever` still record `tokens=None` (neither call is
   token-metered).
-- **Cost:** `ExternalCallRecord.cost_usd` stays `None` by default. `providers_live.py::ProviderPricing` is
-  an OPTIONAL, explicitly-constructed dataclass (`tavily_cost_per_search_usd`, `openai_cost_per_input_
-  token_usd`, `openai_cost_per_output_token_usd`) a caller may pass to any adapter; if supplied, a labeled
-  ESTIMATE is computed from real call/token counts. No price is hardcoded anywhere in this codebase, and no
-  adapter invents a cost figure when `pricing` is left unset (`HttpSourceRetriever` is the one exception:
-  `cost_usd=0.0`, not `None`, because bandwidth cost genuinely is zero-dollar for this engine's purposes --
-  a stated fact, not an estimate).
-- **Latency:** every adapter measures its own real wall-clock `duration_seconds` via `time.monotonic()`
-  around the actual call, recorded on every `ExternalCallRecord` regardless of success/failure.
-- **`sources_covered`** (new field on `ExternalCallRecord`): 1 for search/retrieval and for a
-  non-batching extractor, >1 for a real batched `OpenAIEvidenceExtractor` call -- so a call-graph report
-  built from real telemetry can honestly state "N calls covering M sources" rather than assuming
-  one-call-per-source always holds.
+- **Cost:** unchanged from Task 21 -- `ExternalCallRecord.cost_usd` stays `None` unless an explicit
+  `ProviderPricing` is supplied; `HttpSourceRetriever` still records the one stated fact (`cost_usd=0.0`,
+  bandwidth is genuinely free) rather than an estimate.
+- **Latency:** unchanged -- real `duration_seconds` via `time.monotonic()`, recorded regardless of
+  success/failure.
+- **New telemetry fields on `ExternalCallRecord` (Task 21A item 6):** `provider_attempts` (how many real
+  HTTP attempts this one record aggregates, §10); `validation_retries` (how many of those were re-attempted
+  specifically due to a grounding failure, distinct from a transient one); `truncated` (any source's
+  INPUT content was truncated or excluded to fit the character budget, §1 of the addendum);
+  `output_truncated` (the response itself was cut off by `EXTRACTION_MAX_OUTPUT_TOKENS`, §2 of the
+  addendum, surfaced via `openai.LengthFinishReasonError`); `content_filtered`
+  (`openai.ContentFilterFinishReasonError`); `sources_excluded_for_budget` (count never sent at all).
+  `sources_covered` (Task 21, unchanged) remains 1 for search/retrieval and for a non-batching
+  extractor, >1 for a real batched call.
+- **Analysis-level aggregation (item 6's own "aggregate these at analysis level"):** `AcquisitionTelemetry`
+  gained read-only properties summing the above across every extraction call in a run --
+  `total_extraction_tokens`/`_input_tokens`/`_output_tokens`, `total_extraction_provider_attempts`,
+  `total_extraction_validation_retries`, `extraction_batches_with_input_truncation`/
+  `_output_truncation`, `total_sources_excluded_for_budget` -- computed from `external_calls`, not a
+  second, separately-maintained running total that could drift from it.
 
-## 14. Call-graph report (item 23)
+## 14. Call-graph report (item 23, batch/attempt figures revised by Task 21A)
 
-| Provider | Task 20's own worst case | This task's worst case (default budget) | Reduction driver |
-|---|---|---|---|
-| Tavily search | <=12 | <=12 (unchanged) | Query count was already consolidated (§4); no further reduction found without losing recall |
-| Website fetch (HTTP) | <=24 | <=24 (unchanged) | Retrieval is inherently one fetch per distinct retained source; dedup (§5) reduces which sources get this far, not the per-source cost once retained |
-| OpenAI extraction | <=24 | **<=6** (`ceil(24 / 4)`) | Batching (§3), default `max_sources_per_batch=4` |
+| Provider | Task 20's own worst case | Task 21's worst case | Task 21A's worst case | Reduction driver |
+|---|---|---|---|---|
+| Tavily search | <=12 | <=12 (unchanged) | <=12 (unchanged) | Query count already consolidated; Task 21A item 7 leaves this alone |
+| Website fetch (HTTP) | <=24 | <=24 (unchanged) | <=24 (unchanged) | Task 21A item 7 leaves the retrieval cap alone |
+| OpenAI extraction BATCHES | <=24 (one call/source) | **<=6** (`ceil(24/4)`) | <=6 (unchanged -- batch count, not attempts, is untouched) | Batching, `max_sources_per_batch=4` |
+| OpenAI extraction real HTTP ATTEMPTS | <=24 | <=36 (2 grounding x 3 transient, stacked) | **<=12** (`6 batches x 2` combined attempts) | Task 21A item 4's single combined retry owner (§10) |
 
-**Expected-normal case** (a real company with typical result density, not the worst case above): search
-and retrieval both frequently terminate early via `budget.max_total_sources` (24) before exhausting every
-query's own `max_sources_per_query`; cross-query URL dedup (§5) typically removes some overlap between
-topics researching a related fact (e.g. funding and stage-signal queries both surfacing a TechCrunch
-funding article); extraction batches at less-than-maximum size whenever fewer than 24 sources survive
-retrieval. A realistic expected-normal run is closer to 6-10 search calls, 10-18 retrieval calls, and 3-5
-extraction calls -- an estimate, not a measurement (§16's own "no real run happened" caveat applies here
-too), reasoned from the budget arithmetic and the historical live-evidence sanity checks' own typical
-source-yield-per-query observed across Tasks 11-17's real research (never more than 3-5 genuinely useful
-sources per query in practice).
+**Expected-normal case** (unchanged reasoning from Task 21, batch-count figures untouched by 21A): a
+realistic expected-normal run is closer to 6-10 search calls, 10-18 retrieval calls, and 3-5 extraction
+BATCH calls -- an estimate, not a measurement, reasoned from budget arithmetic and Tasks 11-17's own
+typical real source-yield-per-query. The corresponding expected-normal real OpenAI HTTP ATTEMPT count is
+typically equal to the batch count (1 attempt per batch, since most real batches should succeed on the
+first attempt) -- worse only when a batch genuinely needs its one allowed retry.
 
-**Compared to the legacy workflow** (`app/workflows/due_diligence_workflow.py`, pre-existing, unchanged):
-that pipeline made a fixed ~4 Tavily searches (one generic query enriching all six pillars at once) plus
-~11 OpenAI calls (six pillar analyses + five free-form summary/risk/memo/competitor/structured calls) per
-company -- roughly 4 search + 11 model calls total, always, regardless of company complexity. This engine's
-acquisition layer is NOT trying to undercut that count; it is trying to support six independently
-evidence-gated pillars with dimension-level traceability the legacy single-generic-search design
-structurally cannot provide, at a call count in the same order of magnitude (this task's own realistic
-expected-normal figures above) rather than the naive 12+24+24 worst case Task 20 first estimated.
+**Compared to the legacy workflow:** unchanged from Task 21 -- see that section's own reasoning; Task
+21A only changed the OpenAI ATTEMPT multiplier, not the batch/query/retrieval counts this comparison is
+based on.
 
-## 15. Live-run readiness (item 22 update to `NEW_ENGINE_E2E_EVALUATION.md` §5/§7)
+## 15. Live-run readiness (item 22 update to `NEW_ENGINE_E2E_EVALUATION.md` §5/§7, revised by Task 21A)
 
-**Still not ready to run -- no credentials, no approval, no attempt.** What changed since Task 20: real
-adapter code now exists (§2) and is unit/mock-tested (§2, §11, §12); a live run's cost/latency/token
-envelope can now be stated with real code behind it rather than only Protocol shape. What a small, approved
-live dry run would need:
+**Still not ready to run -- no credentials, no approval, no attempt.** What changed since Task 21: the
+batch character budget is now actually enforced (never silently exceeded); an explicit output-token
+ceiling is set (`EXTRACTION_MAX_OUTPUT_TOKENS = 4096`, §2 of the addendum); the extraction call now uses
+API-enforced structured output (§6a) rather than free-form JSON parsing; and the worst-case real OpenAI
+HTTP attempt count is 12, not 36. What a small, approved live dry run would need is otherwise unchanged
+from Task 21:
 
-- `TAVILY_API_KEY` and `OPENAI_API_KEY` set in the environment (never hardcoded -- §1's own secret-handling
-  discipline, unchanged).
-- Explicit approval, per this task's own standing scope constraint, before either key is ever actually
-  used.
-- Expected calls for 1-2 real companies, default budget: <=12 Tavily search, <=24 HTTP fetch (free,
-  bandwidth-only, but real external traffic to third-party sites), <=6 OpenAI extraction calls, model
-  `gpt-4.1-mini` (§6). Retry envelope per §10's own table.
-- No cost figure is given here beyond "OpenAI: token-metered, roughly 6 calls x prompt-plus-up-to-4-sources
-  (<=6000 chars each, §16) plus completion" -- an actual dollar estimate requires either real historical
-  token counts (none exist yet) or an explicitly-configured `ProviderPricing` the person running the dry
-  run would supply, per item 19's own "never invent a cost figure" rule, unchanged from §13 above.
+- `TAVILY_API_KEY` and `OPENAI_API_KEY` set in the environment (never hardcoded).
+- Explicit approval, before either key is ever actually used.
+- Expected calls for 1-2 real companies, default budget: <=12 Tavily search, <=24 HTTP fetch, <=6 OpenAI
+  extraction BATCH calls (<=12 real HTTP attempts including retries, §10), model `gpt-4.1-mini` (§6),
+  each request bounded to <=20,000 input characters (§1 of the addendum) and <=4,096 output tokens (§2).
+- No cost figure is given beyond the same "token-metered, no invented dollar figure" rule as Task 21 --
+  an actual estimate requires either real historical token counts (none exist yet) or an explicitly-
+  configured `ProviderPricing`.
+- **One additional, still-open question a dry run would specifically answer (§6a):** whether the real
+  OpenAI API actually accepts this schema for `gpt-4.1-mini` as structured output, verified so far only
+  by local SDK introspection, never a live call.
 
-**This task stops here, before any such call, pending explicit approval -- exactly as Task 20 did.**
+**This task stops here, before any such call, pending explicit approval -- exactly as Task 20 and Task
+21 both did.**
 
 ## 16. Known limitations and assumptions awaiting a first real run
 
@@ -365,8 +453,13 @@ changed the picture:
 | `source_classification.py` | Implemented, unit-tested (9 tests) |
 | `dedup.py` | Implemented, unit-tested (6 tests); `dedup_retrieved_content()` deliberately not wired into the default pipeline (§5) |
 | `concurrency_helpers.py` | Implemented, unit-tested (3 tests) |
-| `providers_live.py` (all 3 adapters) | Implemented, mocked/unit-tested (23 tests); **never invoked against a real endpoint** |
-| `extraction.py` extensions (`INVALID_FACT_KIND`/`DISALLOWED_FACT_FIELD`/`extract_many`/sanitization) | Implemented, tested via both `test_provider_adapters.py` and the extended `test_acquisition_efficiency.py` |
-| `pipeline.py` batching/concurrency/dedup integration | Implemented; full offline E2E re-verified (22 Task-20 tests unchanged + 9 new efficiency tests) |
+| `providers_live.py` (all 3 adapters) | Implemented, mocked/unit-tested (36 tests, Task 21A: batching/budget/retry/structured-output tests added, old free-form-JSON tests superseded); **never invoked against a real endpoint** |
+| `extraction.py` extensions (`INVALID_FACT_KIND`/`DISALLOWED_FACT_FIELD`/`extract_many`/sanitization) | Implemented, tested via `test_provider_adapters.py` and `test_acquisition_efficiency.py` |
+| **Batch character-budget enforcement** (Task 21A item 1) | Implemented (`_render_batch_request`/`_allocate_content_budget`), unit-tested (7 tests: never-exceeds-budget, overhead accounting, deterministic truncation, attribution preserved, water-filling redistribution, safe exclusion, telemetry) |
+| **Explicit OpenAI output-token ceiling** (Task 21A item 2) | Implemented (`EXTRACTION_MAX_OUTPUT_TOKENS = 4096`, passed as `max_completion_tokens`), tested (`test_openai_extractor_passes_the_explicit_output_token_ceiling`) |
+| **API-enforced structured output** (Task 21A item 3) | Implemented (`client.chat.completions.parse()` + typed schema), tested (8 tests); real server-side acceptance for `gpt-4.1-mini` unverified without a live call (§6a) |
+| **Single combined OpenAI retry owner** (Task 21A item 4) | Implemented (`EXTRACTION_MAX_PROVIDER_ATTEMPTS_PER_BATCH = 2`), tested (7 tests covering every required failure-combination scenario) |
+| **Extraction usage telemetry** (Task 21A item 6) | Implemented (`ExternalCallRecord` extended, `AcquisitionTelemetry` aggregation properties), tested |
+| `pipeline.py` batching/concurrency/dedup integration | Implemented; full offline E2E re-verified (22 Task-20 tests unchanged + 9 efficiency tests unchanged) |
 | Isolation-boundary AST scanner | Implemented, automated (3 tests) -- previously a manual, per-task-restated check |
 | Live provider behavior against real data | **Not yet tested -- no live run performed** (§15/§16) |

@@ -175,10 +175,23 @@ legacy imports (`app.website_scrapper`, `app.pdf_extractor`, the latter currentl
   `docs/methodology/NEW_ENGINE_E2E_EVALUATION.md` for the offline test results and Task 20's own
   live-run readiness assessment.
 - **`acquisition/providers_live.py`, `source_classification.py`, `dedup.py`, `concurrency_
-  helpers.py`** (Task 21) — real (but still never live-invoked) implementations of the three
-  Protocols above: `TavilySearchProvider`, `HttpSourceRetriever` (wraps `app/website_scrapper.py`
-  directly), `OpenAIEvidenceExtractor` (`gpt-4.1-mini`, batches up to 4 sources into one real call
-  via a duck-typed `extract_batch()` extension, never requests or accepts a model-provided score).
+  helpers.py`** (Task 21, hardened by Task 21A) — real (but still never live-invoked)
+  implementations of the three Protocols above: `TavilySearchProvider`, `HttpSourceRetriever`
+  (wraps `app/website_scrapper.py` directly), `OpenAIEvidenceExtractor` (`gpt-4.1-mini`, batches up
+  to 4 sources into one real call via a duck-typed `extract_batch()` extension, never requests or
+  accepts a model-provided score). **Task 21A** (a read-only live-run preflight found concrete
+  gaps): the batch request now respects a deterministic, ENFORCED character budget
+  (`_render_batch_request`/`_allocate_content_budget` — system prompt, source metadata, and source
+  content all reserved against one configured ceiling, never silently exceeded, a source too small
+  to fit safely excluded entirely rather than sent a useless sliver); an explicit
+  `EXTRACTION_MAX_OUTPUT_TOKENS = 4096` output ceiling is passed as `max_completion_tokens`; the
+  extraction call now uses `client.chat.completions.parse()` — API-enforced JSON-schema structured
+  output, confirmed available via local SDK introspection of the installed `openai==2.37.0` — in
+  place of free-form `.create()` + regex/`json.loads()` (grounding validation is unweakened: a
+  schema-valid-but-ungrounded excerpt is still rejected); and retry ownership for a batch is now
+  ONE combined loop (`EXTRACTION_MAX_PROVIDER_ATTEMPTS_PER_BATCH = 2`, covering both transient and
+  validation failures) replacing two independently-multiplying layers, cutting the worst-case real
+  OpenAI HTTP attempts for a full run from 36 to 12.
   `source_classification.py` assigns `source_type` deterministically from the URL/domain alone,
   before any extraction call ever sees the content — a company's own domain cannot self-declare
   independence regardless of what the page says. `dedup.py` collapses exact-duplicate search-result
@@ -225,7 +238,7 @@ legacy imports (`app.website_scrapper`, `app.pdf_extractor`, the latter currentl
   fictional ones) — see `docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` for the full matrix and
   findings, updated in Task 19 to also print company-level Coverage/Confidence/publishability per
   company (`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` for the analysis of those results).
-- **`tests/`** — **432 tests across 21 files**, all script-style (this repo's pytest is scoped to
+- **`tests/`** — **445 tests across 21 files**, all script-style (this repo's pytest is scoped to
   `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 19** added
   `test_calibration_aggregation.py` (29 tests): the six controlled Confidence fixtures item 9 of that
   task asked for (proving Low/Medium/High correspond to meaningfully different evidence states, not
@@ -236,13 +249,13 @@ legacy imports (`app.website_scrapper`, `app.pdf_extractor`, the latter currentl
   against deterministic fakes, covering evidence-rich/sparse/contradictory/duplicate/prompt-
   injection/partial-failure/revenue-reuse/identity-invariance scenarios plus grounding rejection,
   budget enforcement, extraction recovery, and canonical-identity determinism. **Task 21** added
-  three files (53 tests): `test_provider_adapters.py` (41) — mocked-SDK provider-level tests for all
-  three real adapters, deterministic source-type classification, `dedup.py`, and
-  `concurrency_helpers.py`; `test_isolation_boundary.py` (3) — the automated AST-based import scan
-  described above; `test_acquisition_efficiency.py` (9) — batching-through-the-real-pipeline call
-  count and attribution, sequential-vs-concurrent equivalence, five realistic prompt-injection
-  payloads each individually proven unable to manufacture a ledger entry, and a call-graph
-  budget-arithmetic regression guard.
+  three files (66 tests total, after Task 21A's own additions): `test_provider_adapters.py`
+  (54 — mocked-SDK provider-level tests for all three real adapters, including Task 21A's own
+  character-budget/output-token/structured-output/retry-ownership coverage); `test_isolation_
+  boundary.py` (3) — the automated AST-based import scan described above; `test_acquisition_
+  efficiency.py` (9) — batching-through-the-real-pipeline call count and attribution, sequential-
+  vs-concurrent equivalence, five realistic prompt-injection payloads each individually proven
+  unable to manufacture a ledger entry, and a call-graph budget-arithmetic regression guard.
 - **`demo.py`** — prints a human-readable Product & Technology pillar summary for all five offline
   fixtures: `python -m app.evidence_engine.demo`.
 

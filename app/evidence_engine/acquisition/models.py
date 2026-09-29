@@ -255,7 +255,7 @@ class ExternalCallRecord:
     call_type: str  # "search" | "retrieval" | "extraction"
     provider_name: str
     duration_seconds: float
-    tokens: int | None = None
+    tokens: int | None = None  # total tokens (input+output), when the provider reports it
     cost_usd: float | None = None
     succeeded: bool = True
     # Task 21: how many sources this ONE external call covered -- 1 for
@@ -264,6 +264,39 @@ class ExternalCallRecord:
     # "N extraction calls covering M sources" honestly rather than
     # implying one-call-per-source always holds.
     sources_covered: int = 1
+    # Task 21A item 6 -- explicit extraction usage telemetry. `tokens`
+    # above stays the TOTAL; these two split it, when the provider
+    # reports the split (OpenAI's own `usage.prompt_tokens`/
+    # `usage.completion_tokens`). None, never 0, when unknown -- the same
+    # "never invent a number" discipline as `tokens`/`cost_usd` above.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    # How many REAL provider HTTP attempts this one record aggregates
+    # (Task 21A item 4's single combined retry owner, providers_live.py's
+    # own "Retry ownership" section) -- 1 for search/retrieval (each
+    # pipeline-level retry there produces its own separate record); for
+    # extraction, up to `EXTRACTION_MAX_PROVIDER_ATTEMPTS_PER_BATCH`.
+    provider_attempts: int = 1
+    # Of those attempts, how many were re-attempted specifically because
+    # the PRIOR attempt's response failed grounding validation for at
+    # least one still-pending source (as opposed to a transient HTTP
+    # failure) -- kept distinct from `provider_attempts` so a caller can
+    # see WHY a batch needed more than one real call, not just how many.
+    validation_retries: int = 0
+    # Task 21A item 1 -- whether any source's content was truncated (or
+    # excluded entirely) to fit the configured character budget.
+    truncated: bool = False
+    # Whether the provider's own response was cut off by the configured
+    # output-token ceiling (item 2) or refused by a content filter --
+    # distinct from `truncated` (an INPUT-side truncation) even though
+    # both are captured on the same record for one extraction call.
+    output_truncated: bool = False
+    content_filtered: bool = False
+    # How many sources in this call's own request were excluded entirely
+    # (never sent to the provider at all) because no safe character
+    # allocation existed for them, as of the LAST attempt this record
+    # aggregates.
+    sources_excluded_for_budget: int = 0
 
 
 @dataclass(frozen=True)
@@ -302,3 +335,43 @@ class AcquisitionTelemetry:
     @property
     def total_external_calls(self) -> int:
         return len(self.external_calls)
+
+    # --- Task 21A item 6: extraction usage aggregated at analysis level --
+
+    def _extraction_calls(self) -> tuple[ExternalCallRecord, ...]:
+        return tuple(c for c in self.external_calls if c.call_type == "extraction")
+
+    @property
+    def total_extraction_tokens(self) -> int | None:
+        values = [c.tokens for c in self._extraction_calls() if c.tokens is not None]
+        return sum(values) if values else None
+
+    @property
+    def total_extraction_input_tokens(self) -> int | None:
+        values = [c.input_tokens for c in self._extraction_calls() if c.input_tokens is not None]
+        return sum(values) if values else None
+
+    @property
+    def total_extraction_output_tokens(self) -> int | None:
+        values = [c.output_tokens for c in self._extraction_calls() if c.output_tokens is not None]
+        return sum(values) if values else None
+
+    @property
+    def total_extraction_provider_attempts(self) -> int:
+        return sum(c.provider_attempts for c in self._extraction_calls())
+
+    @property
+    def total_extraction_validation_retries(self) -> int:
+        return sum(c.validation_retries for c in self._extraction_calls())
+
+    @property
+    def extraction_batches_with_input_truncation(self) -> int:
+        return sum(1 for c in self._extraction_calls() if c.truncated)
+
+    @property
+    def extraction_batches_with_output_truncation(self) -> int:
+        return sum(1 for c in self._extraction_calls() if c.output_truncated)
+
+    @property
+    def total_sources_excluded_for_budget(self) -> int:
+        return sum(c.sources_excluded_for_budget for c in self._extraction_calls())
