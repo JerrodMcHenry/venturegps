@@ -1,4 +1,4 @@
-# Provider Adapters & Acquisition Call Budget (Task 21, hardened by Task 21A, routing/relevance layer added Task 23, routing completeness added Task 25)
+# Provider Adapters & Acquisition Call Budget (Task 21, hardened by Task 21A, routing/relevance layer added Task 23, routing completeness added Task 25, classifier-ready extraction contract added Task 27)
 
 **Status: real (but never-invoked) provider adapters for all three Task 20 Protocols exist
 (`app/evidence_engine/acquisition/providers_live.py`), now including a deterministic batch
@@ -243,6 +243,29 @@ client-side, and the schema itself uses only documented Structured-Outputs-compa
 This is the same category of "cannot verify without a live call" already named in Task 20's own
 live-run readiness section, now narrowed to one specific, well-defined question a future approved
 dry run would answer directly.
+
+## 6b. Task 27 addendum -- classifier-ready structured extraction
+
+`_StructuredFactSchema` gained two real, OpenAI-structured-output-enforced `Enum` fields:
+`financing_type: FinancingLegalType | None` and `value_type: TractionValueType | None` (both defined
+once, canonically, in the new `app/evidence_engine/acquisition/fact_contracts.py`, imported here rather
+than redefined). The model can no longer propose an out-of-vocabulary value for either field at all --
+the API itself rejects it, tightening item 3's original "stringly-typed boundary" one step further for
+the two fields that mean exactly one thing regardless of `kind`. `_schema_candidate_to_extracted()` now
+calls `model_dump(exclude_none=True, mode="json")` (previously `exclude_none=True` alone) so an `Enum`
+member serializes to its plain string value, keeping every existing `fact.get(...) == "..."` comparison
+throughout `routing.py`/every pillar file unchanged. The remaining structured-fact fields (`value`,
+`metric`, `status`) deliberately stay free-text at the schema level -- their vocabulary depends on the
+sibling `kind` field, which would require a full discriminated-union schema per kind to express at the
+API layer -- and are instead validated deterministically by the new
+`fact_contracts.py::check_classifier_readiness()`, one step later in the pipeline, exactly where
+`routing.py`'s existing applicability mechanism (Task 25) already lives. Full rationale, the complete
+per-kind contract, and the cohort remediation this responds to:
+`docs/methodology/CLASSIFIER_READY_EXTRACTION_CONTRACT.md`,
+`docs/methodology/COHORT_001_EXTRACTION_REMEDIATION.md`. The extraction system prompt's own routing-
+guidance section was also rewritten to name each kind's exact categorical vocabulary and to instruct
+the model to propose two separate candidates when a source states both a funding amount and a round/
+stage label -- no change to query text, retrieval, or provider call budgets/counts.
 
 ## 7. Deterministic source-type classification (item 13)
 

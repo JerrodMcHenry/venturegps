@@ -238,12 +238,22 @@ def test_missing_structure_remains_missing_never_fabricated() -> None:
 # --- C. Regression fixtures from LINEAR_002 (item 12) --------------------------
 
 def test_founder_background_task_23_behavior_unaffected() -> None:
+    """Updated by Task 27: `founder_experience` now has a verified
+    `fact_contracts.py` applicability check (it did not yet under Task 25
+    alone), so a FULLY well-structured fact (value/person_id/named_entity
+    all present) is now correctly rescued by the deterministic fallback
+    even from a wrong proposal -- Task 25's own routing MECHANISM is
+    unchanged (this is the exact same fallback branch its own tests
+    already prove), only the COVERAGE grew, exactly as intended."""
     c = _candidate(
         criteria=["leadership_composition", "public_track_record"],
         structured_fact={"kind": "founder_experience", "value": "DIRECT", "person_id": "p1", "named_entity": "PriorCo"},
     )
     result = route_candidate(c)
-    expect(result.final_criteria == (), "Task 23's own founder-routing behavior (no positional overlap) must be unchanged")
+    expect(result.final_criteria == ("founder_relevant_experience",),
+           f"Task 27: a fully-structured founder_experience fact must now be rescued, got {result.final_criteria}")
+    expect(result.added_criteria == ("founder_relevant_experience",), str(result.added_criteria))
+
     sanitized = _sanitize_assessment_criteria(_candidate(
         criteria=["founder_relevant_experience"],
         structured_fact={"kind": "founder_experience", "value": "DIRECT", "person_id": "p1", "named_entity": "PriorCo"},

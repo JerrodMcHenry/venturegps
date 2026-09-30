@@ -59,9 +59,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable
 
+from app.evidence_engine.acquisition.fact_contracts import FACT_CONTRACTS, check_classifier_readiness
 from app.evidence_engine.acquisition.models import ExtractedClaimCandidate
-from app.evidence_engine.pillars.financial_funding import funding_round_fields_are_sufficient
-from app.evidence_engine.stage import founding_year_fields_are_sufficient, funding_round_type_fields_are_sufficient
 
 # One entry per structured_fact kind with a real, existing kind-gate in a
 # pillar file (or stage.py) -- the dimension name(s) that gate legitimately
@@ -215,24 +214,22 @@ def strip_kind_agnostic_dimensions_for_owned_kind(criteria: list[str], kind: str
 # the RESULT was still usable, so both silently reached the ledger with
 # `assessment_criteria == []`, permanently un-citable by anything.
 #
-# **`_APPLICABILITY_CHECKS`.** One entry per kind where LINEAR_002 actually
-# found (or this task's own code-reading found) a real gap between "kind
-# matches" and "the specific fact's fields are sufficient." Each check
-# reuses the EXACT validation the real consumer already performs --
-# `pillars/financial_funding.py::funding_round_fields_are_sufficient()`
-# and `stage.py::funding_round_type_fields_are_sufficient()`/`founding_
-# year_fields_are_sufficient()` were themselves split out of (respectively)
-# `parse_funding_round()` and `resolve_stage()` specifically so this module
-# could call the SAME check rather than a second, driftable one. A kind
-# with NO entry here defaults to "fully applicable to everything it is
-# eligible for" -- Task 23's own original assumption, left unchanged for
-# the 15 kinds this task found no evidence of a real problem with; this is
-# a deliberately narrow, evidence-driven extension, not an attempt to
-# harden every kind speculatively.
+# **`_APPLICABILITY_CHECKS` (Task 27 update).** Task 25 originally covered
+# only the 3 kinds LINEAR_002 itself evidenced a real gap for, deliberately
+# leaving the other 15 defaulting to "fully applicable to everything
+# eligible" -- an honest, evidence-scoped restriction, not a claim those 15
+# were actually fine. `LIVE_EVALUATION_COHORT_001.md`'s own Finding S1
+# found the SAME class of gap recurring across every one of them (a
+# correctly-typed, correctly-routed fact whose field VALUES still don't
+# match its real classifier's own vocabulary) -- `fact_contracts.py` (Task
+# 27) now provides a code-verified sufficiency check for every kind-gated
+# kind this engine has, so the fallback can now safely extend to all of
+# them, satisfying the SAME "only for kinds with an explicit, evidence-
+# verified entry" principle Task 25 established -- the entry now just
+# covers more kinds because more kinds have now actually been verified,
+# not because the principle changed.
 _APPLICABILITY_CHECKS: dict[str, Callable[[dict], bool]] = {
-    "funding_round": funding_round_fields_are_sufficient,
-    "funding_round_type": funding_round_type_fields_are_sufficient,
-    "founding_year": founding_year_fields_are_sufficient,
+    kind: check_classifier_readiness for kind in FACT_CONTRACTS if not FACT_CONTRACTS[kind].context_only
 }
 
 

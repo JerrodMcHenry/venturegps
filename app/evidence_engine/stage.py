@@ -190,15 +190,30 @@ def determine_stage(ledger: EvidenceLedger, company_ref: str, as_of: date) -> St
         # tiebreaker when published_at is absent, matching the ledger's own
         # recency convention (spec Part 2.3).
         latest = max(round_type_claims, key=lambda c: c.published_at or c.retrieved_at)
-        mapped = map_round_type(latest.structured_fact["value"])
+        # `.get("value")`, not `["value"]` (Task 27, test_fact_contracts.py's
+        # own consumer test caught this live): a "value"-less funding_round_
+        # type fact reaching this function -- possible for any ledger built
+        # outside extraction.py's own routing pass, e.g. a hand-built
+        # fixture or the calibration suite -- must fail closed to "no
+        # mapped stage from this claim," never raise KeyError. Task 25's
+        # own `funding_round_type_fields_are_sufficient()` already keeps
+        # a malformed fact like this OUT of stage_signal on the normal,
+        # routed extraction path; this is defense-in-depth for the path
+        # that check does not gate, not a second, competing rule.
+        raw_value = latest.structured_fact.get("value")
+        mapped = map_round_type(raw_value) if raw_value else None
         if mapped is not None:
             return mapped
 
     founding_year_claims = [c for c in signal_claims if c.structured_fact.get("kind") == "founding_year"]
     if founding_year_claims:
         latest = max(founding_year_claims, key=lambda c: c.retrieved_at)
+        # Same fix, same rationale: `.get("value")` so a founding_year fact
+        # that (mistakenly) used "amount" instead of "value" -- the exact,
+        # repeatedly-observed real bug LINEAR_002/COHORT_001 documented --
+        # fails closed to Undetermined rather than raising KeyError.
         try:
-            year = int(latest.structured_fact["value"])
+            year = int(latest.structured_fact.get("value"))
         except (TypeError, ValueError):
             return Stage.UNDETERMINED
         return _map_founding_age(year, as_of)

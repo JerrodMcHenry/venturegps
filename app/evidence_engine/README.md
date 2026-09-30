@@ -256,8 +256,23 @@ legacy imports (`app.website_scrapper`, `app.pdf_extractor`, the latter currentl
   fictional ones) — see `docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` for the full matrix and
   findings, updated in Task 19 to also print company-level Coverage/Confidence/publishability per
   company (`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` for the analysis of those results).
-- **`tests/`** — **504 tests across 23 files**, all script-style (this repo's pytest is scoped to
-  `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 25** added
+- **`tests/`** — **549 tests across 25 files**, all script-style (this repo's pytest is scoped to
+  `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 27** added
+  `acquisition/fact_contracts.py` (no tests of its own file, but the canonical, code-derived
+  `fact_kind -> required fields -> categorical vocabulary -> downstream consumer` contract every kind-
+  gated kind now has — the cohort's own "typed and routed but classifier-unusable" gap,
+  `check_classifier_readiness()` its one public function) plus two new files:
+  `test_fact_contracts.py` (41) — for every one of the 20 fact kinds, calls the REAL downstream
+  pillar classifier/parser directly (never a reimplementation) with both a classifier-ready and an
+  insufficient structured_fact, proving both "consumed correctly" and "never crashes, never fabricates
+  a label" (also caught and fixed a real latent `KeyError` in `stage.py::determine_stage()` on a
+  `founding_year` fact using `"amount"` instead of `"value"` — the exact bug LINEAR_002 predicted could
+  happen but never observed live); `test_cohort_001_extraction_fixtures.py` (4) — 14 real, cited
+  before/after fixtures reproducing Stripe/Notion/Fish Audio/Linear 001/002's own exact documented
+  field-completeness failures, plus the item-14 offline classifier-readiness measurement (0% before,
+  100% after, across the 14 cited real shapes). See
+  `docs/methodology/CLASSIFIER_READY_EXTRACTION_CONTRACT.md` and
+  `docs/methodology/COHORT_001_EXTRACTION_REMEDIATION.md`. **Task 25** added
   `test_routing_completeness_and_observability.py` (27 tests) — eligibility-vs-applicability routing
   (the exact LINEAR_002 funding_round/founding_year shapes, both the insufficiently-structured real
   case and a well-structured positive control), all of item 11's routing invariants, and relevance/

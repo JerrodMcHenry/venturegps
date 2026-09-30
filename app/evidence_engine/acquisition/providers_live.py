@@ -104,6 +104,11 @@ from app.evidence_engine.acquisition.extraction import (
     KNOWN_FACT_KINDS,
     validate_candidate,
 )
+from app.evidence_engine.acquisition.fact_contracts import (
+    FACT_CONTRACTS,
+    FinancingLegalType,
+    TractionValueType,
+)
 from app.evidence_engine.acquisition.relevance import SubjectRelationship
 from app.evidence_engine.models import SupportStatus
 from app.website_scrapper import WebsiteFetchError, extract_text_from_website
@@ -379,26 +384,50 @@ more conservative category rather than "primary".
 
 Routing guidance for common cross-cutting facts (deterministic code enforces the FIRST two of these; \
 get them right so your evidence is not silently narrowed to only part of what you found):
-- A funding round (amount raised, round type such as Series A/B/C, investors, valuation) belongs to \
-"funding_history" (kind "funding_round") and, when a round type/stage label is stated, ALSO to \
-"stage_signal" (kind "funding_round_type", value = the round type, e.g. "Series C"). Do not tag a \
-funding-round fact with a traction, revenue, execution, market, or team dimension -- those describe \
-different things even when a funding article also mentions them in passing.
+- A funding round (amount raised, investors, valuation) belongs to "funding_history" (kind \
+"funding_round"). Its "financing_type" field means the LEGAL STRUCTURE of the money, and must be \
+EXACTLY one of: equity, debt, grant, secondary, tender_offer -- never a round label like "Seed" or \
+"Series B" (that is a DIFFERENT field on a DIFFERENT kind, see below). "status" must be exactly \
+"completed" or "announced". If the source ALSO states a round/stage label (Seed, Series A/B/C/D, \
+growth, late-stage, tender offer, IPO), propose a SECOND, separate candidate for that label: kind \
+"funding_round_type", assessment_criteria ["stage_signal"], "value" = the label text (e.g. "Series \
+C"). Do NOT put the round label into "financing_type" -- these are two different facts about the \
+same event, and belong in two different candidates. Do not tag a funding-round fact with a traction, \
+revenue, execution, market, or team dimension.
 - A named person's prior employer, role, or background (e.g. "previously Head of Design at X") \
-belongs to "founder_relevant_experience" (kind "founder_experience", with "named_entity" set to that \
-person's real name) when the person is a founder, and/or "team_identity" for a plain identity/role \
-fact (co-founder/CEO/CTO/etc., kind "team_identity", "named_entity" = the person's real name, "role" = \
-their title). Always set "named_entity" to the person's actual name (never a vague title like "the \
-CEO") when you can -- deterministic code derives a stable person identity from that name, never from \
-your own guess at an id.
+belongs to "founder_relevant_experience" (kind "founder_experience") when the person is a founder -- \
+set "value" to exactly "DIRECT" (same domain/problem space as the current company) or "ADJACENT" \
+(a related but different domain), never left blank, and never a judgment of the employer's prestige. \
+A plain identity/role fact (co-founder/CEO/CTO/etc.) belongs to "team_identity" ("named_entity" = the \
+person's real name, "role" = their title, e.g. "co-founder and CEO"). A person's prior notable \
+outcome (a company that was acquired or IPO'd, or any other prior venture-backed role) belongs to \
+"public_track_record" (kind "track_record", "value" = exactly "PRIOR_EXIT" or "PRIOR_VENTURE_ROLE"). \
+Always set "named_entity" to the person's actual name (never a vague title like "the CEO") -- \
+deterministic code derives a stable person identity from that name, never from your own guess at an id.
 - Dated, first-party release/changelog/announcement evidence belongs to "shipping_velocity" (kind \
-"product_release", "status" = "announced" if only planned/previewed, "launched" if actually shipped \
-and available now -- never mark something "launched" merely because it was announced).
-- Revenue-scale evidence (ARR, MRR, revenue, bookings, GMV) belongs ONLY to "disclosed_scale" and/or \
-"growth_trajectory" (kind "traction_metric", "metric" = the exact metric name, e.g. "revenue" or \
-"ARR"). Never propose "revenue_disclosure" yourself for this kind of fact -- a separate, deterministic \
-rule decides whether Financial & Funding Signals may also reference it; your job is only to record the \
-metric correctly under Commercial Traction's own dimensions.
+"product_release", "status" = exactly "announced" (planned/previewed only), "launched" (actually \
+shipped and available now), "beta", "delayed", or "cancelled" -- never mark something "launched" \
+merely because it was announced).
+- Revenue-scale evidence (ARR, MRR, revenue, bookings, GMV, active users, paying customers) belongs \
+ONLY to "disclosed_scale" and/or "growth_trajectory" (kind "traction_metric"). Set "metric" to EXACTLY \
+one of: revenue, arr, gmv, bookings, active_users, paying_customers -- never a paraphrase like "annual \
+revenue" or "annual recurring revenue". Always set "value_type" to exactly "actual" for a real, \
+current figure (or "projection" for guidance/forecast numbers -- these never count as actual traction). \
+Never propose "revenue_disclosure" yourself for this kind of fact -- a separate, deterministic rule \
+decides whether Financial & Funding Signals may also reference it.
+- A qualitative retention/renewal signal (e.g. "net revenue retention of 130%", "low annual churn") \
+belongs to "retention_renewal_signal" (kind "retention_signal", "value" = exactly "WEAK", "MODERATE", \
+or "STRONG"). Never propose this kind for a customer logo, customer count, testimonial, general \
+adoption claim, or company longevity -- none of those are retention evidence.
+- A capital-efficiency signal (e.g. "profitable since 2021", "negative burn") belongs to \
+"capital_efficiency" (kind "capital_efficiency_signal", "value" = exactly "WEAK", "MODERATE", or \
+"STRONG"). Never inferred from funding amount, headcount, revenue, or valuation alone.
+- A qualitative customer-base-size disclosure belongs to "customer_base_breadth" (kind \
+"customer_band", "value" = exactly "SMALL", "MODERATE", or "LARGE") -- never a bare customer count \
+alone (a bare count with no qualitative characterization is not usable here).
+- An independent analyst's own read of whether a market is fragmented or concentrated belongs to \
+"competitive_landscape_position" (kind "competitive_structure", "value" = exactly "fragmented" or \
+"concentrated") -- never inferred from a bare list of named competitors with no structural read stated.
 
 Propose an empty list if nothing in these sources is genuinely relevant to the allowed dimensions.
 
@@ -470,10 +499,28 @@ def _build_system_prompt(target_dimensions: tuple[str, ...]) -> str:
 # real-model behavior generally.
 
 class _StructuredFactSchema(BaseModel):
+    """Task 27 (`fact_contracts.py`, `COHORT_001_EXTRACTION_REMEDIATION.md`):
+    `financing_type` and `value_type` are now real, schema-enforced enums
+    -- both mean exactly ONE thing regardless of which kind carries them,
+    so the OpenAI API itself rejects an out-of-vocabulary value before it
+    ever reaches this codebase (item 3's own "eliminate stringly-typed
+    classifier boundaries where practical"). `value`/`metric`/`status`
+    deliberately stay `str | None` -- each is used by MULTIPLE kinds with
+    DIFFERENT vocabularies under the same field name (`customer_band.
+    value` means SMALL/MODERATE/LARGE; `founder_experience.value` means
+    ADJACENT/DIRECT; `product_release.status` means announced/launched/...;
+    `funding_round.status` means completed/announced) -- a single field-
+    level enum cannot express "the allowed values depend on a sibling
+    field" without a full discriminated-union schema per kind, a
+    materially larger schema change this task judges not worth it (item
+    10's own "document the tradeoff"). These three are instead validated
+    DETERMINISTICALLY, per the ACTUAL kind, by `fact_contracts.py::check_
+    classifier_readiness()` -- one step later, but just as strict."""
+
     kind: str | None = None
     amount: str | None = None
     currency: str | None = None
-    financing_type: str | None = None
+    financing_type: FinancingLegalType | None = None
     metric: str | None = None
     named_entity: str | None = None
     period_date: str | None = None
@@ -482,7 +529,7 @@ class _StructuredFactSchema(BaseModel):
     round_date: str | None = None
     status: str | None = None
     value: str | None = None
-    value_type: str | None = None
+    value_type: TractionValueType | None = None
     topic: str | None = None
 
 
@@ -510,7 +557,13 @@ class _ExtractionResponseSchema(BaseModel):
 def _schema_candidate_to_extracted(c: _CandidateSchema) -> ExtractedClaimCandidate:
     fact: dict[str, str] | None = None
     if c.structured_fact is not None:
-        raw = c.structured_fact.model_dump(exclude_none=True)
+        # `mode="json"` -- Task 27's own `financing_type`/`value_type` enum
+        # fields must serialize to plain strings here (their real `.value`),
+        # never an Enum member, so `ExtractedClaimCandidate.structured_
+        # fact: dict[str, str]` and every downstream `fact.get(...) == "..."`
+        # comparison (fact_contracts.py, routing.py, every pillar) keeps
+        # working against ordinary strings, unchanged.
+        raw = c.structured_fact.model_dump(exclude_none=True, mode="json")
         if raw:
             fact = raw
     return ExtractedClaimCandidate(
