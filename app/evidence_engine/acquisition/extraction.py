@@ -49,6 +49,7 @@ from app.evidence_engine.acquisition.models import (
     RetrievedSource,
     RoutingDecision,
 )
+from app.evidence_engine.acquisition.canonicalization import canonicalize_structured_fact
 from app.evidence_engine.acquisition.relevance import (
     sanitize_subject_relationship,
     strip_unrelated_third_party_dimensions,
@@ -182,12 +183,24 @@ def _sanitize_assessment_criteria(candidate: ExtractedClaimCandidate) -> Extract
     candidate genuinely relevant to one real dimension should not be
     rejected outright for also carrying one unrecognized label); this
     function is the separate, additive step that narrows the list
-    further, in three passes, each independently documented:
+    further, in four passes, each independently documented:
 
+    0. **Canonicalization** (Task 29 item 2, `acquisition/
+       canonicalization.py::canonicalize_structured_fact()`) -- applied
+       to `structured_fact` FIRST, before anything below reads it. Fixes
+       the `LIVE_EVALUATION_FISH_AUDIO_002.md` §5 ordering defect: a
+       person-identity-relevant fact's `person_id`, a numeric amount like
+       `"$52M"`, or an explicit-but-non-ISO date are all deterministically
+       derivable from what the model already grounded, and must be
+       canonical BEFORE the applicability check below reads them -- not
+       backfilled only later, in `claim_identity.py::finalize_claim()`,
+       by which point this function's own routing decision would already
+       be locked in on the stale, pre-canonical shape.
     1. **Vocabulary** (Task 21, unchanged) -- drop anything not a real
        dimension name at all.
-    2. **Deterministic eligibility+applicability routing** (Task 23 item
-       4, extended by Task 25 items 2-3, `routing.py::route_candidate()`)
+    2. **Deterministic eligibility+applicability+semantic-fit routing**
+       (Task 23 item 4, extended by Task 25 items 2-3 and Task 29 items
+       6-10, `routing.py::route_candidate()`)
        -- when `structured_fact.kind` is a recognized, kind-gated kind,
        keep only the tag(s) that kind's own consuming pillar dimension(s)
        actually are (ELIGIBILITY, unchanged from Task 23 -- this is what
@@ -223,6 +236,11 @@ def _sanitize_assessment_criteria(candidate: ExtractedClaimCandidate) -> Extract
     model merely failed to mention for an unrelated reason -- item 11's
     own "invalid model routing cannot broaden evidence" invariant), and
     never reject the candidate outright for losing every tag this way."""
+    if candidate.structured_fact is not None:
+        canonical_fact = canonicalize_structured_fact(candidate.structured_fact)
+        if canonical_fact != candidate.structured_fact:
+            candidate = candidate.model_copy(update={"structured_fact": canonical_fact})
+
     vocabulary_filtered = [d for d in candidate.assessment_criteria if d in KNOWN_DIMENSIONS]
     if vocabulary_filtered != candidate.assessment_criteria:
         candidate = candidate.model_copy(update={"assessment_criteria": vocabulary_filtered})
@@ -246,6 +264,7 @@ def _sanitize_assessment_criteria(candidate: ExtractedClaimCandidate) -> Extract
         proposed_subject_relationship=candidate.subject_relationship,
         final_subject_relationship=sanitized_relationship,
         relevance_removed_criteria=relevance_removed,
+        semantic_fit_status=decision.semantic_fit_status,
     )
 
     updates: dict[str, object] = {"routing_decision": routing_decision}

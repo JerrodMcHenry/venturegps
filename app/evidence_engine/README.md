@@ -256,8 +256,19 @@ legacy imports (`app.website_scrapper`, `app.pdf_extractor`, the latter currentl
   fictional ones) — see `docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` for the full matrix and
   findings, updated in Task 19 to also print company-level Coverage/Confidence/publishability per
   company (`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` for the analysis of those results).
-- **`tests/`** — **549 tests across 25 files**, all script-style (this repo's pytest is scoped to
-  `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 27** added
+- **`tests/`** — **608 tests across 28 files**, all script-style (this repo's pytest is scoped to
+  `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 29** (Task 28's own
+  live-validation remediation) added `acquisition/canonicalization.py` (deterministic person_id/numeric-
+  amount/explicit-date canonicalization, applied BEFORE routing's applicability check -- fixes a real
+  pipeline-ordering defect where `person_id` was backfilled only after routing had already decided a
+  fact "insufficient structure") and `acquisition/semantic_fit.py` (a third, independent gate, distinct
+  from grounding/schema/classifier-readiness/routing: does the excerpt actually support the SPECIFIC
+  categorical value chosen, not just "some claim it supports" -- catches `retention_signal="STRONG"`
+  assigned to adoption evidence and `competitive_structure="fragmented"` inferred from a bare competitor
+  list, both real Task 28 findings), plus three new test files: `test_canonicalization.py` (28),
+  `test_semantic_fit.py` (21), `test_task29_regression.py` (10, the five named Task 28 regression
+  fixtures end-to-end). See `docs/methodology/SEMANTIC_EVIDENCE_CONTRACT.md` and
+  `docs/methodology/CONTRACT_VALIDATION_001_REMEDIATION.md`. **Task 27** added
   `acquisition/fact_contracts.py` (no tests of its own file, but the canonical, code-derived
   `fact_kind -> required fields -> categorical vocabulary -> downstream consumer` contract every kind-
   gated kind now has — the cohort's own "typed and routed but classifier-unusable" gap,

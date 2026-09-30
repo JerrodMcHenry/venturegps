@@ -185,6 +185,14 @@ class RoutingDecision(BaseModel):
     proposed_subject_relationship: str | None = None
     final_subject_relationship: str | None = None
     relevance_removed_criteria: list[str] = Field(default_factory=list)
+    # Task 29 item 10/15: a `semantic_fit.SemanticFitStatus` value, stored
+    # as plain str (no import cycle) -- "not_applicable" (no rule exists
+    # for this kind), "supported", or "unsupported". Kept distinct from
+    # `status` above: a candidate can be structurally ROUTED and still
+    # have a SUPPORTED/NOT_APPLICABLE semantic_fit_status, or be UNROUTED_
+    # SEMANTICALLY_UNSUPPORTED specifically because this field is
+    # "unsupported" -- the two dimensions are never conflated.
+    semantic_fit_status: str = "not_applicable"
 
 
 class ClaimRoutingRecord(BaseModel):

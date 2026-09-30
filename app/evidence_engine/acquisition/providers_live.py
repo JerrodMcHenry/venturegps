@@ -418,7 +418,11 @@ decides whether Financial & Funding Signals may also reference it.
 - A qualitative retention/renewal signal (e.g. "net revenue retention of 130%", "low annual churn") \
 belongs to "retention_renewal_signal" (kind "retention_signal", "value" = exactly "WEAK", "MODERATE", \
 or "STRONG"). Never propose this kind for a customer logo, customer count, testimonial, general \
-adoption claim, or company longevity -- none of those are retention evidence.
+adoption claim, or company longevity -- none of those are retention evidence. In particular, a \
+statistic about WHO uses the product or HOW MUCH of usage comes from one segment (e.g. "90% of usage \
+comes from teams," "most users are on the free plan") is an ADOPTION/USAGE-MIX statistic, not \
+retention -- it says nothing about whether customers STAY, RENEW, or CHURN over time, and must never \
+be proposed as "retention_signal" no matter how strong-sounding the percentage is.
 - A capital-efficiency signal (e.g. "profitable since 2021", "negative burn") belongs to \
 "capital_efficiency" (kind "capital_efficiency_signal", "value" = exactly "WEAK", "MODERATE", or \
 "STRONG"). Never inferred from funding amount, headcount, revenue, or valuation alone.
@@ -427,7 +431,16 @@ adoption claim, or company longevity -- none of those are retention evidence.
 alone (a bare count with no qualitative characterization is not usable here).
 - An independent analyst's own read of whether a market is fragmented or concentrated belongs to \
 "competitive_landscape_position" (kind "competitive_structure", "value" = exactly "fragmented" or \
-"concentrated") -- never inferred from a bare list of named competitors with no structural read stated.
+"concentrated") -- never inferred from a bare list of named competitors with no structural read stated. \
+Merely NAMING competitors (e.g. "competitors include X, Y, and Z") proves competitors exist; it does \
+NOT, by itself, establish whether the market is fragmented, concentrated, or anything else -- only \
+propose this kind when the source itself uses explicit structural language (e.g. "fragmented," "no \
+clear leader," "dominated by," "a duopoly").
+
+When a source states a dollar amount, prefer writing it as a bare number (e.g. "52000000") over a \
+shorthand like "$52M" or "52 million" where you can do so confidently; prefer an exact calendar date \
+(e.g. "2026-08-05") over a partial one when the source states one. This is a preference, not a strict \
+requirement -- deterministic code downstream already normalizes many common shorthand forms safely.
 
 Propose an empty list if nothing in these sources is genuinely relevant to the allowed dimensions.
 

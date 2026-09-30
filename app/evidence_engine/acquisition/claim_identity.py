@@ -137,7 +137,7 @@ _PERSON_IDENTITY_RELEVANT_KINDS: frozenset[str] = frozenset({
 })
 
 
-def _backfill_person_id(fact: dict[str, str]) -> dict[str, str]:
+def backfill_person_id(fact: dict[str, str]) -> dict[str, str]:
     """Task 23, LINEAR_001 remediation item 6: `person_id` is never
     something the extractor is trusted to invent (`person_identity.py`'s
     own module docstring) -- when a person-identity-relevant fact
@@ -149,7 +149,21 @@ def _backfill_person_id(fact: dict[str, str]) -> dict[str, str]:
     named_entity, already has a person_id, or the name is too vague to
     safely resolve -- `normalize_person_name_to_id()` returning `None`
     is the fail-closed outcome for that last case, left as-is rather
-    than injecting a `None`/empty value)."""
+    than injecting a `None`/empty value).
+
+    Made public (Task 29 item 2/3): `acquisition/canonicalization.py`
+    calls this directly, reusing the exact same derivation, so a
+    person-identity-relevant candidate's `structured_fact` is already
+    canonical BEFORE `routing.py::route_candidate()`'s own applicability
+    check runs -- fixing the `LIVE_EVALUATION_FISH_AUDIO_002.md` §5
+    ordering defect (routing ran on the pre-backfill fact, permanently
+    stripping a dimension a moments-later-backfilled fact would have
+    kept). This function's own behavior and signature are unchanged;
+    only its name is now public, and `finalize_claim()` below still
+    calls it -- now a safe, idempotent no-op in the normal, routed path,
+    and still the only backfill path for any candidate that reaches
+    `finalize_claim()` without having gone through the acquisition
+    pipeline's own sanitization step first (e.g. a hand-built fixture)."""
     if fact.get("kind") not in _PERSON_IDENTITY_RELEVANT_KINDS:
         return fact
     if fact.get("person_id"):
@@ -176,13 +190,13 @@ def finalize_claim(
        dimensions is ALSO tagged `revenue_disclosure`, so Financial &
        Funding Signals' Revenue Disclosure references, rather than
        re-extracts, the exact same claim.
-    2. (Task 23 item 6) `_backfill_person_id()` above -- applied BEFORE
+    2. (Task 23 item 6) `backfill_person_id()` above -- applied BEFORE
        `compute_independence_group_id()` runs, so a backfilled
        `person_id` actually participates in identity-group assignment,
        and persisted onto the final `Claim.structured_fact` so `pillars/
        team_leadership.py::_confirmed_person_ids()` can read it back."""
     assessment_criteria = list(candidate.assessment_criteria)
-    fact = _backfill_person_id(candidate.structured_fact or {}) if candidate.structured_fact else None
+    fact = backfill_person_id(candidate.structured_fact or {}) if candidate.structured_fact else None
     if candidate.structured_fact is not None:
         candidate = candidate.model_copy(update={"structured_fact": fact})
     if (

@@ -61,6 +61,7 @@ from typing import Callable
 
 from app.evidence_engine.acquisition.fact_contracts import FACT_CONTRACTS, check_classifier_readiness
 from app.evidence_engine.acquisition.models import ExtractedClaimCandidate
+from app.evidence_engine.acquisition.semantic_fit import SemanticFitStatus, check_semantic_fit
 
 # One entry per structured_fact kind with a real, existing kind-gate in a
 # pillar file (or stage.py) -- the dimension name(s) that gate legitimately
@@ -265,6 +266,16 @@ class RoutingStatus(str, Enum):
     UNROUTED_INSUFFICIENT_STRUCTURE = "unrouted_insufficient_structure"
     UNROUTED_NO_METHODOLOGY_CONSUMER = "unrouted_no_methodology_consumer"
     REJECTED_INVALID_ROUTING = "rejected_invalid_routing"
+    # Task 29 item 10: a DISTINCT outcome from UNROUTED_INSUFFICIENT_
+    # STRUCTURE on purpose -- that status means the fact's own FIELDS
+    # don't meet its consumer's contract; this one means the fields are
+    # all present and schema-valid, but the claim's own text does not
+    # actually support the SPECIFIC categorical value chosen
+    # (semantic_fit.py). Two different failure classes with two
+    # different fixes (extraction completeness vs. extraction
+    # correctness) deserve two different, inspectable statuses, never
+    # folded into one opaque "insufficient" bucket.
+    UNROUTED_SEMANTICALLY_UNSUPPORTED = "unrouted_semantically_unsupported"
 
 
 @dataclass(frozen=True)
@@ -277,6 +288,12 @@ class RoutingResult:
     final_criteria: tuple[str, ...]
     removed_criteria: tuple[str, ...]
     added_criteria: tuple[str, ...]
+    # Task 29 item 10/15: the full, separate diagnostic stage --
+    # `SemanticFitStatus.value`, always set (even on paths this gate
+    # never blocks), so "semantically supported" and "semantically
+    # unsupported" are never collapsed into a boolean, and "no rule
+    # applies at all" is never confused with either.
+    semantic_fit_status: str = SemanticFitStatus.NOT_APPLICABLE.value
 
 
 def route_candidate(candidate: ExtractedClaimCandidate) -> RoutingResult:
@@ -335,6 +352,27 @@ def route_candidate(candidate: ExtractedClaimCandidate) -> RoutingResult:
         )
 
     eligible = FACT_KIND_ALLOWED_CRITERIA[kind]
+
+    # Task 29 item 6/10: semantic-fit is checked BEFORE structural
+    # applicability, as its own, separately-reasoned gate -- a kind with
+    # no defined rule (`NOT_APPLICABLE`) falls through to the unchanged
+    # structural flow below exactly as before this task; a kind WITH a
+    # rule that finds the claim's own text does not support the SPECIFIC
+    # value chosen short-circuits here, correctly, since (for every kind
+    # a rule currently exists for) `eligible` names exactly the one
+    # dimension that value would otherwise unlock -- there is no OTHER
+    # dimension a semantically-unsupported value could legitimately
+    # reach instead.
+    semantic = check_semantic_fit(fact, candidate.claim_text, candidate.excerpt)
+    if semantic.status == SemanticFitStatus.UNSUPPORTED:
+        return RoutingResult(
+            status=RoutingStatus.UNROUTED_SEMANTICALLY_UNSUPPORTED,
+            reason=f"kind={kind!r}: {semantic.reason}",
+            fact_kind=kind, proposed_criteria=proposed, eligible_criteria=tuple(sorted(eligible)),
+            final_criteria=(), removed_criteria=proposed, added_criteria=(),
+            semantic_fit_status=semantic.status.value,
+        )
+
     applicable = _applicable_criteria(kind, fact, eligible)
 
     from_proposal = tuple(c for c in proposed if c in applicable)
@@ -345,6 +383,7 @@ def route_candidate(candidate: ExtractedClaimCandidate) -> RoutingResult:
             reason=f"kind={kind!r}: the model's own proposal already named an applicable dimension",
             fact_kind=kind, proposed_criteria=proposed, eligible_criteria=tuple(sorted(eligible)),
             final_criteria=from_proposal, removed_criteria=removed, added_criteria=(),
+            semantic_fit_status=semantic.status.value,
         )
 
     # The deterministic FALLBACK (adding a tag the model never proposed
@@ -369,6 +408,7 @@ def route_candidate(candidate: ExtractedClaimCandidate) -> RoutingResult:
             ),
             fact_kind=kind, proposed_criteria=proposed, eligible_criteria=tuple(sorted(eligible)),
             final_criteria=final, removed_criteria=proposed, added_criteria=final,
+            semantic_fit_status=semantic.status.value,
         )
 
     if set(proposed) & eligible:
@@ -386,4 +426,5 @@ def route_candidate(candidate: ExtractedClaimCandidate) -> RoutingResult:
     return RoutingResult(
         status=status, reason=reason, fact_kind=kind, proposed_criteria=proposed,
         eligible_criteria=tuple(sorted(eligible)), final_criteria=(), removed_criteria=proposed, added_criteria=(),
+        semantic_fit_status=semantic.status.value,
     )
