@@ -145,6 +145,13 @@ class ExtractedClaimCandidate(BaseModel):
     assessment_criteria: list[str] = Field(default_factory=list)
     structured_fact: dict[str, str] | None = None
     support_status: SupportStatus = SupportStatus.DIRECTLY_SUPPORTED
+    # Task 23 (LINEAR_001 remediation item 9) -- OPTIONAL, additive,
+    # narrowing-only. One of `relevance.ALLOWED_SUBJECT_RELATIONSHIPS`,
+    # or None (unknown/not populated -- the permissive default; every
+    # candidate from before this task, and any extractor that simply
+    # doesn't set this, behaves exactly as it always has). See
+    # `relevance.py`'s own module docstring for the full rationale.
+    subject_relationship: str | None = None
 
 
 class ClaimRejectionReason(str, Enum):

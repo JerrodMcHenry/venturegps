@@ -104,6 +104,7 @@ from app.evidence_engine.acquisition.extraction import (
     KNOWN_FACT_KINDS,
     validate_candidate,
 )
+from app.evidence_engine.acquisition.relevance import SubjectRelationship
 from app.evidence_engine.models import SupportStatus
 from app.website_scrapper import WebsiteFetchError, extract_text_from_website
 
@@ -364,8 +365,40 @@ copy it character-for-character, never paraphrase, never summarize
 - "assessment_criteria": one or more dimension names from this exact allowed list: {allowed_dimensions}
 - "structured_fact": OPTIONAL. If present, set "kind" to one of this exact allowed list: \
 {allowed_kinds} -- and leave every other field null unless it genuinely applies. Never treat any \
-field as a place to put a score, rating, grade, or confidence value.
+field as a place to put a score, rating, grade, or confidence value. Note: deterministic code will \
+independently re-check that your "assessment_criteria" choice is actually consistent with the "kind" \
+you set -- an inconsistent pairing is corrected, not trusted -- so always set BOTH accurately rather \
+than picking whichever "kind" seems to unlock more dimensions.
 - "support_status": "directly_supported" or "inferred" (default "directly_supported")
+- "subject_relationship": one of "primary" (this fact is directly about the company you are \
+researching), "product_integration" (an official integration/partnership the company's own product \
+participates in), "customer_or_partner" (a customer or business-partner relationship involving the \
+company), or "unrelated_third_party" (a DIFFERENT party's own project/product that merely mentions \
+or uses the company -- not evidence about the company's own capabilities). When unsure, prefer the \
+more conservative category rather than "primary".
+
+Routing guidance for common cross-cutting facts (deterministic code enforces the FIRST two of these; \
+get them right so your evidence is not silently narrowed to only part of what you found):
+- A funding round (amount raised, round type such as Series A/B/C, investors, valuation) belongs to \
+"funding_history" (kind "funding_round") and, when a round type/stage label is stated, ALSO to \
+"stage_signal" (kind "funding_round_type", value = the round type, e.g. "Series C"). Do not tag a \
+funding-round fact with a traction, revenue, execution, market, or team dimension -- those describe \
+different things even when a funding article also mentions them in passing.
+- A named person's prior employer, role, or background (e.g. "previously Head of Design at X") \
+belongs to "founder_relevant_experience" (kind "founder_experience", with "named_entity" set to that \
+person's real name) when the person is a founder, and/or "team_identity" for a plain identity/role \
+fact (co-founder/CEO/CTO/etc., kind "team_identity", "named_entity" = the person's real name, "role" = \
+their title). Always set "named_entity" to the person's actual name (never a vague title like "the \
+CEO") when you can -- deterministic code derives a stable person identity from that name, never from \
+your own guess at an id.
+- Dated, first-party release/changelog/announcement evidence belongs to "shipping_velocity" (kind \
+"product_release", "status" = "announced" if only planned/previewed, "launched" if actually shipped \
+and available now -- never mark something "launched" merely because it was announced).
+- Revenue-scale evidence (ARR, MRR, revenue, bookings, GMV) belongs ONLY to "disclosed_scale" and/or \
+"growth_trajectory" (kind "traction_metric", "metric" = the exact metric name, e.g. "revenue" or \
+"ARR"). Never propose "revenue_disclosure" yourself for this kind of fact -- a separate, deterministic \
+rule decides whether Financial & Funding Signals may also reference it; your job is only to record the \
+metric correctly under Commercial Traction's own dimensions.
 
 Propose an empty list if nothing in these sources is genuinely relevant to the allowed dimensions.
 
@@ -461,6 +494,13 @@ class _CandidateSchema(BaseModel):
     assessment_criteria: list[str]
     structured_fact: _StructuredFactSchema | None = None
     support_status: SupportStatus = SupportStatus.DIRECTLY_SUPPORTED
+    # Task 23 item 9 -- see relevance.py's own module docstring. Optional
+    # so a `.parse()` response omitting it still parses (Pydantic treats
+    # a field with a default as not required in the strict schema
+    # OpenAI's own SDK generates); `_schema_candidate_to_extracted()`
+    # below still passes it through `sanitize_subject_relationship()`
+    # exactly as if a non-schema-enforced provider had supplied it.
+    subject_relationship: SubjectRelationship | None = None
 
 
 class _ExtractionResponseSchema(BaseModel):
@@ -477,6 +517,7 @@ def _schema_candidate_to_extracted(c: _CandidateSchema) -> ExtractedClaimCandida
         source_id=c.source_id, claim_text=c.claim_text, subject_entity=c.subject_entity,
         excerpt=c.excerpt, assessment_criteria=list(c.assessment_criteria),
         structured_fact=fact, support_status=c.support_status,
+        subject_relationship=c.subject_relationship.value if c.subject_relationship else None,
     )
 
 

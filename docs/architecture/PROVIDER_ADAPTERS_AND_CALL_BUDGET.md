@@ -1,13 +1,15 @@
-# Provider Adapters & Acquisition Call Budget (Task 21, hardened by Task 21A)
+# Provider Adapters & Acquisition Call Budget (Task 21, hardened by Task 21A, routing/relevance layer added Task 23)
 
 **Status: real (but never-invoked) provider adapters for all three Task 20 Protocols exist
 (`app/evidence_engine/acquisition/providers_live.py`), now including a deterministic batch
 character-budget enforcer, an explicit OpenAI output-token ceiling, API-enforced JSON-schema
-structured output (replacing free-form `.create()` + `json.loads()`), and a single combined
-OpenAI retry-attempt owner (worst case cut from 36 to 12 real HTTP attempts). 445 tests across 21
-files, all passing against deterministic fakes and mocked SDK clients only. No Tavily call, no
-OpenAI call, no live HTTP fetch, and no analysis of a real company was performed or attempted at
-any point in either task.**
+structured output (replacing free-form `.create()` + `json.loads()`), a single combined
+OpenAI retry-attempt owner (worst case cut from 36 to 12 real HTTP attempts), and (Task 23) a
+deterministic assessment-criteria routing/relevance layer plus person-identity normalization. 477
+tests across 22 files, all passing against deterministic fakes and mocked SDK clients only. No
+Tavily call, no OpenAI call, no live HTTP fetch, and — except for exactly one explicitly-approved
+Task 22 run (see `docs/methodology/LIVE_EVALUATION_LINEAR_001.md`) — no analysis of a real company
+was performed or attempted at any point covered by this document.**
 
 This document does not restate `EVIDENCE_ACQUISITION_PIPELINE.md` (Task 20's own pipeline-stage
 reference, still accurate) or `NEW_ENGINE_E2E_EVALUATION.md` (Task 20's own scenario/readiness
@@ -19,6 +21,25 @@ SDK actually supports schema-enforced structured output, and an excessive 36-cal
 case); §0 records exactly what changed to close them. §10 (retry ownership), §13 (token/cost
 accounting), §14 (call-graph), and §15 (live-run readiness) are updated in place with the new
 figures; every other section describes Task 21's original, still-accurate work.
+
+**§0a — Task 23 (LINEAR_001 remediation), routing/relevance/identity.** After Task 22's own
+one live run exposed real acquisition-quality defects (not provider-boundary ones — every provider
+call in that run succeeded), three new modules were added between extraction and ledger
+construction: `acquisition/routing.py` (a deterministic `structured_fact.kind` → allowed
+`assessment_criteria` map, derived directly from the six pillar files' own `kind ==`/`!=` checks —
+narrows what an already-proposed dimension tag may reach, never widens it), `acquisition/
+relevance.py` (an optional, four-value `subject_relationship` field stripping four kind-agnostic,
+company-quality-claiming dimensions from a candidate explicitly marked
+`unrelated_third_party`), and `acquisition/person_identity.py` (deterministic name→id
+normalization, backfilling `person_id` from an extracted `named_entity` rather than trusting the
+model to invent one). `extraction.py::_sanitize_assessment_criteria()` now applies both narrowing
+passes; `claim_identity.py::finalize_claim()` applies the person-identity backfill. The extraction
+system prompt (`providers_live.py`) gained explicit routing guidance for funding/founder/release/
+revenue facts and the new `subject_relationship` field. Full record, including the exact LINEAR_001
+defect each change addresses:
+`docs/methodology/LINEAR_001_REMEDIATION.md`. None of this changed the provider adapters, the
+character/token/retry budgets, or the call-graph figures below — those remain exactly as Task 21A
+left them.
 
 ## 0. Task 21A addendum — live-run preflight hardening
 

@@ -488,7 +488,11 @@ def test_render_batch_request_gives_a_shorter_source_its_full_content_and_redist
         ExtractionRequest(source=_source(url="https://x.example/short", content=short_content), target_dimensions=("product_existence_maturity",), company_name="TestCo"),
         ExtractionRequest(source=_source(url="https://x.example/long", content="v" * 6000), target_dimensions=("product_existence_maturity",), company_name="TestCo"),
     ]
-    _system, user_prompt, outcomes = live._render_batch_request(reqs, 4_500)
+    # 8,000 (not the tighter 4,500 originally used) -- Task 23 lengthened
+    # the system prompt with new routing/relevance guidance, so this
+    # budget must comfortably exceed that longer prompt's own overhead
+    # for the test to still exercise water-filling rather than exclusion.
+    _system, user_prompt, outcomes = live._render_batch_request(reqs, 8_000)
     short_outcome = next(o for o in outcomes if o.source_id == reqs[0].source.source_id)
     long_outcome = next(o for o in outcomes if o.source_id == reqs[1].source.source_id)
     expect(not short_outcome.truncated and short_outcome.allocated_chars == len(short_content), str(short_outcome))

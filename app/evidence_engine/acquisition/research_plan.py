@@ -40,7 +40,23 @@ _TOPIC_QUERY_TEMPLATES: dict[ResearchTopic, tuple[tuple[str, tuple[str, ...]], .
         ("{company} review comparison independent", ("differentiation_claim_corroboration", "defensibility_signal")),
     ),
     ResearchTopic.MARKET_AND_COMPETITION: (
-        ("{company} market size industry category", ("market_definition_size", "market_growth_signal")),
+        # Task 23 (LINEAR_001 remediation item 8): replaces the original
+        # "{company} market size industry category" wording -- unchanged
+        # query COUNT (still 1 of this topic's 2 queries), a text-only
+        # refinement. LINEAR_001's actual run used the original wording
+        # verbatim and surfaced competitor-comparison pages (ramp.com,
+        # seeto.ai) rather than an independent market-sizing report, even
+        # though one demonstrably exists and is publicly indexed (the
+        # prior manually-curated fixture found one via different search
+        # terms). "Report"/"analysis" bias the query toward the CONTENT
+        # TYPE an analyst market-sizing report actually is, rather than
+        # toward general competitor/category pages -- a wording change
+        # that generalizes to any company's own market (no category or
+        # domain is named), not a Linear-specific fix. Whether this
+        # actually improves recall is explicitly NOT claimed here (item
+        # 14's own "do not claim Market will publish" without a live
+        # re-run) -- see LINEAR_001_REMEDIATION.md for the same caveat.
+        ("{company} total addressable market size report analysis", ("market_definition_size", "market_growth_signal")),
         ("{company} competitors competitive landscape", ("competitive_landscape_position", "timing_catalyst")),
     ),
     ResearchTopic.TEAM_AND_LEADERSHIP: (
@@ -52,7 +68,27 @@ _TOPIC_QUERY_TEMPLATES: dict[ResearchTopic, tuple[tuple[str, tuple[str, ...]], .
         ("{company} growth retention case study", ("growth_trajectory", "retention_renewal_signal", "commercial_validation")),
     ),
     ResearchTopic.EXECUTION_AND_SHIPPING: (
-        ("{company} changelog product launch release", ("shipping_velocity",)),
+        # Task 23 (LINEAR_001 remediation item 7): replaces the original
+        # "{company} changelog product launch release" wording -- same
+        # query COUNT (still 1 of this topic's 2), a text-only
+        # refinement. LINEAR_001 ran the original wording verbatim and
+        # never retrieved the company's own real, public, crawlable
+        # changelog, even though the prior manually-curated fixture used
+        # exactly that page directly. "Official changelog release notes
+        # product updates" names the three standard first-party page
+        # types companies actually use for this (changelog / release
+        # notes / product updates / newsroom-blog, per item 7's own
+        # list) -- a wording change that generalizes to any company
+        # (no domain or company-specific path is named), not a
+        # Linear-specific fix. A domain-biased search using the
+        # company's own already-known website (still generic, not
+        # Linear-specific) would likely help further but is a deeper
+        # architecture change (passing `website_url` into `SearchProvider.
+        # search()`) this task did not make -- named as follow-up work in
+        # LINEAR_001_REMEDIATION.md, not attempted here. Whether this
+        # wording change actually improves recall is explicitly NOT
+        # claimed without a live re-run (item 14).
+        ("{company} official changelog release notes product updates", ("shipping_velocity",)),
         ("{company} partnership sales go-to-market", ("gtm_motion_evidence", "strategic_consistency")),
     ),
     ResearchTopic.FUNDING_AND_FINANCIALS: (

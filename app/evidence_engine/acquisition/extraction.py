@@ -48,6 +48,14 @@ from app.evidence_engine.acquisition.models import (
     RejectedClaimCandidate,
     RetrievedSource,
 )
+from app.evidence_engine.acquisition.relevance import (
+    sanitize_subject_relationship,
+    strip_unrelated_third_party_dimensions,
+)
+from app.evidence_engine.acquisition.routing import (
+    route_assessment_criteria,
+    strip_kind_agnostic_dimensions_for_owned_kind,
+)
 from app.evidence_engine.acquisition.providers import EvidenceExtractor
 
 _WHITESPACE = re.compile(r"\s+")
@@ -168,21 +176,56 @@ def validate_candidate(
 
 
 def _sanitize_assessment_criteria(candidate: ExtractedClaimCandidate) -> ExtractedClaimCandidate:
-    """Filters `assessment_criteria` down to only recognized dimension
-    names before a candidate is finalized into a `Claim` (Task 21 item
-    14). `validate_candidate` above only requires that AT LEAST ONE
-    listed criterion be recognized (item 9's own original rule, unchanged
-    -- a candidate genuinely relevant to one real dimension should not be
+    """Filters `assessment_criteria` down to only recognized, LEGITIMATE
+    dimension names before a candidate is finalized into a `Claim`
+    (Task 21 item 14, extended by Task 23's own LINEAR_001 remediation).
+    `validate_candidate` above only requires that AT LEAST ONE listed
+    criterion be recognized (item 9's own original rule, unchanged -- a
+    candidate genuinely relevant to one real dimension should not be
     rejected outright for also carrying one unrecognized label); this
-    function is the separate, additive step that then drops the
-    unrecognized ones rather than letting them ride along into the
-    ledger, where `cross_pillar_audit.py`/pillar evaluators would either
-    silently ignore them (harmless) or, worse, be extended later by code
-    that trusts `assessment_criteria` as already-validated."""
-    kept = [d for d in candidate.assessment_criteria if d in KNOWN_DIMENSIONS]
-    if kept == candidate.assessment_criteria:
+    function is the separate, additive step that narrows the list
+    further, in three passes, each independently documented:
+
+    1. **Vocabulary** (Task 21, unchanged) -- drop anything not a real
+       dimension name at all.
+    2. **Deterministic kind-based routing** (Task 23 item 4,
+       `routing.py`) -- when `structured_fact.kind` is a recognized,
+       kind-gated kind, keep only the tag(s) that kind's own consuming
+       pillar dimension(s) actually are. This is what stops (for
+       example) a real funding-round fact from ALSO riding into an
+       unrelated dimension the model happened to also propose --
+       LINEAR_001's own single highest-impact finding.
+    3. **Relevance** (Task 23 item 9, `relevance.py`) -- when the
+       extractor marked a candidate `unrelated_third_party`, drop the
+       four kind-agnostic, company-quality-claiming dimensions that have
+       no positive kind-gate of their own and would otherwise have no
+       structural defense against exactly this case (LINEAR_001's own
+       dev.to hobbyist-tool finding).
+
+    Passes never ADD a tag the model did not propose, and never reject
+    the candidate outright for losing every tag this way -- unchanged
+    from Task 21's own "drop the unrecognized ones rather than letting
+    them ride along" behavior, now with two more reasons a tag might be
+    dropped."""
+    vocabulary_filtered = [d for d in candidate.assessment_criteria if d in KNOWN_DIMENSIONS]
+    if vocabulary_filtered != candidate.assessment_criteria:
+        candidate = candidate.model_copy(update={"assessment_criteria": vocabulary_filtered})
+
+    routed = route_assessment_criteria(candidate)
+    fact_kind = candidate.structured_fact.get("kind") if candidate.structured_fact else None
+    routed = strip_kind_agnostic_dimensions_for_owned_kind(routed, fact_kind)
+
+    sanitized_relationship = sanitize_subject_relationship(candidate.subject_relationship)
+    routed = strip_unrelated_third_party_dimensions(routed, sanitized_relationship)
+
+    updates: dict[str, object] = {}
+    if routed != candidate.assessment_criteria:
+        updates["assessment_criteria"] = routed
+    if sanitized_relationship != candidate.subject_relationship:
+        updates["subject_relationship"] = sanitized_relationship
+    if not updates:
         return candidate
-    return candidate.model_copy(update={"assessment_criteria": kept})
+    return candidate.model_copy(update=updates)
 
 
 def extract_with_recovery(

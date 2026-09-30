@@ -34,6 +34,7 @@ import re
 from datetime import date
 
 from app.evidence_engine.acquisition.models import ExtractedClaimCandidate, RetrievedSource
+from app.evidence_engine.acquisition.person_identity import normalize_person_name_to_id
 from app.evidence_engine.models import Claim
 
 _WHITESPACE = re.compile(r"\s+")
@@ -95,6 +96,22 @@ IDENTITY_KEY_FIELDS: dict[str, tuple[str, ...]] = {
     "strategic_statement": ("topic",),
     "funding_round_type": (),
     "founding_year": (),
+    # Task 23 (LINEAR_001 remediation, item 5's own "inspect why structured-
+    # fact population is low"): these three kinds were already read by
+    # `pillars/team_leadership.py`/`pillars/commercial_traction.py` --
+    # `leadership_hire`/`founders_only_confirmed` gate Leadership
+    # Composition, `retention_signal` gates Retention/Renewal Signal --
+    # but were missing from this table. Since `extraction.py::KNOWN_
+    # FACT_KINDS` is built directly from this table's own keys (Task 21),
+    # this gap meant a real, legitimately-typed candidate of one of these
+    # three kinds would have been rejected outright by `validate_
+    # candidate()`'s `INVALID_FACT_KIND` check -- a genuine bug, not a
+    # hypothetical one, caught by re-deriving this table from the pillars'
+    # own actual `kind ==`/`!=` checks rather than trusting it was already
+    # complete.
+    "leadership_hire": ("named_entity",),
+    "founders_only_confirmed": (),
+    "retention_signal": (),
 }
 
 
@@ -115,24 +132,62 @@ def compute_independence_group_id(candidate: ExtractedClaimCandidate, company_re
     return _hash(company_ref, "text", _normalize_text(candidate.claim_text))
 
 
+_PERSON_IDENTITY_RELEVANT_KINDS: frozenset[str] = frozenset({
+    "team_identity", "founder_experience", "track_record", "leadership_hire",
+})
+
+
+def _backfill_person_id(fact: dict[str, str]) -> dict[str, str]:
+    """Task 23, LINEAR_001 remediation item 6: `person_id` is never
+    something the extractor is trusted to invent (`person_identity.py`'s
+    own module docstring) -- when a person-identity-relevant fact
+    carries a `named_entity` (the person's own name, which the
+    extractor already reliably supplies) but no `person_id`, this
+    deterministically derives one from that name and backfills it,
+    NEVER overwriting a `person_id` the model did supply. Returns the
+    SAME dict, unchanged, when no backfill applies (no kind match, no
+    named_entity, already has a person_id, or the name is too vague to
+    safely resolve -- `normalize_person_name_to_id()` returning `None`
+    is the fail-closed outcome for that last case, left as-is rather
+    than injecting a `None`/empty value)."""
+    if fact.get("kind") not in _PERSON_IDENTITY_RELEVANT_KINDS:
+        return fact
+    if fact.get("person_id"):
+        return fact
+    named_entity = fact.get("named_entity")
+    if not named_entity:
+        return fact
+    person_id = normalize_person_name_to_id(named_entity)
+    if person_id is None:
+        return fact
+    return {**fact, "person_id": person_id}
+
+
 def finalize_claim(
     candidate: ExtractedClaimCandidate, source: RetrievedSource, company_ref: str,
 ) -> Claim:
     """Builds the real, canonical `Claim` from an already-grounding-
     validated candidate (`extraction.py::validate_candidate` must have
     already accepted it -- this function does not re-validate). Applies
-    the one deterministic cross-pillar reuse rule this engine currently
-    has (item 14, spec Part 3.1): a specifically-revenue `traction_
-    metric` claim tagged for Commercial Traction's own dimensions is
-    ALSO tagged `revenue_disclosure`, so Financial & Funding Signals'
-    Revenue Disclosure references, rather than re-extracts, the exact
-    same claim -- the same mechanism Task 17 proved with real Stripe
-    data, now applied automatically at acquisition time rather than by a
-    human hand-editing `assessment_criteria` after the fact."""
+    two deterministic, additive rules before construction:
+
+    1. (Task 17, spec Part 3.1, unchanged) a specifically-revenue
+       `traction_metric` claim tagged for Commercial Traction's own
+       dimensions is ALSO tagged `revenue_disclosure`, so Financial &
+       Funding Signals' Revenue Disclosure references, rather than
+       re-extracts, the exact same claim.
+    2. (Task 23 item 6) `_backfill_person_id()` above -- applied BEFORE
+       `compute_independence_group_id()` runs, so a backfilled
+       `person_id` actually participates in identity-group assignment,
+       and persisted onto the final `Claim.structured_fact` so `pillars/
+       team_leadership.py::_confirmed_person_ids()` can read it back."""
     assessment_criteria = list(candidate.assessment_criteria)
-    fact = candidate.structured_fact or {}
+    fact = _backfill_person_id(candidate.structured_fact or {}) if candidate.structured_fact else None
+    if candidate.structured_fact is not None:
+        candidate = candidate.model_copy(update={"structured_fact": fact})
     if (
-        fact.get("kind") == "traction_metric"
+        fact
+        and fact.get("kind") == "traction_metric"
         and fact.get("metric") == "revenue"
         and "revenue_disclosure" not in assessment_criteria
     ):

@@ -207,6 +207,24 @@ legacy imports (`app.website_scrapper`, `app.pdf_extractor`, the latter currentl
   in-memory stub after construction. See `docs/architecture/PROVIDER_ADAPTERS_AND_CALL_BUDGET.md`
   for the full record, including the live-run readiness update and the call-graph comparison against
   Task 20's own worst-case figures.
+- **`acquisition/routing.py`, `relevance.py`, `person_identity.py`** (Task 23 — LINEAR_001
+  remediation, after Task 22's own first live run) — a deterministic layer between extraction and
+  ledger construction, added because the live run's single highest-impact defect was NOT grounding
+  or provider reliability but the extractor tagging real, correctly-grounded evidence with the
+  wrong `assessment_criteria`. `routing.py`'s `FACT_KIND_ALLOWED_CRITERIA` (derived directly from
+  every pillar file's own `structured_fact.kind` checks, not invented) intersects a candidate's
+  proposed criteria against what its `kind` can actually reach — a funding round can no longer also
+  count toward Product & Technology, a founder's background can no longer be misfiled away from
+  `founder_relevant_experience`. `relevance.py` adds an optional `subject_relationship` field
+  (`primary`/`product_integration`/`customer_or_partner`/`unrelated_third_party`) stripping the four
+  kind-agnostic Product & Technology dimensions from a claim explicitly marked as being about an
+  unrelated third party (the live run's own "dev.to hobbyist tool" finding), while never touching
+  legitimate ecosystem/partner evidence. `person_identity.py` deterministically derives a stable
+  `person_id` from an extracted person's real name (never trusting the model to invent one, never
+  inferring identity from a vague title like "the CEO") — `claim_identity.py::finalize_claim()`
+  backfills it when missing, fixing the live run's own two-independent-sources-not-recognized-as-
+  corroborating gap. Full defect-by-defect record, including what remains genuinely unverified until
+  a second live run: `docs/methodology/LINEAR_001_REMEDIATION.md`.
 - **`fixtures/`** — Notion, Linear (real companies), Auroraflow, Pathlight, DupliCo (fictional,
   each built to stress a specific mechanism; offline, hand-authored) — Product & Technology only.
   **Task 18** added two more fictional, fully-offline companies spanning all six pillars: `beacon_
@@ -238,8 +256,13 @@ legacy imports (`app.website_scrapper`, `app.pdf_extractor`, the latter currentl
   fictional ones) — see `docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` for the full matrix and
   findings, updated in Task 19 to also print company-level Coverage/Confidence/publishability per
   company (`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` for the analysis of those results).
-- **`tests/`** — **445 tests across 21 files**, all script-style (this repo's pytest is scoped to
-  `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 19** added
+- **`tests/`** — **477 tests across 22 files**, all script-style (this repo's pytest is scoped to
+  `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 23** added
+  `test_extraction_routing_remediation.py` (32 tests) — deterministic fact-kind routing, the five
+  item-10 adversarial cross-pillar-routing cases, person-identity normalization/backfill (the exact
+  LINEAR_001 two-independent-source shape), release/market representability, and relevance
+  (`subject_relationship`) stripping; see `docs/methodology/LINEAR_001_REMEDIATION.md`. **Task 19**
+  added
   `test_calibration_aggregation.py` (29 tests): the six controlled Confidence fixtures item 9 of that
   task asked for (proving Low/Medium/High correspond to meaningfully different evidence states, not
   just that the mechanism runs), the new company-level Coverage/Confidence/publishability
