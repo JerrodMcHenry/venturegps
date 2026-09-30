@@ -47,15 +47,13 @@ from app.evidence_engine.acquisition.models import (
     ExtractionResponse,
     RejectedClaimCandidate,
     RetrievedSource,
+    RoutingDecision,
 )
 from app.evidence_engine.acquisition.relevance import (
     sanitize_subject_relationship,
     strip_unrelated_third_party_dimensions,
 )
-from app.evidence_engine.acquisition.routing import (
-    route_assessment_criteria,
-    strip_kind_agnostic_dimensions_for_owned_kind,
-)
+from app.evidence_engine.acquisition.routing import route_candidate
 from app.evidence_engine.acquisition.providers import EvidenceExtractor
 
 _WHITESPACE = re.compile(r"\s+")
@@ -188,13 +186,23 @@ def _sanitize_assessment_criteria(candidate: ExtractedClaimCandidate) -> Extract
 
     1. **Vocabulary** (Task 21, unchanged) -- drop anything not a real
        dimension name at all.
-    2. **Deterministic kind-based routing** (Task 23 item 4,
-       `routing.py`) -- when `structured_fact.kind` is a recognized,
-       kind-gated kind, keep only the tag(s) that kind's own consuming
-       pillar dimension(s) actually are. This is what stops (for
-       example) a real funding-round fact from ALSO riding into an
-       unrelated dimension the model happened to also propose --
-       LINEAR_001's own single highest-impact finding.
+    2. **Deterministic eligibility+applicability routing** (Task 23 item
+       4, extended by Task 25 items 2-3, `routing.py::route_candidate()`)
+       -- when `structured_fact.kind` is a recognized, kind-gated kind,
+       keep only the tag(s) that kind's own consuming pillar dimension(s)
+       actually are (ELIGIBILITY, unchanged from Task 23 -- this is what
+       stops a real funding-round fact from ALSO riding into an unrelated
+       dimension the model happened to also propose, LINEAR_001's own
+       single highest-impact finding). Task 25 adds APPLICABILITY on top:
+       when the model's own proposal names no applicable dimension at
+       all, but the fact's own fields are sufficient by that dimension's
+       real evidence contract, `route_candidate()` deterministically
+       routes it anyway -- fixing `LIVE_EVALUATION_LINEAR_002.md`'s own
+       new finding, where a correctly-typed `funding_round`/`founding_
+       year` fact silently ended up with `assessment_criteria == []`
+       because the model's proposal, though present, named nothing
+       eligible, and nothing then checked whether the RESULT was still
+       usable.
     3. **Relevance** (Task 23 item 9, `relevance.py`) -- when the
        extractor marked a candidate `unrelated_third_party`, drop the
        four kind-agnostic, company-quality-claiming dimensions that have
@@ -202,29 +210,49 @@ def _sanitize_assessment_criteria(candidate: ExtractedClaimCandidate) -> Extract
        structural defense against exactly this case (LINEAR_001's own
        dev.to hobbyist-tool finding).
 
-    Passes never ADD a tag the model did not propose, and never reject
-    the candidate outright for losing every tag this way -- unchanged
-    from Task 21's own "drop the unrecognized ones rather than letting
-    them ride along" behavior, now with two more reasons a tag might be
-    dropped."""
+    The full decision (proposed/eligible/final/removed/added criteria,
+    routing status and reason, proposed vs. final subject_relationship)
+    is attached to the returned candidate's own `routing_decision` field
+    (Task 25 item 7/9) -- never persisted onto the final `Claim` (item 8's
+    own "rather than polluting core scoring models"); `pipeline.py`
+    pairs it with the finalized `claim_id` once one exists.
+
+    Passes never ADD a tag the model did not propose UNLESS `route_
+    candidate()`'s own deterministic-fallback branch fires (which itself
+    only ever adds a tag the FACT's own fields justify, never one the
+    model merely failed to mention for an unrelated reason -- item 11's
+    own "invalid model routing cannot broaden evidence" invariant), and
+    never reject the candidate outright for losing every tag this way."""
     vocabulary_filtered = [d for d in candidate.assessment_criteria if d in KNOWN_DIMENSIONS]
     if vocabulary_filtered != candidate.assessment_criteria:
         candidate = candidate.model_copy(update={"assessment_criteria": vocabulary_filtered})
 
-    routed = route_assessment_criteria(candidate)
-    fact_kind = candidate.structured_fact.get("kind") if candidate.structured_fact else None
-    routed = strip_kind_agnostic_dimensions_for_owned_kind(routed, fact_kind)
+    decision = route_candidate(candidate)
+    after_routing = list(decision.final_criteria)
 
     sanitized_relationship = sanitize_subject_relationship(candidate.subject_relationship)
-    routed = strip_unrelated_third_party_dimensions(routed, sanitized_relationship)
+    after_relevance = strip_unrelated_third_party_dimensions(after_routing, sanitized_relationship)
+    relevance_removed = [c for c in after_routing if c not in after_relevance]
 
-    updates: dict[str, object] = {}
-    if routed != candidate.assessment_criteria:
-        updates["assessment_criteria"] = routed
+    routing_decision = RoutingDecision(
+        status=decision.status.value,
+        reason=decision.reason,
+        fact_kind=decision.fact_kind,
+        proposed_criteria=list(decision.proposed_criteria),
+        eligible_criteria=list(decision.eligible_criteria),
+        final_criteria=after_relevance,
+        removed_criteria=list(decision.removed_criteria),
+        added_criteria=list(decision.added_criteria),
+        proposed_subject_relationship=candidate.subject_relationship,
+        final_subject_relationship=sanitized_relationship,
+        relevance_removed_criteria=relevance_removed,
+    )
+
+    updates: dict[str, object] = {"routing_decision": routing_decision}
+    if after_relevance != candidate.assessment_criteria:
+        updates["assessment_criteria"] = after_relevance
     if sanitized_relationship != candidate.subject_relationship:
         updates["subject_relationship"] = sanitized_relationship
-    if not updates:
-        return candidate
     return candidate.model_copy(update=updates)
 
 

@@ -28,7 +28,7 @@ Concretely, and non-negotiably:
     valuation; multiple financing rounds -- none of these, by themselves,
     establish profitability, margins, unit economics, burn efficiency,
     runway, or financial sustainability. `Funding History`'s own parser
-    (`_parse_funding_round`) recognizes only `structured_fact.kind ==
+    (`parse_funding_round`) recognizes only `structured_fact.kind ==
     "funding_round"`; `Capital Efficiency`'s own classifier recognizes
     only `structured_fact.kind == "capital_efficiency_signal"`. Neither
     has any code path into the other's label or score.
@@ -180,7 +180,51 @@ class _FundingRound:
     round_date: date
 
 
-def _parse_funding_round(claim: Claim) -> _FundingRound | None:
+def funding_round_fields_are_sufficient(fact: dict[str, str] | None) -> bool:
+    """The pure, dict-level half of `parse_funding_round()`'s own
+    well-formedness check -- split out (Task 25) so `acquisition/
+    routing.py` can determine, at ACQUISITION time (before a `Claim`
+    even exists), whether a `funding_round` fact is structurally
+    sufficient to ever legitimately reach `funding_history` -- without
+    duplicating this exact five-field contract as a second, parallel
+    check that could drift from it. `parse_funding_round()` below is now
+    written in terms of this function; nothing about its own behavior on
+    a real `Claim` changed."""
+    fact = fact or {}
+    if fact.get("kind") != "funding_round":
+        return False
+    if fact.get("status") != "completed":
+        # "Announced" (not yet closed) financing is explicitly distinct
+        # (item 7) and never counts toward a completed round's total.
+        return False
+    if fact.get("financing_type") not in P.FUNDING_HISTORY_COUNTED_FINANCING_TYPES:
+        # Debt, grants, and tender-offer/secondary transactions are
+        # retained in the ledger but do not carry "equity", so they never
+        # reach this point (module docstring).
+        return False
+    if fact.get("currency") != "USD":
+        # No FX normalization exists in this engine (the same documented
+        # limitation Commercial Traction's own Disclosed Scale already
+        # has, Task 15) -- a non-USD round is retained but not usable here.
+        return False
+    raw_amount = fact.get("amount")
+    raw_date = fact.get("round_date")
+    if not raw_amount or not raw_date:
+        return False
+    try:
+        amount = float(raw_amount)
+    except ValueError:
+        return False
+    if amount <= 0:
+        return False
+    try:
+        date.fromisoformat(raw_date)
+    except ValueError:
+        return False
+    return True
+
+
+def parse_funding_round(claim: Claim) -> _FundingRound | None:
     """Returns None (never raises) for any claim that isn't a well-formed,
     completed, equity-financed, USD-denominated round -- fails closed on
     ambiguous input rather than guessing. A claim whose `structured_fact.
@@ -190,36 +234,10 @@ def _parse_funding_round(claim: Claim) -> _FundingRound | None:
     `assessment_criteria` it carries -- cross-pillar/cross-kind leakage
     prevented mechanically, not by convention."""
     fact = claim.structured_fact or {}
-    if fact.get("kind") != "funding_round":
+    if not funding_round_fields_are_sufficient(fact):
         return None
-    if fact.get("status") != "completed":
-        # "Announced" (not yet closed) financing is explicitly distinct
-        # (item 7) and never counts toward a completed round's total.
-        return None
-    if fact.get("financing_type") not in P.FUNDING_HISTORY_COUNTED_FINANCING_TYPES:
-        # Debt, grants, and tender-offer/secondary transactions are
-        # retained in the ledger but do not carry "equity", so they never
-        # reach this point (module docstring).
-        return None
-    if fact.get("currency") != "USD":
-        # No FX normalization exists in this engine (the same documented
-        # limitation Commercial Traction's own Disclosed Scale already
-        # has, Task 15) -- a non-USD round is retained but not usable here.
-        return None
-    raw_amount = fact.get("amount")
-    raw_date = fact.get("round_date")
-    if not raw_amount or not raw_date:
-        return None
-    try:
-        amount = float(raw_amount)
-    except ValueError:
-        return None
-    if amount <= 0:
-        return None
-    try:
-        round_date = date.fromisoformat(raw_date)
-    except ValueError:
-        return None
+    amount = float(fact["amount"])
+    round_date = date.fromisoformat(fact["round_date"])
     return _FundingRound(claim=claim, amount=amount, round_date=round_date)
 
 
@@ -246,7 +264,7 @@ def evaluate_funding_history(
             rationale="No admissible (non-disputed) claim is on record.",
         )
 
-    candidates = tuple(r for r in (_parse_funding_round(c) for c in evidence.admissible) if r is not None)
+    candidates = tuple(r for r in (parse_funding_round(c) for c in evidence.admissible) if r is not None)
     if not candidates:
         return DimensionResult(
             dimension=DIMENSION_FUNDING_HISTORY, pillar=PILLAR, category=DimensionCategory.COMPUTED, weight=weight,

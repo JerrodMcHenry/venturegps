@@ -1,15 +1,17 @@
-# Provider Adapters & Acquisition Call Budget (Task 21, hardened by Task 21A, routing/relevance layer added Task 23)
+# Provider Adapters & Acquisition Call Budget (Task 21, hardened by Task 21A, routing/relevance layer added Task 23, routing completeness added Task 25)
 
 **Status: real (but never-invoked) provider adapters for all three Task 20 Protocols exist
 (`app/evidence_engine/acquisition/providers_live.py`), now including a deterministic batch
 character-budget enforcer, an explicit OpenAI output-token ceiling, API-enforced JSON-schema
 structured output (replacing free-form `.create()` + `json.loads()`), a single combined
-OpenAI retry-attempt owner (worst case cut from 36 to 12 real HTTP attempts), and (Task 23) a
-deterministic assessment-criteria routing/relevance layer plus person-identity normalization. 477
-tests across 22 files, all passing against deterministic fakes and mocked SDK clients only. No
-Tavily call, no OpenAI call, no live HTTP fetch, and — except for exactly one explicitly-approved
-Task 22 run (see `docs/methodology/LIVE_EVALUATION_LINEAR_001.md`) — no analysis of a real company
-was performed or attempted at any point covered by this document.**
+OpenAI retry-attempt owner (worst case cut from 36 to 12 real HTTP attempts), a deterministic
+assessment-criteria routing/relevance layer plus person-identity normalization (Task 23), and
+(Task 25) an eligibility-vs-applicability routing upgrade with a fully observable, typed routing
+outcome per claim. 504 tests across 23 files, all passing against deterministic fakes and mocked
+SDK clients only. No Tavily call, no OpenAI call, no live HTTP fetch, and — except for exactly two
+explicitly-approved live runs (see `docs/methodology/LIVE_EVALUATION_LINEAR_001.md` and
+`LIVE_EVALUATION_LINEAR_002.md`) — no analysis of a real company was performed or attempted at any
+point covered by this document.**
 
 This document does not restate `EVIDENCE_ACQUISITION_PIPELINE.md` (Task 20's own pipeline-stage
 reference, still accurate) or `NEW_ENGINE_E2E_EVALUATION.md` (Task 20's own scenario/readiness
@@ -40,6 +42,22 @@ defect each change addresses:
 `docs/methodology/LINEAR_001_REMEDIATION.md`. None of this changed the provider adapters, the
 character/token/retry budgets, or the call-graph figures below — those remain exactly as Task 21A
 left them.
+
+**§0b — Task 25 (LINEAR_002 remediation), eligibility vs. applicability.** `LIVE_EVALUATION_
+LINEAR_002.md` found Task 23's own routing could strip a correctly-typed candidate's `assessment_
+criteria` to empty with no record of why (a `funding_round` and a `founding_year` fact, both real,
+both silently un-citable). `routing.py` now separates ELIGIBILITY (which dimension(s) a fact KIND may
+ever reach, Task 23's own original table, unchanged) from APPLICABILITY (does THIS fact's own field
+values meet that dimension's real evidence contract) — implemented for the three kinds real evidence
+identified a gap for (`funding_round`, `funding_round_type`, `founding_year`), each reusing the real
+pillar/stage consumer's own validation logic directly (`pillars/financial_funding.py::funding_round_
+fields_are_sufficient()`; `stage.py::funding_round_type_fields_are_sufficient()`/`founding_year_
+fields_are_sufficient()`). A new `RoutingStatus` enum (`ROUTED`/`CONTEXT_ONLY`/`UNROUTED_INSUFFICIENT_
+STRUCTURE`/`UNROUTED_NO_METHODOLOGY_CONSUMER`/`REJECTED_INVALID_ROUTING`) and a full `RoutingDecision`
+record (attached to `ExtractedClaimCandidate`, never to `Claim`) make every routing/relevance decision
+inspectable — `pipeline.py` pairs each with its own finalized `claim_id` in `AcquisitionTelemetry.
+claim_routing`. Full record: `docs/methodology/LINEAR_002_REMEDIATION.md`. No provider, budget, or
+call-graph figure below changed.
 
 ## 0. Task 21A addendum — live-run preflight hardening
 

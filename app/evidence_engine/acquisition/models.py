@@ -152,6 +152,49 @@ class ExtractedClaimCandidate(BaseModel):
     # doesn't set this, behaves exactly as it always has). See
     # `relevance.py`'s own module docstring for the full rationale.
     subject_relationship: str | None = None
+    # Task 25 -- populated by `extraction.py::_sanitize_assessment_
+    # criteria()` after routing.py/relevance.py both run; None only
+    # before that step has ever executed (never a real code path once a
+    # candidate has passed grounding validation). See `RoutingDecision`
+    # below and `routing.py`'s own module docstring for what each field
+    # means and why this lives here rather than on `Claim` itself.
+    routing_decision: "RoutingDecision | None" = None
+
+
+class RoutingDecision(BaseModel):
+    """The full, inspectable record of one candidate's own routing/
+    relevance decision (Task 25, LINEAR_002 remediation item 9's own
+    "record enough information to inspect... exactly why a claim did or
+    did not reach a pillar"). Deliberately lives on `ExtractedClaimCandidate`
+    (the acquisition-layer, untrusted-input-facing model), never on
+    `Claim` (the canonical, methodology-facing model every pillar/the
+    ledger/the cross-pillar audit already depends on) -- item 8's own
+    "rather than polluting core scoring models." `pipeline.py` pairs this
+    with the finalized `Claim.claim_id` it belongs to
+    (`ClaimRoutingRecord` below) once one exists, for a future live-run
+    report to read directly from `AcquisitionTelemetry`."""
+
+    status: str  # a routing.RoutingStatus value, stored as plain str (no import cycle)
+    reason: str
+    fact_kind: str | None = None
+    proposed_criteria: list[str] = Field(default_factory=list)
+    eligible_criteria: list[str] = Field(default_factory=list)
+    final_criteria: list[str] = Field(default_factory=list)
+    removed_criteria: list[str] = Field(default_factory=list)
+    added_criteria: list[str] = Field(default_factory=list)
+    proposed_subject_relationship: str | None = None
+    final_subject_relationship: str | None = None
+    relevance_removed_criteria: list[str] = Field(default_factory=list)
+
+
+class ClaimRoutingRecord(BaseModel):
+    """`RoutingDecision` + the `claim_id` it ultimately became, once
+    `claim_identity.py::finalize_claim()` has computed one -- built by
+    `pipeline.py::_extract_claims()`, the one place both are available
+    together, and collected into `AcquisitionTelemetry.claim_routing`."""
+
+    claim_id: str
+    decision: RoutingDecision
 
 
 class ClaimRejectionReason(str, Enum):
@@ -334,6 +377,10 @@ class AcquisitionTelemetry:
     claims_disputed: int = 0
     retries_used: int = 0
     quality_findings: tuple[AcquisitionQualityFinding, ...] = field(default_factory=tuple)
+    # Task 25 item 9 -- one record per finalized claim, so a future live-
+    # run report can answer exactly why any specific claim did or did not
+    # reach a pillar, without re-deriving it from the ledger alone.
+    claim_routing: tuple[ClaimRoutingRecord, ...] = field(default_factory=tuple)
 
     @property
     def total_duration_seconds(self) -> float:

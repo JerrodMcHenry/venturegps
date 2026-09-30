@@ -111,12 +111,49 @@ _FOUNDING_AGE_BANDS: tuple[tuple[int, Stage], ...] = (
 )
 
 
-def _map_round_type(value: str) -> Stage | None:
+def map_round_type(value: str) -> Stage | None:
     lowered = value.strip().lower()
     for keyword, stage in _ROUND_TYPE_KEYWORDS:
         if keyword in lowered:
             return stage
     return None
+
+
+def funding_round_type_fields_are_sufficient(fact: dict[str, str] | None) -> bool:
+    """Task 25 -- lets `acquisition/routing.py` determine, at acquisition
+    time, whether a `funding_round_type` fact is structurally sufficient
+    to legitimately reach `stage_signal`: not merely "kind matches," but
+    "the `value` field this module actually reads
+    (`resolve_stage()`'s own `latest.structured_fact["value"]`) is
+    present AND maps to a real `Stage` via this module's own `map_round_
+    type()` -- reused directly, not re-implemented, so this can never
+    silently drift from what `resolve_stage()` itself would accept."""
+    fact = fact or {}
+    if fact.get("kind") != "funding_round_type":
+        return False
+    value = fact.get("value")
+    if not value:
+        return False
+    return map_round_type(value) is not None
+
+
+def founding_year_fields_are_sufficient(fact: dict[str, str] | None) -> bool:
+    """Task 25 -- same purpose as `funding_round_type_fields_are_
+    sufficient()` above, for `founding_year`: `resolve_stage()` reads
+    `latest.structured_fact["value"]` (NOT "amount" -- a real, live
+    mismatch `LIVE_EVALUATION_LINEAR_002.md` found, see
+    `LINEAR_002_REMEDIATION.md`) and requires it to parse as an int."""
+    fact = fact or {}
+    if fact.get("kind") != "founding_year":
+        return False
+    value = fact.get("value")
+    if not value:
+        return False
+    try:
+        int(value)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def _map_founding_age(founding_year: int, as_of: date) -> Stage:
@@ -153,7 +190,7 @@ def determine_stage(ledger: EvidenceLedger, company_ref: str, as_of: date) -> St
         # tiebreaker when published_at is absent, matching the ledger's own
         # recency convention (spec Part 2.3).
         latest = max(round_type_claims, key=lambda c: c.published_at or c.retrieved_at)
-        mapped = _map_round_type(latest.structured_fact["value"])
+        mapped = map_round_type(latest.structured_fact["value"])
         if mapped is not None:
             return mapped
 

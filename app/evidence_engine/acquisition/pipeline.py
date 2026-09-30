@@ -53,6 +53,7 @@ from app.evidence_engine.acquisition.models import (
     AcquisitionBudget,
     AcquisitionQualityFinding,
     AcquisitionTelemetry,
+    ClaimRoutingRecord,
     CompanyAnalysisInput,
     ExternalCallRecord,
     ExtractionRequest,
@@ -238,7 +239,7 @@ def _extract_claims(
     sources: list[RetrievedSource], plan: ResearchPlan, company_name: str, company_ref: str,
     evidence_extractor: EvidenceExtractor, budget: AcquisitionBudget,
     quality_findings: list[AcquisitionQualityFinding],
-) -> tuple[list[Claim], int, int]:
+) -> tuple[list[Claim], int, int, list[ClaimRoutingRecord]]:
     """Stage 4-6.
 
     Task 21 changes from Task 20's own one-call-per-source version (item
@@ -284,6 +285,7 @@ def _extract_claims(
     )
 
     claims: list[Claim] = []
+    routing_records: list[ClaimRoutingRecord] = []
     accepted_count = 0
     rejected_count = 0
 
@@ -317,9 +319,19 @@ def _extract_claims(
                                 f"rejected on grounding validation",
                 ))
             for candidate in accepted:
-                claims.append(finalize_claim(candidate, source_by_id[sid], company_ref))
+                claim = finalize_claim(candidate, source_by_id[sid], company_ref)
+                claims.append(claim)
+                # Task 25 item 9: pair this candidate's own routing/
+                # relevance decision (already computed by extraction.py::
+                # _sanitize_assessment_criteria(), attached to the
+                # ACCEPTED candidate before finalize_claim ever ran) with
+                # the claim_id finalize_claim() just produced -- this is
+                # the one place both are available together, so no
+                # signature change to finalize_claim() itself was needed.
+                if candidate.routing_decision is not None:
+                    routing_records.append(ClaimRoutingRecord(claim_id=claim.claim_id, decision=candidate.routing_decision))
 
-    return claims, accepted_count, rejected_count
+    return claims, accepted_count, rejected_count, routing_records
 
 
 def run_acquisition_pipeline(
@@ -358,7 +370,7 @@ def run_acquisition_pipeline(
     ))
 
     t0 = time.monotonic()
-    claims, accepted_count, rejected_count = _extract_claims(
+    claims, accepted_count, rejected_count, routing_records = _extract_claims(
         sources, plan, input.company_name, company_ref, evidence_extractor, budget, quality_findings,
     )
     stages.append(StageTelemetry(
@@ -408,6 +420,7 @@ def run_acquisition_pipeline(
         claims_extracted=accepted_count, claims_rejected=rejected_count,
         claims_deduplicated=deduplicated_count, claims_disputed=disputed_count,
         quality_findings=tuple(quality_findings),
+        claim_routing=tuple(routing_records),
     )
 
     return AcquisitionResult(

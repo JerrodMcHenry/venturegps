@@ -256,8 +256,13 @@ legacy imports (`app.website_scrapper`, `app.pdf_extractor`, the latter currentl
   fictional ones) — see `docs/methodology/NEW_ENGINE_FULL_EVALUATION.md` for the full matrix and
   findings, updated in Task 19 to also print company-level Coverage/Confidence/publishability per
   company (`docs/methodology/NEW_ENGINE_CALIBRATION_RESULTS.md` for the analysis of those results).
-- **`tests/`** — **477 tests across 22 files**, all script-style (this repo's pytest is scoped to
-  `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 23** added
+- **`tests/`** — **504 tests across 23 files**, all script-style (this repo's pytest is scoped to
+  `app/v2` only). Run any file: `python -m app.evidence_engine.tests.<name>`. **Task 25** added
+  `test_routing_completeness_and_observability.py` (27 tests) — eligibility-vs-applicability routing
+  (the exact LINEAR_002 funding_round/founding_year shapes, both the insufficiently-structured real
+  case and a well-structured positive control), all of item 11's routing invariants, and relevance/
+  routing telemetry now inspectable end-to-end through the real pipeline; see
+  `docs/methodology/LINEAR_002_REMEDIATION.md`. **Task 23** added
   `test_extraction_routing_remediation.py` (32 tests) — deterministic fact-kind routing, the five
   item-10 adversarial cross-pillar-routing cases, person-identity normalization/backfill (the exact
   LINEAR_001 two-independent-source shape), release/market representability, and relevance
