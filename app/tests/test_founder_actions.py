@@ -730,6 +730,18 @@ def test_completing_action_does_not_affect_methodology_jsonb() -> None:
 
 
 def test_completing_action_does_not_affect_rankings() -> None:
+    # Task 33 item 15: GET /rankings has required RequireAuth since a
+    # prior security-hardening phase (see app/tests/test_security_
+    # hardening.py::test_rankings_now_requires_auth, currently passing)
+    # -- this test's own `_score_in_rankings()` helper predates that
+    # change and called it with no Authorization header, which now
+    # returns 401's JSON body ({"detail": ...}) instead of a list of
+    # rows, crashing with AttributeError on `.get()` deep inside a list
+    # comprehension. Fixed by authenticating the read, same as every
+    # mutation call in this test already does -- the underlying "does
+    # completing an action change the ranking?" behavior this test
+    # checks is completely unchanged; only the read's own auth
+    # requirement is new.
     _ensure_test_users()
     startup_id = _make_analyzed_startup("NoRankingsChange")
     try:
@@ -737,15 +749,15 @@ def test_completing_action_does_not_affect_rankings() -> None:
         company_name = f"{TEST_PREFIX} NoRankingsChange"
 
         def _score_in_rankings():
-            rows = client.get("/rankings").json()
+            rows = client.get("/rankings", headers=_auth_headers(USER_A)).json()
             matches = [r for r in rows if r.get("company_name") == company_name]
             return matches[0]["overall_score"] if matches else None
 
-        score_before = _score_in_rankings()
         with _patched_auth():
+            score_before = _score_in_rankings()
             created = client.post(f"/founder/startups/{startup_id}/actions", json={"title": "x"}, headers=_auth_headers(USER_A)).json()
             client.patch(f"/founder/startups/{startup_id}/actions/{created['id']}", json={"status": "completed"}, headers=_auth_headers(USER_A))
-        score_after = _score_in_rankings()
+            score_after = _score_in_rankings()
         expect(score_before == score_after, f"Rankings score must be unchanged, before={score_before} after={score_after}")
     finally:
         _cleanup()

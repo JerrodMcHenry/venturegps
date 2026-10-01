@@ -73,25 +73,37 @@ def submit_evidence_v1_analysis(
     if not website_url:
         raise EvidenceV1ServiceError(
             EvidenceV1FailureReason.UNSUPPORTED_INPUT,
-            "Evidence Engine v1 currently supports company-website analysis only. "
+            "This analysis mode currently supports a company website only. "
             "Please provide a website URL.",
         )
     if not company_name:
         raise EvidenceV1ServiceError(
             EvidenceV1FailureReason.UNSUPPORTED_INPUT,
-            "Evidence Engine v1 requires a company name in addition to the website URL.",
+            "Please provide a company name in addition to the website URL.",
         )
 
     try:
         run_result: EvidenceV1RunResult = run_evidence_v1_analysis(company_name, website_url)
     except EvidenceV1AdapterError as exc:
-        raise EvidenceV1ServiceError(EvidenceV1FailureReason.NOT_CONFIGURED, str(exc)) from exc
+        # Task 33 item 2: a configuration problem is a server-operator
+        # concern, not something a user-facing message should name
+        # (e.g. "missing OPENAI_API_KEY") -- the real, specific reason
+        # is still logged server-side (traceback.print_exc() below is
+        # the pipeline-failure case; this one logs via `str(exc)` to
+        # stdout, never returned to the client) so an operator can
+        # still diagnose it.
+        print(f"Evidence v1 not configured: {exc}")
+        raise EvidenceV1ServiceError(
+            EvidenceV1FailureReason.NOT_CONFIGURED,
+            "This analysis mode isn't available right now. Please try the standard analysis, "
+            "or try again later.",
+        ) from exc
     except Exception as exc:  # noqa: BLE001 -- provider/pipeline failure, never leaked raw to the client
         traceback.print_exc()
         raise EvidenceV1ServiceError(
             EvidenceV1FailureReason.ACQUISITION_FAILED,
-            "The Evidence Engine analysis could not be completed. This can happen if a research "
-            "or AI provider is temporarily unavailable. Please try again.",
+            "This analysis could not be completed. This can happen if a research or data "
+            "provider is temporarily unavailable. Please try again.",
         ) from exc
 
     try:

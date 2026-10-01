@@ -239,7 +239,7 @@ from app.observability import init_observability, capture_exception
 # persistence modules it uses are never imported anywhere else in this
 # file. No methodology/acquisition code from app/evidence_engine/ is
 # imported directly here -- only through this product-integration layer.
-from app.evidence_v1.config import Engine, resolve_engine
+from app.evidence_v1.config import Engine, evidence_v1_enabled, resolve_engine
 from app.evidence_v1.service import EvidenceV1ServiceError, submit_evidence_v1_analysis
 from app.evidence_v1.api_models import EvidenceV1AnalysisResponse
 
@@ -496,6 +496,17 @@ def version():
         # (app/ai/sie_v2_methodology.py), so the frontend has one safe,
         # already-correct source instead of a second hardcoded string.
         "methodology_version": METHODOLOGY_VERSION,
+        # Task 33 item 2 -- the ONE place the frontend learns whether
+        # Evidence v1 is server-enabled, so it can decide whether to show
+        # an entry point at all. A plain boolean, not a secret -- knowing
+        # the flag's current STATE is not the same as being able to set
+        # it; `resolve_engine()` (app/evidence_v1/config.py) remains the
+        # only thing that ever actually authorizes a request to run on
+        # evidence_v1, regardless of what this endpoint reports or what a
+        # client sends. This endpoint is public/unauthenticated (like the
+        # rest of this route, unchanged) -- "is the beta on" is not
+        # itself sensitive information.
+        "evidence_v1_enabled": evidence_v1_enabled(),
     }
 
 @app.get("/admin/diagnostics/observability-check")
@@ -4271,21 +4282,20 @@ def analyze_unified(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Evidence Engine v1 currently supports company-website analysis only "
+                    "This analysis mode currently supports a company website only "
                     "(no pitch deck or free-form company text yet). Please provide a website "
-                    "URL and company name, or omit the engine parameter to use the standard "
-                    "analysis."
+                    "URL and company name, or use the standard analysis instead."
                 ),
             )
         if startup_id is not None:
             raise HTTPException(
                 status_code=400,
-                detail="Evidence Engine v1 does not yet support founder-targeted re-analysis.",
+                detail="This analysis mode doesn't yet support founder-targeted re-analysis.",
             )
         if not stripped_website_url or not stripped_company_name:
             raise HTTPException(
                 status_code=400,
-                detail="Evidence Engine v1 requires both a company name and a website URL.",
+                detail="Please provide both a company name and a website URL.",
             )
         try:
             validated_evidence_v1_url = WebsiteAnalysisRequest(url=stripped_website_url)

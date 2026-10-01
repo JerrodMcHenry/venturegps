@@ -11,7 +11,7 @@ import ErrorMessage from "@/components/ui/ErrorMessage";
 import Input from "@/components/ui/Input";
 import Skeleton from "@/components/ui/Skeleton";
 import Textarea from "@/components/ui/Textarea";
-import { analyzeMultiSource, getFounderStartupWorkspace, isEvidenceV1Response } from "@/lib/api";
+import { analyzeMultiSource, getFounderStartupWorkspace, getVersion, isEvidenceV1Response } from "@/lib/api";
 import { consumeVentureDescriptionForAnalyze } from "@/lib/ventureToStartupHandoff";
 
 // Unified Multi-Source Analyze Startup: company website, pitch deck, and
@@ -175,16 +175,44 @@ export default function AnalyzeStartupForm() {
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const [companyText, setCompanyText] = useState("");
 
-  // Task 31 -- Evidence Engine v1 product integration, controlled rollout.
-  // Deliberately NOT a checkbox in the default UI: reachable only via
-  // ?engine=evidence_v1, so the ordinary analysis experience is
-  // completely unchanged for every visitor who doesn't already know this
-  // exists. Requesting it is never authorization -- the server
-  // independently validates against its own EVIDENCE_V1_ENABLED
-  // configuration and silently runs the unchanged legacy pipeline
-  // instead when it is not server-enabled (see app/evidence_v1/config.py).
-  const useEvidenceV1 = searchParams.get("engine") === "evidence_v1";
+  // Task 31/33 -- Evidence-first analysis (beta), controlled rollout.
+  // Discoverability is server-driven (Task 33 item 2): GET /version's
+  // own `evidence_v1_enabled` is the ONE signal that decides whether an
+  // entry point renders at all -- when the server reports it disabled,
+  // nothing below ever appears, and a visitor sees exactly the existing
+  // production experience. This is never the authorization boundary
+  // itself: POST /analyze's own server-side resolve_engine() always
+  // independently re-checks the SAME flag before running anything (see
+  // app/evidence_v1/config.py) -- a stale/cached/spoofed client-side
+  // read of this value can at worst show or hide a UI option, never
+  // actually run the beta engine on its own. `?engine=evidence_v1` in
+  // the URL remains a direct deep-link (useful for internal testing/
+  // demos) and pre-selects the toggle below when the feature is
+  // available; it is not itself trusted as authorization either.
+  const [evidenceV1Available, setEvidenceV1Available] = useState(false);
+  const [useEvidenceV1, setUseEvidenceV1] = useState(searchParams.get("engine") === "evidence_v1");
   const [evidenceV1CompanyName, setEvidenceV1CompanyName] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    getVersion()
+      .then((info) => {
+        if (isMounted) {
+          setEvidenceV1Available(info.evidence_v1_enabled);
+        }
+      })
+      .catch(() => {
+        // Fails closed: if the version check itself fails, the beta
+        // entry point simply never appears -- same as the feature being
+        // disabled. Never surfaced as a user-facing error (this is a
+        // discoverability signal, not a page the user asked to load).
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -608,25 +636,47 @@ export default function AnalyzeStartupForm() {
 
       {!isSubmitting ? (
         <form onSubmit={handleSubmit} className="space-y-6">
-          {useEvidenceV1 ? (
+          {/* Task 33 item 2: this entire block renders ONLY when the
+              server (GET /version) reports the feature on -- when it
+              doesn't, nothing here exists and the form below is
+              byte-identical to the pre-beta experience. Product
+              language throughout; no internal names ("evidence_v1",
+              "engine adapter", a version identifier) anywhere a
+              non-technical user would see them. */}
+          {evidenceV1Available ? (
             <div className="rounded-xl border border-primary/30 bg-primary/5 px-5 py-4">
-              <p className="text-sm font-semibold text-text-primary">Evidence Engine v1 (controlled beta)</p>
-              <p className="mt-1 text-sm text-text-secondary">
-                This analysis will run on VentureGPS&rsquo;s evidence-first engine instead of the
-                standard analysis. It supports a company website only (no pitch deck or additional
-                text yet), and will fall back to the standard analysis automatically if this engine
-                isn&rsquo;t enabled for your account.
-              </p>
-              <div className="mt-3">
-                <Input
-                  id="evidence-v1-company-name"
-                  label="Company Name"
-                  type="text"
-                  value={evidenceV1CompanyName}
-                  onChange={(event) => setEvidenceV1CompanyName(event.target.value)}
-                  placeholder="Acme Inc."
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={useEvidenceV1}
+                  onChange={(event) => setUseEvidenceV1(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 />
-              </div>
+                <span>
+                  <span className="text-sm font-semibold text-text-primary">
+                    Try our evidence-first analysis <span className="font-normal text-text-tertiary">(beta)</span>
+                  </span>
+                  <span className="mt-1 block text-sm text-text-secondary">
+                    Every finding is tied to a specific public source you can inspect yourself.
+                    Categories without enough public evidence are clearly marked rather than guessed
+                    at. Currently supports a company website only (no pitch deck or additional text
+                    yet).
+                  </span>
+                </span>
+              </label>
+
+              {useEvidenceV1 ? (
+                <div className="mt-3 pl-7">
+                  <Input
+                    id="evidence-v1-company-name"
+                    label="Company Name"
+                    type="text"
+                    value={evidenceV1CompanyName}
+                    onChange={(event) => setEvidenceV1CompanyName(event.target.value)}
+                    placeholder="Acme Inc."
+                  />
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -776,20 +826,19 @@ export default function AnalyzeStartupForm() {
 // exactly what it was: a static list of what the pipeline covers, never
 // live per-stage progress -- the backend does not report which call is
 // in flight, and this deliberately does not pretend otherwise.
-// Task 31 item 14 -- Evidence Engine v1's own real stages
-// (app/evidence_engine/acquisition/pipeline.py's own telemetry stage
-// names: research_planning, source_discovery_and_retrieval,
-// evidence_extraction, contradiction_detection, ledger_construction,
-// six_pillar_evaluation_and_aggregation), described honestly in plain
-// language -- never a fabricated percentage, same "static list, not
-// live per-stage progress" discipline STAGES above already established,
-// since this backend also does not report which stage is in flight.
+// Task 31 item 14, revised Task 33 item 10 -- the evidence-first
+// pipeline's own real activity, in plain, non-technical language (never
+// "grounding"/"claims"/an internal stage name) -- never a fabricated
+// percentage. These are explanatory ACTIVITY STATES, not a claim of
+// exact backend synchronization: the backend does not report which
+// stage is currently in flight, so, same as STAGES above, this is a
+// static list of what the run covers, not live per-stage progress.
 const EVIDENCE_V1_STAGES = [
   "Researching public sources",
-  "Retrieving and grounding evidence",
-  "Structuring claims",
-  "Evaluating methodology",
-  "Preparing report",
+  "Reviewing evidence",
+  "Structuring findings",
+  "Applying the VentureGPS methodology",
+  "Preparing your report",
 ];
 
 function AnalyzingState({
@@ -811,20 +860,28 @@ function AnalyzingState({
           <span className="block h-full w-full rounded-full bg-surface" />
         </span>
 
-        <div>
+        {/* Task 33 item 14: `role="status"`/`aria-live="polite"` belong
+            on this block (announced ONCE, when the state first appears
+            or its text changes) -- NOT on the ticking elapsed-time
+            counter below, which used to carry aria-live itself and
+            would have caused assistive tech to re-announce "Elapsed:
+            0:01", "0:02", "0:03"... every second. That counter is now
+            purely visual (still updates on screen; simply no longer
+            wired to be re-announced every tick). */}
+        <div role="status" aria-live="polite">
           <p className="text-lg font-semibold text-text-primary">
             Analyzing startup&hellip;
           </p>
 
           <p className="mt-1 text-sm text-text-secondary">
             {isEvidenceV1
-              ? "VentureGPS is running Evidence Engine v1: gathering and grounding real evidence, then evaluating it against the six Intelligence Pillars. Usually 30–60 seconds — please keep this tab open."
+              ? "VentureGPS is gathering real public evidence about this company, then applying its evidence-first methodology across the six Intelligence Pillars. Usually about 30 seconds — please keep this tab open."
               : "VentureGPS is running AI-assisted research on this company, then AI-generated analysis across the six Intelligence Pillars. Usually 2–4 minutes -- please keep this tab open."}
           </p>
         </div>
       </div>
 
-      <p className="mt-6 text-sm text-text-secondary" aria-live="polite">
+      <p className="mt-6 text-sm text-text-secondary">
         Elapsed: {formatElapsed(elapsedSeconds)}
       </p>
 

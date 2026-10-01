@@ -801,6 +801,11 @@ def test_achieving_milestone_does_not_modify_methodology_jsonb() -> None:
 
 
 def test_rankings_unchanged() -> None:
+    # Task 33 item 15: GET /rankings requires auth since a prior
+    # security-hardening phase -- `_score()` below now authenticates its
+    # own read, same as every other call in this test already does. See
+    # test_founder_actions.py::test_completing_action_does_not_affect_
+    # rankings for the identical fix and full rationale.
     _ensure_test_users()
     startup_id = _make_analyzed_startup("RankingsUnchanged")
     try:
@@ -808,22 +813,25 @@ def test_rankings_unchanged() -> None:
         company_name = f"{TEST_PREFIX} RankingsUnchanged"
 
         def _score():
-            rows = client.get("/rankings").json()
+            rows = client.get("/rankings", headers=_auth_headers(USER_A)).json()
             matches = [r for r in rows if r.get("company_name") == company_name]
             return matches[0]["overall_score"] if matches else None
 
-        before = _score()
         with _patched_auth():
+            before = _score()
             created = client.post(f"/founder/startups/{startup_id}/milestones", json={"title": "x"}, headers=_auth_headers(USER_A)).json()
             client.patch(f"/founder/startups/{startup_id}/milestones/{created['id']}", json={"status": "achieved"}, headers=_auth_headers(USER_A))
             client.post(f"/founder/startups/{startup_id}/updates", json=_update_body(), headers=_auth_headers(USER_A))
-        after = _score()
+            after = _score()
         expect(before == after, f"Rankings score must be unchanged, before={before} after={after}")
     finally:
         _cleanup()
 
 
 def test_discovery_unchanged() -> None:
+    # Task 33 item 15: GET /discover also requires RequireAuth (same
+    # security-hardening phase as /rankings) -- same fix as
+    # test_rankings_unchanged above.
     _ensure_test_users()
     startup_id = _make_analyzed_startup("DiscoveryUnchanged")
     try:
@@ -831,15 +839,15 @@ def test_discovery_unchanged() -> None:
         company_name = f"{TEST_PREFIX} DiscoveryUnchanged"
 
         def _score():
-            rows = client.get("/discover", params={"query": company_name}).json()["results"]
+            rows = client.get("/discover", params={"query": company_name}, headers=_auth_headers(USER_A)).json()["results"]
             matches = [r for r in rows if r.get("company_name") == company_name]
             return matches[0]["overall_score"] if matches else None
 
-        before = _score()
         with _patched_auth():
+            before = _score()
             created = client.post(f"/founder/startups/{startup_id}/milestones", json={"title": "x"}, headers=_auth_headers(USER_A)).json()
             client.patch(f"/founder/startups/{startup_id}/milestones/{created['id']}", json={"status": "achieved"}, headers=_auth_headers(USER_A))
-        after = _score()
+            after = _score()
         expect(before == after, f"Discovery score must be unchanged, before={before} after={after}")
     finally:
         _cleanup()

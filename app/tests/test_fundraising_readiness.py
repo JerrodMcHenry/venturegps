@@ -446,6 +446,9 @@ def test_readiness_does_not_change_sps_history() -> None:
 
 
 def test_readiness_does_not_change_rankings() -> None:
+    # Task 33 item 15: GET /rankings requires auth since a prior
+    # security-hardening phase -- see test_founder_actions.py's own
+    # identical fix/rationale.
     _ensure_test_users()
     startup_id = _make_analyzed_startup("NoRankingsChange")
     try:
@@ -453,20 +456,21 @@ def test_readiness_does_not_change_rankings() -> None:
         company_name = f"{TEST_PREFIX} NoRankingsChange"
 
         def _score():
-            rows = client.get("/rankings").json()
+            rows = client.get("/rankings", headers=_auth_headers(USER_A)).json()
             matches = [r for r in rows if r.get("company_name") == company_name]
             return matches[0]["overall_score"] if matches else None
 
-        before = _score()
         with _patched_auth():
+            before = _score()
             client.get(f"/founder/startups/{startup_id}/fundraising", headers=_auth_headers(USER_A))
-        after = _score()
+            after = _score()
         expect(before == after, f"Rankings must be unchanged, before={before} after={after}")
     finally:
         _cleanup()
 
 
 def test_readiness_does_not_change_discovery() -> None:
+    # Task 33 item 15: GET /discover also requires auth -- same fix.
     _ensure_test_users()
     startup_id = _make_analyzed_startup("NoDiscoveryChange")
     try:
@@ -474,29 +478,30 @@ def test_readiness_does_not_change_discovery() -> None:
         company_name = f"{TEST_PREFIX} NoDiscoveryChange"
 
         def _score():
-            rows = client.get("/discover", params={"query": company_name}).json()["results"]
+            rows = client.get("/discover", params={"query": company_name}, headers=_auth_headers(USER_A)).json()["results"]
             matches = [r for r in rows if r.get("company_name") == company_name]
             return matches[0]["overall_score"] if matches else None
 
-        before = _score()
         with _patched_auth():
+            before = _score()
             client.get(f"/founder/startups/{startup_id}/fundraising", headers=_auth_headers(USER_A))
-        after = _score()
+            after = _score()
         expect(before == after, f"Discovery must be unchanged, before={before} after={after}")
     finally:
         _cleanup()
 
 
 def test_readiness_does_not_change_compare() -> None:
+    # Task 33 item 15: GET /compare also requires auth -- same fix.
     _ensure_test_users()
     startup_a = _make_analyzed_startup("CompareA")
     startup_b = _make_analyzed_startup("CompareB")
     try:
         _grant_membership(USER_A, startup_a)
-        before = client.get("/compare", params={"startups": f"{startup_a},{startup_b}"}).json()
         with _patched_auth():
+            before = client.get("/compare", params={"startups": f"{startup_a},{startup_b}"}, headers=_auth_headers(USER_A)).json()
             client.get(f"/founder/startups/{startup_a}/fundraising", headers=_auth_headers(USER_A))
-        after = client.get("/compare", params={"startups": f"{startup_a},{startup_b}"}).json()
+            after = client.get("/compare", params={"startups": f"{startup_a},{startup_b}"}, headers=_auth_headers(USER_A)).json()
         expect(before == after, "Compare output must be unchanged by viewing readiness")
     finally:
         _cleanup()

@@ -41,6 +41,7 @@ from scratch; they are not a claim about what is currently running.
 | `CLERK_ISSUER` | The Clerk instance's Frontend API URL, e.g. `https://your-app.clerk.accounts.dev` (dev) or `https://clerk.yourdomain.com` (production custom domain) — decode it from the `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` set on the frontend, or copy it from the Clerk Dashboard | Required for all four paid analyze endpoints to accept requests — see `app/auth.py`. **No safe default**: unlike `CORS_ALLOWED_ORIGINS`, an unset `CLERK_ISSUER` fails every authenticated request closed (401), it does not fall back to a guessed value |
 | `CLERK_AUTHORIZED_PARTIES` | Set manually in the Render dashboard | Comma-separated list of allowed frontend origins that may present a token, e.g. `https://sie-staging.vercel.app`. Unset = the same two local-dev origins `CORS_ALLOWED_ORIGINS` falls back to. Mirrors `CORS_ALLOWED_ORIGINS`'s own pattern; set both together |
 | `ADMIN_USER_IDS` | Set manually in the Render dashboard | Comma-separated list of Clerk user IDs (e.g. `user_2abc...,user_2def...`) allowed to call the admin startup-claim review endpoints (`app/auth.py`'s `RequireAdmin`). Backend-only — **never** prefix with `NEXT_PUBLIC_`. Unset or empty = no admins; every admin endpoint fails closed (403), same fail-closed default as an unset `CLERK_ISSUER` |
+| `EVIDENCE_V1_ENABLED` | Set manually in the Render dashboard, when ready | `true`/`false` (case-insensitive); unset or anything else = `false`. Server-side-only switch for the Evidence Engine v1 beta path (`app/evidence_v1/config.py::evidence_v1_enabled()`) — see "Evidence Engine v1 database migrations" below. A client can never turn this on by itself; `resolve_engine()` re-checks it on every request regardless of what the client sends. Leave unset until the table has been migrated (next section) |
 | `PYTHON_VERSION` | Set in `render.yaml` | Pinned to `3.12.5` to match the version this app has been tested against locally |
 
 ### Frontend (Vercel)
@@ -159,7 +160,10 @@ the deploy sequence.
   additive-only (`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN`, each wrapped in
   its own try/except), rolling the backend back to an older commit is safe —
   older code simply won't reference newer columns, and no migration ever
-  drops or destructively alters existing data.
+  drops or destructively alters existing data. V2's and Evidence v1's own
+  tables (`v2.*`, `evidence_v1_analyses`) are migrated manually, not at
+  startup, so a backend rollback never touches either — rolling back older
+  code simply stops calling the newer routes/tables, same as above.
 - **Database**: this is a staging database with no production data to protect;
   if it ever needs to be reset, delete and recreate the Render Postgres
   resource rather than attempting to hand-edit it. Do not do this to the
@@ -231,3 +235,89 @@ schema `v2` if it still contains anything other than Alembic's own bookkeeping, 
 
 Whether to automate this (for example a Render pre-deploy command, which I
 believe requires a paid plan - verify) is a separate, later decision.
+
+## Evidence Engine v1 database migrations (manual)
+
+Evidence Engine v1 owns exactly one additive table, `evidence_v1_analyses`, in the
+**default/public** schema — not `v2`, not a new schema of its own. It is a third,
+fully independent Alembic environment, distinct from both the legacy ad-hoc
+`add_*_column()` migrations above and V2's own `alembic.ini`/`app/v2/migrations/`.
+Full architectural rationale (why a third environment, not a reuse of either
+existing one): `docs/architecture/EVIDENCE_ENGINE_PRODUCT_INTEGRATION.md` §4.
+
+**Also run by hand, on purpose — same convention as V2.** It does not run at
+application import, when FastAPI starts, in the Render build/start commands, or in
+a pre-deploy command. Nothing in `render.yaml` or the start command references it.
+
+```bash
+# from the repo root, with the venv active
+export DATABASE_URL='postgresql://...'   # the SAME target as the app's own runtime database
+alembic -c alembic_evidence_v1.ini current   # prints its own version table state - check it
+alembic -c alembic_evidence_v1.ini upgrade head
+alembic -c alembic_evidence_v1.ini current   # expect: 0001 (head)
+```
+
+- Target resolution: `DATABASE_URL` directly (there is no separate
+  `EVIDENCE_V1_DATABASE_URL` — this table lives in the same physical database as
+  everything else, just a different, independently-tracked migration history). No
+  `.env` file is loaded by the Alembic CLI itself; export the variable in the shell
+  first.
+- Version table: `evidence_v1_alembic_version` (default schema) — a different name
+  from both the legacy app's implicit table state and `v2.alembic_version`, so the
+  three histories can never collide even though two of them may target the same
+  database.
+- `alembic -c alembic_evidence_v1.ini current`/`heads`/`history` create nothing.
+  `upgrade head` creates `evidence_v1_analyses` (revision 0001) — one `CREATE TABLE`,
+  one index (`ix_evidence_v1_analyses_owner_created`), no autogenerate (this
+  environment has no reflection/diffing machinery by design — each revision is
+  small and hand-written).
+- **Ordering relative to the feature flag:** run `upgrade head` **before** setting
+  `EVIDENCE_V1_ENABLED=true` anywhere. With the flag off (the default), the table
+  is simply unused — `resolve_engine()` never routes a request to the evidence_v1
+  path, so a missing table is harmless until the flag flips. With the flag on and
+  the table missing, every evidence_v1 request fails closed with a mapped,
+  non-leaking `PERSISTENCE_FAILED` → 502 (verified:
+  `app/tests/test_evidence_v1_integration.py`) — not a crash, not data loss, but
+  not a usable beta either, so there is no reason to flip the flag before this
+  step.
+- **Ordering relative to the legacy and V2 migrations:** independent of both — it
+  shares nothing with either (no foreign key crosses into `v2.*` or the legacy
+  `analyses` table), so it can be run before, after, or interleaved with either
+  without a correctness concern. There is also no ordering requirement between this
+  migration and a deploy of the Evidence-v1 application code itself in either
+  direction: with the flag off, neither the route branch nor the table is reachable
+  regardless of deploy order.
+- Preview without a database: `alembic -c alembic_evidence_v1.ini upgrade head --sql`.
+- **Verified locally** against the same `venturegps_v2_dev_1801` instance
+  (127.0.0.1:54331) used for V2's own local verification (Task 31): upgrade and
+  downgrade both run cleanly; `v2.*` and the legacy `analyses` table are provably
+  untouched by either direction (`app/evidence_v1/tests/test_migrations.py`, run as
+  `python -m app.evidence_v1.tests.test_migrations` — a script, like the legacy
+  tests, not `pytest`, since it lives outside `app/v2` and the root `conftest.py`
+  scopes pytest to `app/v2` only). Whether staging/production have ever had this
+  migration applied is **not verifiable from this repository** — the same caveat
+  that applies to the V2 migrations above applies here.
+
+**Rollback.** `alembic -c alembic_evidence_v1.ini downgrade base` drops
+`evidence_v1_analyses` and leaves `evidence_v1_alembic_version` in place, empty (no
+custom teardown, unlike V2's schema-drop — there is no schema to drop here). Safe
+on a database with no evidence_v1 rows (e.g. before the flag has ever been turned
+on anywhere). Once real rows exist, treat this the same as the V2 guidance above:
+take a backup first, prefer fixing forward with a new revision over a destructive
+downgrade, and never downgrade a database the flag is currently pointed at in any
+environment.
+
+**Manual controlled release (no automated gate exists yet).** There is currently no
+staged-rollout infrastructure (no canary, no percentage-based flag, no per-user
+allowlist) beyond the single global `EVIDENCE_V1_ENABLED` boolean and the client's
+own `?engine=evidence_v1` opt-in. The controlled release procedure is therefore
+entirely manual: (1) run the migration above against the target database with the
+flag still off; (2) set `EVIDENCE_V1_ENABLED=true` only in a controlled
+environment (e.g. staging, or a Render environment not linked to the public
+production URL); (3) exercise it manually via `?engine=evidence_v1` from a known
+test account; (4) only once satisfied, consider enabling it where the public
+frontend's "Evidence-based" discoverability checkbox (driven by `GET /version`'s
+`evidence_v1_enabled` field — see `docs/architecture/EVIDENCE_ENGINE_PRODUCT_INTEGRATION.md`)
+would actually surface it to ordinary users. There is no mechanism to show it to a
+subset of production users short of this — building one is future work, not
+something to improvise ad hoc here.

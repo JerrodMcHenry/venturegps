@@ -193,8 +193,13 @@ export default function MyAnalysesView() {
                       <p className="truncate text-base font-semibold text-text-primary">
                         {entry.data.company_name}
                       </p>
+                      {/* Task 33 item 11: product language, never the
+                          internal engine name -- this badge only needs
+                          to tell the reader "this is a different kind
+                          of report than the others in this list," not
+                          which engine produced it. */}
                       <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
-                        Evidence v1
+                        Evidence-based
                       </span>
                     </div>
                     <p className="mt-0.5 text-sm text-text-secondary">{formatDate(entry.data.created_at)}</p>

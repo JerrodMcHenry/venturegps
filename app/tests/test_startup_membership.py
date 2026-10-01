@@ -631,32 +631,59 @@ def test_membership_removal_immediately_removes_authorization() -> None:
 # --- 19-20: existing public surfaces remain public ----------------------------
 
 
-def test_public_startup_profile_remains_public() -> None:
-    startup_id = _make_test_startup("StillPublic")
+# Task 33 item 15: these two tests predate a later, intentional
+# security-hardening phase that put GET /startup/{name}, /rankings,
+# /discover, and /compare behind RequireAuth (see app/tests/test_
+# security_hardening.py's own currently-passing test_rankings_now_
+# requires_auth et al., and app/api.py's own "Portfolio Release Task
+# 3B -- Secure Analysis Visibility" comment on /startup/{name}). The
+# ORIGINAL "stays public, no auth" assertions here are stale -- root
+# cause confirmed as Category A (an intentional contract change these
+# two tests were never updated for), not a production regression.
+# Rewritten to the CURRENT, correct, two-sided contract: unauthenticated
+# access is rejected, authenticated access succeeds -- these tests now
+# actively guard the auth requirement instead of assuming its opposite.
+
+
+def test_startup_profile_requires_auth_then_succeeds_when_authenticated() -> None:
+    startup_id = _make_test_startup("AuthRequired")
     try:
         with engine.begin() as connection:
             name = connection.execute(
                 text("SELECT canonical_name FROM startups WHERE id = :id"), {"id": startup_id}
             ).scalar()
-        response = client.get(f"/startup/{name}")
-        expect(response.status_code == 200, f"Expected 200 with no auth, got {response.status_code}")
+
+        unauth_response = client.get(f"/startup/{name}")
+        expect(unauth_response.status_code == 401, f"Expected 401 with no auth, got {unauth_response.status_code}")
+
+        with _patched_auth():
+            auth_response = client.get(f"/startup/{name}", headers=_auth_headers(USER_A))
+        expect(auth_response.status_code == 200, f"Expected 200 once authenticated, got {auth_response.status_code}")
     finally:
         _cleanup()
 
 
-def test_public_rankings_discovery_compare_remain_public() -> None:
+def test_rankings_discovery_compare_require_auth_then_succeed_when_authenticated() -> None:
     startup_1 = _make_test_startup("PublicSurfaces1")
     startup_2 = _make_test_startup("PublicSurfaces2")
     try:
-        response = client.get("/rankings")
-        expect(response.status_code == 200, f"Rankings expected 200, got {response.status_code}")
+        unauth_rankings = client.get("/rankings")
+        expect(unauth_rankings.status_code == 401, f"Rankings expected 401 with no auth, got {unauth_rankings.status_code}")
+        unauth_discover = client.get("/discover")
+        expect(unauth_discover.status_code == 401, f"Discovery expected 401 with no auth, got {unauth_discover.status_code}")
+        unauth_compare = client.get("/compare", params={"startups": f"{startup_1},{startup_2}"})
+        expect(unauth_compare.status_code == 401, f"Compare expected 401 with no auth, got {unauth_compare.status_code}")
 
-        response = client.get("/discover")
-        expect(response.status_code == 200, f"Discovery expected 200, got {response.status_code}")
+        with _patched_auth():
+            response = client.get("/rankings", headers=_auth_headers(USER_A))
+            expect(response.status_code == 200, f"Rankings expected 200 once authenticated, got {response.status_code}")
 
-        # /compare requires >= MIN_COMPARISON_STARTUPS (2) well-formed ids.
-        response = client.get("/compare", params={"startups": f"{startup_1},{startup_2}"})
-        expect(response.status_code == 200, f"Compare expected 200, got {response.status_code}: {response.text}")
+            response = client.get("/discover", headers=_auth_headers(USER_A))
+            expect(response.status_code == 200, f"Discovery expected 200 once authenticated, got {response.status_code}")
+
+            # /compare requires >= MIN_COMPARISON_STARTUPS (2) well-formed ids.
+            response = client.get("/compare", params={"startups": f"{startup_1},{startup_2}"}, headers=_auth_headers(USER_A))
+            expect(response.status_code == 200, f"Compare expected 200 once authenticated, got {response.status_code}: {response.text}")
     finally:
         _cleanup()
 
@@ -755,8 +782,8 @@ TESTS = [
     test_member_authorization_fails_for_other_startup,
     test_guessing_startup_id_does_not_bypass_authorization,
     test_membership_removal_immediately_removes_authorization,
-    test_public_startup_profile_remains_public,
-    test_public_rankings_discovery_compare_remain_public,
+    test_startup_profile_requires_auth_then_succeeds_when_authenticated,
+    test_rankings_discovery_compare_require_auth_then_succeed_when_authenticated,
     test_claim_submission_behavior_unchanged,
     test_exactly_one_membership_insert_path_exists,
 ]

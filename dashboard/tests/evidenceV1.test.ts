@@ -101,8 +101,12 @@ function test_report_component_never_renders_an_overall_score(): void {
 }
 
 function test_report_component_distinguishes_unscored_from_a_negative_result(): void {
+  // Task 33 item 3: the user-facing label was renamed from the internal
+  // "Unscored" to the product-language "Information unavailable" -- the
+  // underlying data field (dimension.score == null) is unchanged, only
+  // this display string.
   const source = readSource("components/evidence/EvidenceV1Report.tsx");
-  expect(/Unscored/.test(source), "an unscored dimension must be labeled as such, not silently omitted");
+  expect(/Information unavailable/.test(source), "a dimension with no score must be labeled as such, not silently omitted");
   expect(/not a negative finding|not a negative assessment/.test(source), "the copy must explicitly say unknown is not the same as poor performance");
 }
 
@@ -126,8 +130,10 @@ function test_my_analyses_view_never_compares_coverage_to_the_legacy_score_badge
   // badge/copy, never scoreBadgeClasses()/formatScore() (the legacy
   // 0-100-score-tiered styling), which would visually imply the two are
   // the same kind of number.
-  const badgeMatch = source.match(/>\s*Evidence v1\s*</);
-  expect(badgeMatch !== null, "Evidence v1 badge not found");
+  // Task 33 item 11: the badge text itself is product language ("Evidence-based"),
+  // never the internal engine name -- only the test name/comments say "Evidence v1".
+  const badgeMatch = source.match(/>\s*Evidence-based\s*</);
+  expect(badgeMatch !== null, "Evidence-based badge not found");
   const evidenceBlockStart = badgeMatch!.index!;
   const evidenceBlock = source.slice(evidenceBlockStart, source.indexOf("})", evidenceBlockStart));
   expect(!/scoreBadgeClasses/.test(evidenceBlock), "Coverage must not be styled via the legacy score-tier badge classes");

@@ -10,6 +10,19 @@
 # DEPLOYMENT.md for the full staging runbook, including what to set
 # CORS_ALLOWED_ORIGINS to once the frontend's Vercel URL is known.
 #
+# EVIDENCE_V1_ENABLED defaults to "false" here (not a secret, so it's an
+# explicit value rather than sync:false) so a fresh Blueprint deploy never
+# accidentally enables the Evidence Engine v1 beta path before its table
+# has been migrated -- see DEPLOYMENT.md's "Evidence Engine v1 database
+# migrations" section for the manual migrate-then-enable ordering. Flip it
+# to "true" in the Render dashboard only after that migration has run.
+#
+# CLERK_ISSUER, CLERK_AUTHORIZED_PARTIES, and ADMIN_USER_IDS are also
+# required/used at runtime (see DEPLOYMENT.md's env var table) but are
+# pre-existing omissions from this Blueprint, not something introduced
+# here -- they must still be set by hand in the Render dashboard outside
+# of this file until someone adds them here.
+#
 # Render's exact Blueprint schema keys occasionally change between
 # documentation revisions -- if the dashboard flags a key on import,
 # check Render's current Blueprint reference; the intent of every field
@@ -42,3 +55,5 @@ services:
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      - key: EVIDENCE_V1_ENABLED
+        value: "false"

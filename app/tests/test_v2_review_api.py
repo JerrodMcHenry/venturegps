@@ -263,6 +263,13 @@ def test_forged_signature_rejected() -> None:
 # ---------------------------------------------------------------- legacy routes unaffected by the new mount
 
 def test_legacy_routes_still_behave_normally() -> None:
+    # Task 33 item 15: GET /rankings has required RequireAuth since a
+    # prior, intentional security-hardening phase (see app/tests/
+    # test_security_hardening.py's own currently-passing test_rankings_
+    # now_requires_auth) -- this test's own "must stay public" assertion
+    # predates that change and is stale (Category A, not a production
+    # regression). Rewritten to the current, correct two-sided contract:
+    # unauthenticated access is rejected; authenticated access succeeds.
     with _patched_auth():
         health = client.get("/health")
         expect(health.status_code == 200, f"/health regressed: {health.status_code}")
@@ -270,8 +277,11 @@ def test_legacy_routes_still_behave_normally() -> None:
         unauth_legacy = client.post("/analyze", data={}, files={})
         expect(unauth_legacy.status_code == 401, f"/analyze auth gate regressed: {unauth_legacy.status_code}")
 
-        public = client.get("/rankings")
-        expect(public.status_code != 401, f"/rankings must stay public, got {public.status_code}")
+        unauth_rankings = client.get("/rankings")
+        expect(unauth_rankings.status_code == 401, f"/rankings must require auth, got {unauth_rankings.status_code}")
+
+        auth_rankings = client.get("/rankings", headers=_headers(_make_token(sub=ADMIN_USER_ID)))
+        expect(auth_rankings.status_code == 200, f"/rankings must succeed once authenticated, got {auth_rankings.status_code}")
 
 
 # ---------------------------------------------------------------- the real, DB-backed workflow

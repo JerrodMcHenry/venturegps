@@ -277,7 +277,7 @@ def test_evidence_v1_with_free_form_text_fails_clearly_rather_than_silently_igno
             headers=_auth_headers(USER_A),
         )
         expect(response.status_code == 400, response.text)
-        expect("Evidence Engine v1" in response.json().get("detail", ""), response.text)
+        expect("analysis mode" in response.json().get("detail", "").lower(), response.text)
         expect(fake.calls == [], "adapter must never run with unsupported input silently dropped")
     _cleanup()
 
@@ -285,12 +285,13 @@ def test_evidence_v1_with_free_form_text_fails_clearly_rather_than_silently_igno
 # --- 3. Provider-failure mapping (item 15) ------------------------------------
 
 def test_evidence_v1_missing_credentials_maps_to_a_clear_non_leaking_error() -> None:
-    """Uses the adapter's OWN real message format (`_require_provider_
-    credentials()`'s "Evidence Engine v1 is not configured: missing
-    X.") -- an env var NAME (never its value) is actionable operator
-    information, not a secret; this test confirms the message is that
-    clear, well-formed sentence, never a raw Python exception repr or a
-    traceback fragment."""
+    """Task 33 item 2: the user-facing message is now generic product
+    language ("This analysis mode isn't available right now...") --
+    the adapter's own specific, operator-actionable detail (e.g. which
+    env var is missing) is logged server-side only (via `print()`,
+    confirmed never appearing in the HTTP response) and never reaches
+    the client at all, a stricter guarantee than Task 31's original
+    "clear sentence, not a traceback" check."""
     real_error = EvidenceV1AdapterError("Evidence Engine v1 is not configured: missing OPENAI_API_KEY.")
     with _patched_auth(), _patched_evidence_v1_flag(True), _patched_adapter_failure(real_error):
         _ensure_test_users()
@@ -301,7 +302,8 @@ def test_evidence_v1_missing_credentials_maps_to_a_clear_non_leaking_error() -> 
         )
         expect(response.status_code == 502, response.text)
         detail = response.json().get("detail", "")
-        expect(detail == "Evidence Engine v1 is not configured: missing OPENAI_API_KEY.", detail)
+        expect(detail == "This analysis mode isn't available right now. Please try the standard analysis, or try again later.", detail)
+        expect("OPENAI_API_KEY" not in detail, f"the specific missing-credential detail must never reach the client: {detail}")
         expect("Traceback" not in detail and "File \"" not in detail, f"must never leak a raw traceback: {detail}")
     _cleanup()
 
