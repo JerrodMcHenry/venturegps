@@ -233,6 +233,16 @@ from app.website_scrapper import extract_text_from_website
 from app.reporting.pdf_generator import generate_pdf_report
 from app.observability import init_observability, capture_exception
 
+# Task 31 -- Evidence Engine v1 product integration. resolve_engine() is
+# the ONE server-side engine-selection boundary POST /analyze calls
+# (app/evidence_v1/config.py's own docstring); the adapter/service/
+# persistence modules it uses are never imported anywhere else in this
+# file. No methodology/acquisition code from app/evidence_engine/ is
+# imported directly here -- only through this product-integration layer.
+from app.evidence_v1.config import Engine, resolve_engine
+from app.evidence_v1.service import EvidenceV1ServiceError, submit_evidence_v1_analysis
+from app.evidence_v1.api_models import EvidenceV1AnalysisResponse
+
 # Phase 40C -- Private Beta Deployment + Production Acceptance. Called
 # before the app is otherwise configured, matching Sentry's own "as early
 # in the process as possible" guidance. No-op when SENTRY_DSN is unset
@@ -461,6 +471,14 @@ app.include_router(v2_capital_router)
 # may never import legacy. Every route in it is admin-gated; nothing here is public.
 from app.v2_review_api import router as v2_review_router
 app.include_router(v2_review_router)
+
+# Task 31 -- Evidence Engine v1 product integration: authenticated retrieval routes
+# (app/evidence_v1/router.py), mounted the same way. POST /analyze's own engine-selection
+# boundary (below) is what actually RUNS evidence_v1 analyses; this router only ever reads
+# back an already-persisted, immutable result -- never reruns acquisition. No legacy route
+# above or below this line is touched. See docs/architecture/EVIDENCE_ENGINE_PRODUCT_INTEGRATION.md.
+from app.evidence_v1.router import router as evidence_v1_router
+app.include_router(evidence_v1_router)
 
 @app.get("/health")
 def health():
@@ -4161,7 +4179,7 @@ def _read_pdf_upload_sync(file: UploadFile) -> bytes:
     return b"".join(chunks)
 
 
-@app.post("/analyze", response_model=StartupAnalysisResponse)
+@app.post("/analyze", response_model=StartupAnalysisResponse | EvidenceV1AnalysisResponse)
 def analyze_unified(
     website_url: str | None = Form(None),
     company_text: str | None = Form(None),
@@ -4174,6 +4192,17 @@ def analyze_unified(
     # membership check immediately below -- never trusted merely because
     # the client supplied it.
     startup_id: int | None = Form(None),
+    # Task 31 -- Evidence Engine v1 product integration. `engine` is
+    # client-REQUESTED, never client-AUTHORIZED: resolve_engine() below
+    # is the only thing that decides whether this request actually runs
+    # on evidence_v1 (server-side EVIDENCE_V1_ENABLED must also be true)
+    # -- an unrecognized or disabled value silently, safely resolves to
+    # "legacy", never an error. `company_name` is EvidenceV1-only: the
+    # legacy pipeline extracts a company name itself from assembled
+    # text/PDF/website content and has never needed this field, so it is
+    # optional and ignored entirely on the legacy path.
+    engine: str | None = Form(None),
+    company_name: str | None = Form(None),
     current_user: AuthenticatedUser = RequireAuth,
 ):
     # SIE Authentication Phase 2: requires a valid Clerk-authenticated
@@ -4219,6 +4248,123 @@ def analyze_unified(
     if startup_id is not None:
         require_startup_member(startup_id=startup_id, current_user=current_user)
 
+    # -------------------------------------------------------------------
+    # Task 31 item 2 -- the ONE engine-selection boundary. Everything
+    # below this block, for the rest of this function, is the legacy
+    # path, completely unmodified from before this task. A request that
+    # resolves to evidence_v1 returns from inside this block and never
+    # reaches any legacy-specific code (PDF handling, multi-source
+    # assembly, run_due_diligence(), save_analysis()).
+    # -------------------------------------------------------------------
+    resolved_engine = resolve_engine(engine)
+
+    if resolved_engine == Engine.EVIDENCE_V1:
+        # item 7: narrow input scope for the first integration -- website
+        # + company name only. A pitch deck or free-form company text
+        # combined with engine=evidence_v1 fails CLEARLY here, before any
+        # cost is incurred, rather than being silently ignored.
+        stripped_website_url = website_url.strip() if website_url else None
+        stripped_company_name = company_name.strip() if company_name else None
+        has_pdf_for_evidence_v1 = pdf is not None and bool(pdf.filename)
+
+        if has_pdf_for_evidence_v1 or (company_text and company_text.strip()):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Evidence Engine v1 currently supports company-website analysis only "
+                    "(no pitch deck or free-form company text yet). Please provide a website "
+                    "URL and company name, or omit the engine parameter to use the standard "
+                    "analysis."
+                ),
+            )
+        if startup_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Evidence Engine v1 does not yet support founder-targeted re-analysis.",
+            )
+        if not stripped_website_url or not stripped_company_name:
+            raise HTTPException(
+                status_code=400,
+                detail="Evidence Engine v1 requires both a company name and a website URL.",
+            )
+        try:
+            validated_evidence_v1_url = WebsiteAnalysisRequest(url=stripped_website_url)
+        except PydanticValidationError:
+            raise HTTPException(
+                status_code=400, detail="Website URL must start with http:// or https://",
+            )
+
+        # Same cost/abuse protection as the legacy path, reused unchanged
+        # (item 16's own "preserve useful telemetry" + the same real-
+        # money concern: evidence_v1 also makes real, paid OpenAI/Tavily
+        # calls) -- compute_analysis_fingerprint()/has_recent_duplicate_
+        # completed_run()/count_recent_analysis_runs()/begin_analysis_run()/
+        # finish_analysis_run() are engine-agnostic already (keyed on
+        # user_id + a content fingerprint), so no new protection
+        # mechanism was built for this engine.
+        evidence_v1_fingerprint = compute_analysis_fingerprint(None, stripped_website_url, None)
+
+        if has_recent_duplicate_completed_run(current_user.user_id, evidence_v1_fingerprint):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "You recently submitted this exact analysis. Please wait a "
+                    "few minutes before submitting it again."
+                ),
+            )
+        if count_recent_analysis_runs(current_user.user_id) >= DAILY_ANALYSIS_CAP:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"You've reached the current beta limit of {DAILY_ANALYSIS_CAP} "
+                    f"analyses per {USAGE_WINDOW_HOURS} hours. Please try again later."
+                ),
+            )
+
+        evidence_v1_run_id = begin_analysis_run(current_user.user_id, None, evidence_v1_fingerprint)
+        if evidence_v1_run_id is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "An analysis is already running for your account. Please "
+                    "wait for it to finish before starting another."
+                ),
+            )
+
+        evidence_v1_run_status = "failed"
+        try:
+            try:
+                submission = submit_evidence_v1_analysis(
+                    owner_user_id=current_user.user_id,
+                    company_name=stripped_company_name,
+                    website_url=validated_evidence_v1_url.url,
+                )
+            except EvidenceV1ServiceError as exc:
+                # item 15: a typed, already-clear user_message -- never
+                # the raw exception, never a provider/database detail.
+                # unsupported_input -> 400 (the caller's own mistake);
+                # everything else (not_configured/acquisition_failed/
+                # persistence_failed) is a server-side condition -> 502.
+                status_code = 400 if exc.reason.value == "unsupported_input" else 502
+                raise HTTPException(status_code=status_code, detail=exc.user_message)
+
+            evidence_v1_run_status = "completed"
+            return EvidenceV1AnalysisResponse(
+                analysis_id=submission.analysis_id,
+                methodology_version=submission.methodology_version,
+                company_name=submission.company_name,
+                canonical_website=submission.canonical_website,
+                stage=submission.stage,
+                company_coverage_pct=submission.company_coverage_pct,
+                company_confidence=submission.company_confidence,
+                company_publishable=submission.company_publishable,
+            )
+        finally:
+            finish_analysis_run(evidence_v1_run_id, evidence_v1_run_status)
+
+    # -------------------------------------------------------------------
+    # Legacy path -- unchanged from before Task 31.
+    # -------------------------------------------------------------------
     website_url = website_url.strip() if website_url else None
     company_text = company_text.strip() if company_text else None
     has_pdf = pdf is not None and bool(pdf.filename)

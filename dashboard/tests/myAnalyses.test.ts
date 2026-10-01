@@ -44,17 +44,27 @@ function test_view_uses_a_real_clerk_token(): void {
 }
 
 function test_view_reopens_each_entry_via_its_own_company_name(): void {
-  // The regression this guards: an entry must link to the SAME authorized
-  // report GET /startup/{company_name} already gates -- never a second,
-  // separate read of analysis content embedded in the list itself.
+  // The regression this guards: a LEGACY entry must link to the SAME
+  // authorized report GET /startup/{company_name} already gates -- never
+  // a second, separate read of analysis content embedded in the list
+  // itself. Task 31 wraps each row as `{kind, created_at, data}` (to
+  // merge with Evidence v1 rows, which link to /evidence/{id} instead --
+  // see tests/evidenceV1.test.ts) -- the legacy company_name field now
+  // lives at `entry.data.company_name`, same value, same route.
   const source = readSource("app/my-analyses/MyAnalysesView.tsx");
-  expect(/\/startup\/\$\{encodeURIComponent\(entry\.company_name\)\}/.test(source), "Each entry must link to /startup/{company_name} to reopen its own authorized report");
-  expect(!/entry\.methodology/.test(source), "MyAnalysesView must never render analysis content inline -- it must link to the authorized /startup/{name} route instead");
+  expect(/\/startup\/\$\{encodeURIComponent\(entry\.data\.company_name\)\}/.test(source), "Each legacy entry must link to /startup/{company_name} to reopen its own authorized report");
+  expect(!/entry\.data\.methodology/.test(source), "MyAnalysesView must never render analysis content inline -- it must link to the authorized /startup/{name} route instead");
 }
 
 function test_view_handles_the_empty_state_honestly(): void {
+  // Task 31 -- MyAnalysesView now merges legacy + Evidence v1 analyses
+  // into one `combined` list (tests/evidenceV1.test.ts covers the merge
+  // itself); the empty-state check below was updated from
+  // `analyses.length === 0` to `combined.length === 0` for the same
+  // reason -- it is genuinely checking "no analyses of EITHER engine"
+  // now, not a narrower rename that lost meaning.
   const source = readSource("app/my-analyses/MyAnalysesView.tsx");
-  expect(/analyses\.length === 0/.test(source), "MyAnalysesView must render a distinct empty state rather than an empty list with no explanation");
+  expect(/combined\.length === 0/.test(source), "MyAnalysesView must render a distinct empty state rather than an empty list with no explanation");
   expect(/href="\/analyze"/.test(source), "The empty state must offer a way to submit a first analysis");
 }
 

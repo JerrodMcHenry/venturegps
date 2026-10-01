@@ -11,7 +11,7 @@ import ErrorMessage from "@/components/ui/ErrorMessage";
 import Input from "@/components/ui/Input";
 import Skeleton from "@/components/ui/Skeleton";
 import Textarea from "@/components/ui/Textarea";
-import { analyzeMultiSource, getFounderStartupWorkspace } from "@/lib/api";
+import { analyzeMultiSource, getFounderStartupWorkspace, isEvidenceV1Response } from "@/lib/api";
 import { consumeVentureDescriptionForAnalyze } from "@/lib/ventureToStartupHandoff";
 
 // Unified Multi-Source Analyze Startup: company website, pitch deck, and
@@ -174,6 +174,17 @@ export default function AnalyzeStartupForm() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const [companyText, setCompanyText] = useState("");
+
+  // Task 31 -- Evidence Engine v1 product integration, controlled rollout.
+  // Deliberately NOT a checkbox in the default UI: reachable only via
+  // ?engine=evidence_v1, so the ordinary analysis experience is
+  // completely unchanged for every visitor who doesn't already know this
+  // exists. Requesting it is never authorization -- the server
+  // independently validates against its own EVIDENCE_V1_ENABLED
+  // configuration and silently runs the unchanged legacy pipeline
+  // instead when it is not server-enabled (see app/evidence_v1/config.py).
+  const useEvidenceV1 = searchParams.get("engine") === "evidence_v1";
+  const [evidenceV1CompanyName, setEvidenceV1CompanyName] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -378,7 +389,20 @@ export default function AnalyzeStartupForm() {
         companyText: companyText.trim() || undefined,
         startupId: isFounderTargeted ? founderTarget.startupId : undefined,
         token,
+        engine: useEvidenceV1 ? "evidence_v1" : undefined,
+        companyName: useEvidenceV1 ? evidenceV1CompanyName.trim() || undefined : undefined,
       });
+
+      // Task 31 -- if the server actually ran Evidence Engine v1 (the
+      // server-side flag was enabled; this is never guaranteed just
+      // because useEvidenceV1 was requested), the response carries its
+      // own stable analysis_id and shape -- redirect to its own report
+      // route, never /startup/{name} (a different table, a different
+      // methodology, no overall score to render there).
+      if (isEvidenceV1Response(response)) {
+        router.push(`/evidence/${encodeURIComponent(response.analysis_id)}`);
+        return;
+      }
 
       // Founder-targeted mode: redirect back into Founder Workspace for
       // the exact startup_id just submitted, not the public profile --
@@ -584,6 +608,28 @@ export default function AnalyzeStartupForm() {
 
       {!isSubmitting ? (
         <form onSubmit={handleSubmit} className="space-y-6">
+          {useEvidenceV1 ? (
+            <div className="rounded-xl border border-primary/30 bg-primary/5 px-5 py-4">
+              <p className="text-sm font-semibold text-text-primary">Evidence Engine v1 (controlled beta)</p>
+              <p className="mt-1 text-sm text-text-secondary">
+                This analysis will run on VentureGPS&rsquo;s evidence-first engine instead of the
+                standard analysis. It supports a company website only (no pitch deck or additional
+                text yet), and will fall back to the standard analysis automatically if this engine
+                isn&rsquo;t enabled for your account.
+              </p>
+              <div className="mt-3">
+                <Input
+                  id="evidence-v1-company-name"
+                  label="Company Name"
+                  type="text"
+                  value={evidenceV1CompanyName}
+                  onChange={(event) => setEvidenceV1CompanyName(event.target.value)}
+                  placeholder="Acme Inc."
+                />
+              </div>
+            </div>
+          ) : null}
+
           <Input
             id="website-url"
             label="Company Website"
@@ -702,7 +748,7 @@ export default function AnalyzeStartupForm() {
           </Button>
         </form>
       ) : (
-        <AnalyzingState elapsedSeconds={elapsedSeconds} />
+        <AnalyzingState elapsedSeconds={elapsedSeconds} isEvidenceV1={useEvidenceV1} />
       )}
     </>
   );
@@ -730,7 +776,30 @@ export default function AnalyzeStartupForm() {
 // exactly what it was: a static list of what the pipeline covers, never
 // live per-stage progress -- the backend does not report which call is
 // in flight, and this deliberately does not pretend otherwise.
-function AnalyzingState({ elapsedSeconds }: { elapsedSeconds: number }) {
+// Task 31 item 14 -- Evidence Engine v1's own real stages
+// (app/evidence_engine/acquisition/pipeline.py's own telemetry stage
+// names: research_planning, source_discovery_and_retrieval,
+// evidence_extraction, contradiction_detection, ledger_construction,
+// six_pillar_evaluation_and_aggregation), described honestly in plain
+// language -- never a fabricated percentage, same "static list, not
+// live per-stage progress" discipline STAGES above already established,
+// since this backend also does not report which stage is in flight.
+const EVIDENCE_V1_STAGES = [
+  "Researching public sources",
+  "Retrieving and grounding evidence",
+  "Structuring claims",
+  "Evaluating methodology",
+  "Preparing report",
+];
+
+function AnalyzingState({
+  elapsedSeconds,
+  isEvidenceV1 = false,
+}: {
+  elapsedSeconds: number;
+  isEvidenceV1?: boolean;
+}) {
+  const stages = isEvidenceV1 ? EVIDENCE_V1_STAGES : STAGES;
   return (
     <div className="rounded-2xl border border-primary/15 bg-surface/70 p-8 shadow-lg shadow-primary/5 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/60">
       <div className="flex items-center gap-4">
@@ -748,8 +817,9 @@ function AnalyzingState({ elapsedSeconds }: { elapsedSeconds: number }) {
           </p>
 
           <p className="mt-1 text-sm text-text-secondary">
-            VentureGPS is running AI-assisted research on this company, then AI-generated analysis
-            across the six Intelligence Pillars. Usually 2&ndash;4 minutes -- please keep this tab open.
+            {isEvidenceV1
+              ? "VentureGPS is running Evidence Engine v1: gathering and grounding real evidence, then evaluating it against the six Intelligence Pillars. Usually 30–60 seconds — please keep this tab open."
+              : "VentureGPS is running AI-assisted research on this company, then AI-generated analysis across the six Intelligence Pillars. Usually 2–4 minutes -- please keep this tab open."}
           </p>
         </div>
       </div>
@@ -764,7 +834,7 @@ function AnalyzingState({ elapsedSeconds }: { elapsedSeconds: number }) {
         </p>
 
         <ul className="mt-3 space-y-2 text-sm text-text-secondary">
-          {STAGES.map((stage) => (
+          {stages.map((stage) => (
             <li key={stage} className="flex items-center gap-2.5">
               <span
                 aria-hidden="true"

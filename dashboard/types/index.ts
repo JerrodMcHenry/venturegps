@@ -15,3 +15,4 @@ export * from "./fundraisingReadiness";
 export * from "./investorWorkspace";
 export * from "./pitchDeckCoach";
 export * from "./finance";
+export * from "./evidenceV1";

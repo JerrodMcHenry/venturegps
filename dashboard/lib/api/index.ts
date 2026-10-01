@@ -22,3 +22,4 @@ export * from "./investorWorkspace";
 export * from "./pitchDeckCoach";
 export * from "./adminAnalytics";
 export * from "./financials";
+export * from "./evidenceV1";

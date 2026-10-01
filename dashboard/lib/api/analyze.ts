@@ -1,4 +1,4 @@
-import type { AnalyzeStartupResponse } from "@/types";
+import type { AnalyzeStartupResponse, EvidenceV1AnalysisResponse } from "@/types";
 
 import { apiFetch } from "./client";
 
@@ -33,12 +33,27 @@ const ANALYZE_TIMEOUT_MS = 10 * 60 * 1000;
 // AnalyzeStartupForm.tsx), attached as `Authorization: Bearer <token>`
 // via apiFetch's `token` option. This function never reads or stores the
 // token itself; it only forwards what it's given for this one request.
+// Task 31 -- Evidence Engine v1 product integration. A response with
+// engine: "evidence_v1" is an EvidenceV1AnalysisResponse; anything else
+// (the existing shape, no `engine` field) is the unchanged legacy
+// AnalyzeStartupResponse. Callers narrow on the `engine` field -- see
+// AnalyzeStartupForm.tsx's own navigation logic.
+export type AnalyzeMultiSourceResponse = AnalyzeStartupResponse | EvidenceV1AnalysisResponse;
+
+export function isEvidenceV1Response(
+  response: AnalyzeMultiSourceResponse
+): response is EvidenceV1AnalysisResponse {
+  return (response as EvidenceV1AnalysisResponse).engine === "evidence_v1";
+}
+
 export function analyzeMultiSource({
   websiteUrl,
   pdfFile,
   companyText,
   startupId,
   token,
+  engine,
+  companyName,
 }: {
   websiteUrl?: string;
   pdfFile?: File | null;
@@ -52,7 +67,16 @@ export function analyzeMultiSource({
   // trusted just because it was sent.
   startupId?: number | null;
   token?: string | null;
-}): Promise<AnalyzeStartupResponse> {
+  // Task 31 item 4: REQUESTS evidence_v1 -- never authorizes it. The
+  // server independently validates against its own EVIDENCE_V1_ENABLED
+  // configuration and silently falls back to the unchanged legacy path
+  // when it is not server-enabled, regardless of this value.
+  engine?: "evidence_v1";
+  // Task 31 item 7: required (and used) only when engine === "evidence_v1"
+  // -- the legacy pipeline extracts a company name itself and ignores
+  // this field entirely.
+  companyName?: string;
+}): Promise<AnalyzeMultiSourceResponse> {
   const formData = new FormData();
 
   if (websiteUrl) {
@@ -71,7 +95,15 @@ export function analyzeMultiSource({
     formData.append("startup_id", String(startupId));
   }
 
-  return apiFetch<AnalyzeStartupResponse>("/analyze", {
+  if (engine) {
+    formData.append("engine", engine);
+  }
+
+  if (companyName) {
+    formData.append("company_name", companyName);
+  }
+
+  return apiFetch<AnalyzeMultiSourceResponse>("/analyze", {
     method: "POST",
     body: formData,
     timeoutMs: ANALYZE_TIMEOUT_MS,
