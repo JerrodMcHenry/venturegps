@@ -1,0 +1,480 @@
+{
+ "analysis_id": "offline-notion-fixture",
+ "engine": "evidence_v1",
+ "methodology_version": "evidence-engine-v1-candidate.1",
+ "company_name": "Notion",
+ "canonical_website": "https://www.notion.com",
+ "stage": "Growth",
+ "run_status": "completed",
+ "company_coverage_pct": 18.0,
+ "company_confidence": "Medium",
+ "company_publishable": false,
+ "created_at": "2026-10-01T03:53:38Z",
+ "result": {
+  "company_ref": "notion",
+  "as_of": "2026-09-30",
+  "generated_at": "2026-09-30",
+  "total_claims_in_ledger": 7,
+  "rejected_count": 0,
+  "accepted_claims": [
+   {
+    "claim_id": "notion-001",
+    "claim_text": "Notion's product is available as a web application and as native desktop and mobile applications.",
+    "subject_entity": "Notion",
+    "source_url": "https://www.notion.so",
+    "source_publisher": "Notion (product website)",
+    "source_type": "product_documentation",
+    "published_at": null,
+    "retrieved_at": "2026-09-01",
+    "support_status": "directly_supported",
+    "excerpt": "Notion is available via web browser and as native desktop and mobile apps.",
+    "assessment_criteria": [
+     "product_existence_maturity"
+    ],
+    "independence_group_id": "notion-product-existence",
+    "structured_fact": null
+   },
+   {
+    "claim_id": "notion-002",
+    "claim_text": "Independent software-review coverage describes Notion as combining notes, documents, and project tracking in a single connected workspace, a combination frequently contrasted with single-purpose competitor tools.",
+    "subject_entity": "Notion",
+    "source_url": null,
+    "source_publisher": "a technology/software-review publication",
+    "source_type": "independent_reporting",
+    "published_at": null,
+    "retrieved_at": "2026-09-01",
+    "support_status": "directly_supported",
+    "excerpt": "...combines notes, docs, wikis, and light project tracking into one connected workspace...",
+    "assessment_criteria": [
+     "differentiation_claim_corroboration"
+    ],
+    "independence_group_id": "notion-differentiation-review",
+    "structured_fact": null
+   },
+   {
+    "claim_id": "notion-003",
+    "claim_text": "Notion publishes a public API enabling third-party integrations.",
+    "subject_entity": "Notion",
+    "source_url": null,
+    "source_publisher": "Notion (developer documentation)",
+    "source_type": "product_documentation",
+    "published_at": null,
+    "retrieved_at": "2026-09-01",
+    "support_status": "directly_supported",
+    "excerpt": "Notion offers a public API for building integrations.",
+    "assessment_criteria": [
+     "technical_depth_signal"
+    ],
+    "independence_group_id": "notion-api",
+    "structured_fact": null
+   },
+   {
+    "claim_id": "notion-004",
+    "claim_text": "Notion integrates with Slack.",
+    "subject_entity": "Notion",
+    "source_url": null,
+    "source_publisher": "an independent integration/reporting source",
+    "source_type": "independent_reporting",
+    "published_at": null,
+    "retrieved_at": "2026-09-01",
+    "support_status": "directly_supported",
+    "excerpt": "Notion offers a Slack integration for sharing page updates.",
+    "assessment_criteria": [
+     "technical_depth_signal"
+    ],
+    "independence_group_id": "notion-integration-slack",
+    "structured_fact": null
+   },
+   {
+    "claim_id": "notion-005",
+    "claim_text": "Notion integrates with Google Drive.",
+    "subject_entity": "Notion",
+    "source_url": null,
+    "source_publisher": "an independent integration/reporting source",
+    "source_type": "independent_reporting",
+    "published_at": null,
+    "retrieved_at": "2026-09-01",
+    "support_status": "directly_supported",
+    "excerpt": "Notion supports embedding and linking Google Drive files.",
+    "assessment_criteria": [
+     "technical_depth_signal"
+    ],
+    "independence_group_id": "notion-integration-gdrive",
+    "structured_fact": null
+   },
+   {
+    "claim_id": "notion-stage-001",
+    "claim_text": "Independent reporting describes Notion as a mature, growth-stage company with a multi-year funding and operating history.",
+    "subject_entity": "Notion",
+    "source_url": null,
+    "source_publisher": "a business/technology publication",
+    "source_type": "independent_reporting",
+    "published_at": null,
+    "retrieved_at": "2026-09-01",
+    "support_status": "directly_supported",
+    "excerpt": "...described as a mature, growth-stage company...",
+    "assessment_criteria": [
+     "stage_signal"
+    ],
+    "independence_group_id": "notion-stage-maturity",
+    "structured_fact": {
+     "kind": "funding_round_type",
+     "value": "growth-stage financing"
+    }
+   },
+   {
+    "claim_id": "notion-006",
+    "claim_text": "Independent reporting describes Notion's large, actively-contributing template and community ecosystem as a factor supporting retention within organizations already using it.",
+    "subject_entity": "Notion",
+    "source_url": null,
+    "source_publisher": "a technology/business publication",
+    "source_type": "independent_reporting",
+    "published_at": null,
+    "retrieved_at": "2026-09-01",
+    "support_status": "directly_supported",
+    "excerpt": "...a large community of template creators and power users contributes to ongoing adoption within teams...",
+    "assessment_criteria": [
+     "defensibility_signal"
+    ],
+    "independence_group_id": "notion-ecosystem-defensibility",
+    "structured_fact": null
+   }
+  ],
+  "pillar_results": [
+   {
+    "pillar": "Market Opportunity",
+    "strength": null,
+    "coverage_pct": 0.0,
+    "confidence": "Low",
+    "publishable": false,
+    "withhold_reasons": [
+     "weighted coverage 0.0% < floor 40.0%",
+     "only 0 scored dimension(s) < floor 2"
+    ],
+    "dimension_results": [
+     {
+      "dimension": "market_definition_size",
+      "category": "classified",
+      "weight": 0.3,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "Classified as 'NOT_DISCLOSED', which does not score this dimension.",
+      "classification_label": "NOT_DISCLOSED"
+     },
+     {
+      "dimension": "market_growth_signal",
+      "category": "classified",
+      "weight": 0.25,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "Classified as 'NOT_DISCLOSED', which does not score this dimension.",
+      "classification_label": "NOT_DISCLOSED"
+     },
+     {
+      "dimension": "timing_catalyst",
+      "category": "classified",
+      "weight": 0.2,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "Classified as 'NONE_DISCLOSED', which does not score this dimension.",
+      "classification_label": "NONE_DISCLOSED"
+     },
+     {
+      "dimension": "competitive_landscape_position",
+      "category": "classified",
+      "weight": 0.25,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "Classified as 'NOT_ESTABLISHED', which does not score this dimension.",
+      "classification_label": "NOT_ESTABLISHED"
+     }
+    ]
+   },
+   {
+    "pillar": "Product & Technology",
+    "strength": 6.5,
+    "coverage_pct": 100.0,
+    "confidence": "Medium",
+    "publishable": true,
+    "withhold_reasons": [],
+    "dimension_results": [
+     {
+      "dimension": "product_existence_maturity",
+      "category": "computed",
+      "weight": 0.25,
+      "score": 7.0,
+      "availability": "scorable",
+      "supporting_claim_ids": [
+       "notion-001"
+      ],
+      "confidence": "Medium",
+      "rationale": "A directly observable, independently-checkable product artifact is admissible.",
+      "classification_label": null
+     },
+     {
+      "dimension": "differentiation_claim_corroboration",
+      "category": "classified",
+      "weight": 0.25,
+      "score": 6.0,
+      "availability": "scorable",
+      "supporting_claim_ids": [
+       "notion-002"
+      ],
+      "confidence": "Medium",
+      "rationale": "Classified as 'CORROBORATED', scored via the stage-indexed lookup table (stage=Growth).",
+      "classification_label": "CORROBORATED"
+     },
+     {
+      "dimension": "technical_depth_signal",
+      "category": "classified",
+      "weight": 0.25,
+      "score": 7.0,
+      "availability": "scorable",
+      "supporting_claim_ids": [
+       "notion-003",
+       "notion-004",
+       "notion-005"
+      ],
+      "confidence": "High",
+      "rationale": "Classified as 'SUBSTANTIAL', scored via the stage-indexed lookup table (stage=Growth).",
+      "classification_label": "SUBSTANTIAL"
+     },
+     {
+      "dimension": "defensibility_signal",
+      "category": "classified",
+      "weight": 0.25,
+      "score": 6.0,
+      "availability": "scorable",
+      "supporting_claim_ids": [
+       "notion-006"
+      ],
+      "confidence": "Medium",
+      "rationale": "Classified as 'CORROBORATED_MOAT', scored via the stage-indexed lookup table (stage=Growth).",
+      "classification_label": "CORROBORATED_MOAT"
+     }
+    ]
+   },
+   {
+    "pillar": "Team & Leadership",
+    "strength": null,
+    "coverage_pct": 0.0,
+    "confidence": "Low",
+    "publishable": false,
+    "withhold_reasons": [
+     "weighted coverage 0.0% < floor 40.0%",
+     "only 0 scored dimension(s) < floor 2"
+    ],
+    "dimension_results": [
+     {
+      "dimension": "founder_relevant_experience",
+      "category": "classified",
+      "weight": 0.4,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "Classified as 'NONE_DISCLOSED', which does not score this dimension.",
+      "classification_label": "NONE_DISCLOSED"
+     },
+     {
+      "dimension": "leadership_composition",
+      "category": "classified",
+      "weight": 0.3,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "Classified as 'NOT_ESTABLISHED', which does not score this dimension.",
+      "classification_label": "NOT_ESTABLISHED"
+     },
+     {
+      "dimension": "public_track_record",
+      "category": "classified",
+      "weight": 0.3,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "Classified as 'NONE_DISCLOSED', which does not score this dimension.",
+      "classification_label": "NONE_DISCLOSED"
+     }
+    ]
+   },
+   {
+    "pillar": "Commercial Traction",
+    "strength": null,
+    "coverage_pct": 0.0,
+    "confidence": "Low",
+    "publishable": false,
+    "withhold_reasons": [
+     "weighted coverage 0.0% < floor 40.0%",
+     "only 0 scored dimension(s) < floor 2"
+    ],
+    "dimension_results": [
+     {
+      "dimension": "disclosed_scale",
+      "category": "computed",
+      "weight": 0.25,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No claim is on record for this dimension.",
+      "classification_label": null
+     },
+     {
+      "dimension": "growth_trajectory",
+      "category": "computed",
+      "weight": 0.25,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No claim is on record for this dimension.",
+      "classification_label": null
+     },
+     {
+      "dimension": "customer_base_breadth",
+      "category": "classified",
+      "weight": 0.2,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No claim is on record for this dimension.",
+      "classification_label": null
+     },
+     {
+      "dimension": "commercial_validation",
+      "category": "classified",
+      "weight": 0.15,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No claim is on record for this dimension.",
+      "classification_label": null
+     },
+     {
+      "dimension": "retention_renewal_signal",
+      "category": "classified",
+      "weight": 0.15,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No claim is on record for this dimension.",
+      "classification_label": null
+     }
+    ]
+   },
+   {
+    "pillar": "Execution & Momentum",
+    "strength": null,
+    "coverage_pct": 0.0,
+    "confidence": "Low",
+    "publishable": false,
+    "withhold_reasons": [
+     "weighted coverage 0.0% < floor 40.0%",
+     "only 0 scored dimension(s) < floor 2"
+    ],
+    "dimension_results": [
+     {
+      "dimension": "shipping_velocity",
+      "category": "classified",
+      "weight": 0.35,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No claim is on record for this dimension.",
+      "classification_label": null
+     },
+     {
+      "dimension": "gtm_motion_evidence",
+      "category": "classified",
+      "weight": 0.35,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No claim is on record for this dimension.",
+      "classification_label": null
+     },
+     {
+      "dimension": "strategic_consistency",
+      "category": "computed",
+      "weight": 0.3,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No dated public statement is on record for this dimension.",
+      "classification_label": null
+     }
+    ]
+   },
+   {
+    "pillar": "Financial & Funding Signals",
+    "strength": null,
+    "coverage_pct": 0.0,
+    "confidence": "Low",
+    "publishable": false,
+    "withhold_reasons": [
+     "weighted coverage 0.0% < floor 40.0%",
+     "only 0 scored dimension(s) < floor 2"
+    ],
+    "dimension_results": [
+     {
+      "dimension": "funding_history",
+      "category": "computed",
+      "weight": 0.45,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No claim is on record for this dimension.",
+      "classification_label": null
+     },
+     {
+      "dimension": "revenue_disclosure",
+      "category": "computed",
+      "weight": 0.25,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No claim is tagged for this dimension. Revenue Disclosure only ever reuses a claim Commercial Traction's own Disclosed Scale already requires, explicitly tagged with this dimension too -- it never re-extracts a figure independently.",
+      "classification_label": null
+     },
+     {
+      "dimension": "capital_efficiency",
+      "category": "classified",
+      "weight": 0.3,
+      "score": null,
+      "availability": "unscored_no_evidence",
+      "supporting_claim_ids": [],
+      "confidence": "Low",
+      "rationale": "No claim is on record for this dimension.",
+      "classification_label": null
+     }
+    ]
+   }
+  ],
+  "company_withhold_reasons": [
+   "company-level weighted coverage 18.0% < floor 40.0%",
+   "only 1 published pillar(s) < floor 2"
+  ],
+  "cross_pillar_audit": [],
+  "wall_clock_seconds": 0
+ },
+ "telemetry": null
+}
