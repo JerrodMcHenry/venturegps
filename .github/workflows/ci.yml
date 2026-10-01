@@ -317,6 +317,13 @@ jobs:
       - name: Pipeline concurrency -- bounded parallelism and SPS engine default (app/tests/test_pipeline_concurrency.py)
         run: python -m app.tests.test_pipeline_concurrency
 
+      # Evidence-v1's table is managed only by its own isolated Alembic
+      # environment (alembic_evidence_v1.ini -> evidence_v1_alembic_version),
+      # never by app/api.py's import-time migrations -- apply it to this
+      # job's disposable database before the tests that use it.
+      - name: Evidence Engine v1 -- apply migrations to the disposable CI database
+        run: alembic -c alembic_evidence_v1.ini upgrade head
+
       # Task 31/33 -- Evidence Engine v1 product integration. The
       # authoritative regression coverage for the server-side engine-
       # selection boundary (resolve_engine() -- a client can never
