@@ -317,6 +317,25 @@ jobs:
       - name: Pipeline concurrency -- bounded parallelism and SPS engine default (app/tests/test_pipeline_concurrency.py)
         run: python -m app.tests.test_pipeline_concurrency
 
+      # Task 31/33 -- Evidence Engine v1 product integration. The
+      # authoritative regression coverage for the server-side engine-
+      # selection boundary (resolve_engine() -- a client can never
+      # authorize evidence_v1 merely by requesting it), the adapter/
+      # service error-mapping contract (no raw provider exception or
+      # secret ever reaches the client), and ownership-scoped retrieval
+      # (GET /evidence-v1/analyses/{id} -- a non-owner and a nonexistent
+      # id receive the byte-identical 404, same discipline as
+      # test_analysis_visibility.py above). Fully offline: the one
+      # function that would reach real OpenAI/Tavily
+      # (app.evidence_v1.service.run_evidence_v1_analysis) is
+      # monkeypatched to a fake, deterministic result for every test in
+      # this file. This step was missing from this job despite the file
+      # existing since Task 31 -- added during Task 35's portfolio
+      # closeout as a repository-hygiene fix (no application code
+      # changed).
+      - name: Evidence Engine v1 -- engine selection, error mapping, ownership-scoped retrieval (app/tests/test_evidence_v1_integration.py)
+        run: python -m app.tests.test_evidence_v1_integration
+
   frontend:
     name: Frontend — lint, typecheck, tests, build
     runs-on: ubuntu-latest

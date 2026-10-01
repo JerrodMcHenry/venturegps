@@ -1,8 +1,20 @@
 .venv/
 .env
+.env.local
 **__pycache__/
 .DS_Store
 *.py[cod]
 .claude/
 # Generated reports
 reports/*.pdf
+
+# Frontend build/dependency output (dashboard/)
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+
+# Test caches
+.pytest_cache/
+.ruff_cache/

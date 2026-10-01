@@ -8,8 +8,14 @@ portfolio-facing architecture reference for the **second, newer** analysis engin
 behind a server-side flag: what request a user actually triggers, which steps are AI-driven versus
 deterministic, and why the boundary between those two kinds of steps is drawn where it is.
 
-This describes a real, running path in this codebase (`EVIDENCE_V1_ENABLED` gated, reachable today via
-`?engine=evidence_v1`), not a future plan.
+This describes a real, running path in this codebase, not a future plan. **Current status (Task 34,
+2026-10-01): deployed and validated in real production** — `EVIDENCE_V1_ENABLED=true` on the live backend
+(`https://sie-production-api.onrender.com`), reachable from the live frontend
+(`https://app.venturegps.ai/analyze`) via an explicit "Try our evidence-first analysis (beta)" opt-in
+checkbox, confirmed end to end with one real, paid production analysis (Notion,
+`docs/validation/EVIDENCE_V1_PRODUCTION_SMOKE_001.md`). This is the current, primary analysis architecture
+this repository demonstrates — the legacy SIE pipeline (`docs/portfolio/ENGINE_TRANSPARENCY.md`) remains
+live and unmodified for backward compatibility, not as the system this document is describing.
 
 ## 1. Component architecture
 
@@ -130,7 +136,31 @@ same claim as the LLM being *right*. The deterministic half of this pipeline gua
 the engine found and validated" from "the score computed from it" — a reader is never asked to trust an AI
 judgment that was not first run through a deterministic, inspectable check.
 
-## 4. What this integration deliberately does not do
+## 4. Trust boundaries
+
+Every boundary below is enforced in code, not convention, and each has its own test coverage:
+
+| Boundary | Who/what is untrusted | Enforcement |
+|---|---|---|
+| **Browser → Backend** | The browser (and anything a user submits through it) is never trusted to decide what it's authorized to do. The `?engine=evidence_v1` discoverability checkbox is a UI convenience only — it has zero authority. | `resolve_engine()` (`app/evidence_v1/config.py`) re-reads `EVIDENCE_V1_ENABLED` from the server's own environment on **every** request; a client requesting `engine=evidence_v1` while the flag is off silently and safely resolves to the legacy path, never an error, never an override. |
+| **Feature authorization** | A client-visible flag value is never itself the authorization boundary. | Same mechanism as above — the server is the only party that can turn the engine on, and it re-validates per request, not per session or per token. |
+| **External web content** | Every page `source_discovery_and_retrieval` fetches is untrusted, potentially adversarial text — including the literal possibility of prompt-injection attempts embedded in a scraped page. | The extraction system prompt explicitly instructs the model to treat `<source>` blocks as data, never as instructions (`providers_live.py`'s `_SYSTEM_PROMPT_TEMPLATE`); retrieval itself reuses the legacy `extract_text_from_website`'s existing SSRF hardening (scheme allow-listing, private/loopback/link-local/cloud-metadata-address rejection, DNS-rebinding-safe IP pinning, bounded redirects, oversized-response rejection) unchanged — `HttpSourceRetriever` adds nothing to and weakens nothing in that boundary. |
+| **LLM output** | Every claim an OpenAI extraction call proposes is untrusted, proposed data — never a fact until independently checked. | Grounding (the excerpt must be verbatim-present in the real retrieved text), semantic-fit validation, and contradiction detection all run in deterministic code before a candidate becomes a scorable `Claim` — see §3. |
+| **Methodology admission** | Which claims are allowed to influence a score is a deterministic decision, not an AI one. | `app/evidence_engine/scoring.py`/`cross_pillar_audit.py` compute every pillar score and the company-level Coverage/Confidence/publishable gate from already-validated claims only, with no model call anywhere in that path. |
+| **Database retrieval** | A valid, authenticated session is still not sufficient to read any row — only the caller's own rows. | `GET /evidence-v1/analyses/{id}` looks up strictly by the UUID id, then compares `row.owner_user_id` to the authenticated caller; a non-owner and a nonexistent id both receive the identical 404 (never a distinguishing 403), independently verified against the real production database with an unauthenticated `curl` call returning `401` with no data (`docs/validation/EVIDENCE_V1_PRODUCTION_SMOKE_001.md` §12). |
+
+## 5. Failure behavior — what fails closed, and how
+
+| Condition | Behavior |
+|---|---|
+| `EVIDENCE_V1_ENABLED` unset, false, or any non-`"true"`-like value | Fails closed to the legacy path — never an error, never a partial Evidence-v1 attempt. |
+| Missing `OPENAI_API_KEY`/`TAVILY_API_KEY` | Checked explicitly before any provider object is constructed (`adapter.py::_require_provider_credentials()`); the real missing-variable name is logged server-side only, the client receives a generic, non-leaking "this analysis mode isn't available right now" message. |
+| A provider/pipeline exception mid-run (e.g. a Tavily or OpenAI failure) | Caught once at the service boundary, logged server-side via `traceback.print_exc()` (never returned to the client), mapped to a generic "could not be completed, please try again" message — never a raw exception, stack trace, or credential fragment reaching the browser. |
+| The run succeeds but the database write fails | A distinct, separately-mapped failure reason (`PERSISTENCE_FAILED`) — the user is told the analysis completed but could not be saved, rather than silently returning a result that doesn't actually exist anywhere. |
+| Unsupported input (no website URL, or only free-form text) | Rejected with a clear 400 *before* any pipeline work starts or any provider is called — Evidence-v1's first integration deliberately supports exactly one input shape (company name + website), not a silent fallback to a different behavior. |
+| A pillar's evidence coverage falls below its publication floor | The pillar (and, if enough pillars are affected, the whole company-level analysis) is marked **withheld**, with the exact floor and the measured value shown — never silently scored anyway, never presented as equivalent to a pillar with real evidence. |
+
+## 6. What this integration deliberately does not do
 
 - **No scoring methodology change.** `app/evidence_engine/`'s own scoring rules (pillar weights, Coverage/
   Confidence thresholds) are unmodified by this product-integration work — this document describes how an
