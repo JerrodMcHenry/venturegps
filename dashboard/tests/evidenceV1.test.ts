@@ -139,11 +139,18 @@ function test_my_analyses_view_never_compares_coverage_to_the_legacy_score_badge
   expect(!/scoreBadgeClasses/.test(evidenceBlock), "Coverage must not be styled via the legacy score-tier badge classes");
 }
 
-// --- 6. Submission form: evidence_v1 is opt-in, never the default ---------
+// --- 6. Submission form: evidence_v1 requested only when the SERVER says so --
+// Final UX correction: the opt-in checkbox and ?engine=evidence_v1 deep-link
+// were removed -- the website-only form requests evidence_v1 whenever GET
+// /version reports it enabled. The server's resolve_engine() still decides.
+// Full form coverage: tests/analyzeWebsiteOnly.test.ts.
 
-function test_form_only_requests_evidence_v1_via_an_explicit_query_param(): void {
+function test_form_requests_evidence_v1_only_from_the_server_reported_flag(): void {
   const source = readSource("app/analyze/AnalyzeStartupForm.tsx");
-  expect(/searchParams\.get\("engine"\) === "evidence_v1"/.test(source), "evidence_v1 must be gated behind an explicit ?engine=evidence_v1, never a default-on toggle");
+  expect(/setServerMode\(info\.evidence_v1_enabled \? "evidence" : "standard"\)/.test(source), "website-only mode must come from GET /version's evidence_v1_enabled");
+  expect(!/searchParams\.get\("engine"\)/.test(source), "no query parameter may select or be required for the engine");
+  const engineRequests = source.match(/engine: "evidence_v1"/g) ?? [];
+  expect(engineRequests.length === 1, `evidence_v1 must be requested from exactly one place (the website-only submit), found ${engineRequests.length}`);
 }
 
 function test_form_redirects_evidence_v1_responses_to_the_new_report_route(): void {
@@ -187,7 +194,7 @@ const TESTS: [string, () => void][] = [
   ["test_my_analyses_view_fetches_both_engines_independently", test_my_analyses_view_fetches_both_engines_independently],
   ["test_my_analyses_view_links_evidence_v1_entries_to_their_own_report_route", test_my_analyses_view_links_evidence_v1_entries_to_their_own_report_route],
   ["test_my_analyses_view_never_compares_coverage_to_the_legacy_score_badge", test_my_analyses_view_never_compares_coverage_to_the_legacy_score_badge],
-  ["test_form_only_requests_evidence_v1_via_an_explicit_query_param", test_form_only_requests_evidence_v1_via_an_explicit_query_param],
+  ["test_form_requests_evidence_v1_only_from_the_server_reported_flag", test_form_requests_evidence_v1_only_from_the_server_reported_flag],
   ["test_form_redirects_evidence_v1_responses_to_the_new_report_route", test_form_redirects_evidence_v1_responses_to_the_new_report_route],
   ["test_form_loading_state_uses_honest_non_fabricated_language", test_form_loading_state_uses_honest_non_fabricated_language],
   ["test_type_shape_matches_the_backend_response_model", test_type_shape_matches_the_backend_response_model],

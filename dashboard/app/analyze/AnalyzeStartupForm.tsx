@@ -14,13 +14,21 @@ import Textarea from "@/components/ui/Textarea";
 import { analyzeMultiSource, getFounderStartupWorkspace, getVersion, isEvidenceV1Response } from "@/lib/api";
 import { consumeVentureDescriptionForAnalyze } from "@/lib/ventureToStartupHandoff";
 
-// Unified Multi-Source Analyze Startup: company website, pitch deck, and
-// additional company information are evidence SOURCES feeding one
-// canonical analysis, not separate mutually-exclusive modes -- all three
-// fields are shown together, any combination (including just one) is
-// valid, and a single submit sends whichever were filled in to POST
-// /analyze (see lib/api/analyze.ts::analyzeMultiSource). This replaces
-// the earlier three-tab mode switcher.
+// Final UX correction -- ONE analysis product. When the server reports
+// evidence-backed analysis enabled (GET /version's `evidence_v1_enabled`),
+// a normal new analysis is website-only (company name + website) and
+// always requests the evidence-backed engine: no engine checkbox, no
+// query parameter, no pitch-deck or free-form-text field. When the server
+// reports it disabled (or /version can't be read), the form is the
+// unchanged multi-source form below, where company website, pitch deck,
+// and additional company information are evidence SOURCES feeding one
+// canonical analysis (see lib/api/analyze.ts::analyzeMultiSource). A
+// founder-targeted re-analysis (?startup_id=) always uses that multi-
+// source form -- the evidence-backed engine doesn't support re-analysis.
+//
+// None of this is authorization: POST /analyze's server-side
+// resolve_engine() (app/evidence_v1/config.py) independently decides
+// which engine runs on every request.
 //
 // SIE Authentication Phase 1: this used to be app/analyze/page.tsx
 // itself. It's now a plain client component rendered by that page after
@@ -161,6 +169,29 @@ function validateForm(
   return null;
 }
 
+// Evidence-backed mode: website-only, and the company name is required
+// alongside it (POST /analyze rejects an evidence-backed request missing
+// either). Same client-side-only contract as validateForm() -- the backend
+// re-validates regardless.
+function validateWebsiteOnlyForm(companyName: string, websiteUrl: string): string | null {
+  if (companyName.trim().length === 0) {
+    return "Enter the company's name.";
+  }
+
+  if (websiteUrl.trim().length === 0) {
+    return "Enter the company's website.";
+  }
+
+  return validateWebsiteUrl(websiteUrl);
+}
+
+// "checking" until GET /version answers; "evidence" = the website-only,
+// evidence-backed flow; "standard" = the unchanged multi-source form
+// (server flag off, or /version unreadable -- fails closed to the
+// existing experience, which is also what the server itself would run
+// for a request that doesn't ask for the evidence-backed engine).
+type AnalysisMode = "checking" | "evidence" | "standard";
+
 export default function AnalyzeStartupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -175,23 +206,14 @@ export default function AnalyzeStartupForm() {
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const [companyText, setCompanyText] = useState("");
 
-  // Task 31/33 -- Evidence-first analysis (beta), controlled rollout.
-  // Discoverability is server-driven (Task 33 item 2): GET /version's
-  // own `evidence_v1_enabled` is the ONE signal that decides whether an
-  // entry point renders at all -- when the server reports it disabled,
-  // nothing below ever appears, and a visitor sees exactly the existing
-  // production experience. This is never the authorization boundary
-  // itself: POST /analyze's own server-side resolve_engine() always
-  // independently re-checks the SAME flag before running anything (see
-  // app/evidence_v1/config.py) -- a stale/cached/spoofed client-side
-  // read of this value can at worst show or hide a UI option, never
-  // actually run the beta engine on its own. `?engine=evidence_v1` in
-  // the URL remains a direct deep-link (useful for internal testing/
-  // demos) and pre-selects the toggle below when the feature is
-  // available; it is not itself trusted as authorization either.
-  const [evidenceV1Available, setEvidenceV1Available] = useState(false);
-  const [useEvidenceV1, setUseEvidenceV1] = useState(searchParams.get("engine") === "evidence_v1");
-  const [evidenceV1CompanyName, setEvidenceV1CompanyName] = useState("");
+  // Server-driven (GET /version's `evidence_v1_enabled`): decides which
+  // form renders, never which engine runs -- POST /analyze's own
+  // resolve_engine() re-checks the SAME server flag on every request, so a
+  // stale/spoofed client read can at worst show the wrong form; a request
+  // for the evidence-backed engine while the server flag is off simply runs
+  // the standard analysis (and redirects to its own report) instead.
+  const [serverMode, setServerMode] = useState<AnalysisMode>("checking");
+  const [companyName, setCompanyName] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -199,14 +221,15 @@ export default function AnalyzeStartupForm() {
     getVersion()
       .then((info) => {
         if (isMounted) {
-          setEvidenceV1Available(info.evidence_v1_enabled);
+          setServerMode(info.evidence_v1_enabled ? "evidence" : "standard");
         }
       })
       .catch(() => {
-        // Fails closed: if the version check itself fails, the beta
-        // entry point simply never appears -- same as the feature being
-        // disabled. Never surfaced as a user-facing error (this is a
-        // discoverability signal, not a page the user asked to load).
+        // Fails closed to the existing standard form -- never surfaced as
+        // a user-facing error (the page itself still works).
+        if (isMounted) {
+          setServerMode("standard");
+        }
       });
 
     return () => {
@@ -335,6 +358,11 @@ export default function AnalyzeStartupForm() {
 
   const isSubmitting = status === "submitting";
 
+  // A founder-targeted re-analysis always uses the standard multi-source
+  // form -- the evidence-backed engine doesn't support re-analysis.
+  const analysisMode: AnalysisMode = requestedStartupId !== null ? "standard" : serverMode;
+  const isWebsiteOnly = analysisMode === "evidence";
+
   useEffect(() => {
     if (!isSubmitting) {
       return;
@@ -382,7 +410,9 @@ export default function AnalyzeStartupForm() {
       return;
     }
 
-    const validationError = validateForm(websiteUrl, pdfFile, companyText);
+    const validationError = isWebsiteOnly
+      ? validateWebsiteOnlyForm(companyName, websiteUrl)
+      : validateForm(websiteUrl, pdfFile, companyText);
 
     if (validationError) {
       setStatus("error");
@@ -411,19 +441,26 @@ export default function AnalyzeStartupForm() {
 
       const isFounderTargeted = founderTarget.status === "ready";
 
-      const response = await analyzeMultiSource({
-        websiteUrl: websiteUrl.trim() || undefined,
-        pdfFile: pdfFile ?? undefined,
-        companyText: companyText.trim() || undefined,
-        startupId: isFounderTargeted ? founderTarget.startupId : undefined,
-        token,
-        engine: useEvidenceV1 ? "evidence_v1" : undefined,
-        companyName: useEvidenceV1 ? evidenceV1CompanyName.trim() || undefined : undefined,
-      });
+      // Website-only mode never sends a pitch deck or free-form text --
+      // those inputs aren't shown, and are never silently routed anywhere.
+      const response = isWebsiteOnly
+        ? await analyzeMultiSource({
+            websiteUrl: websiteUrl.trim(),
+            companyName: companyName.trim(),
+            engine: "evidence_v1",
+            token,
+          })
+        : await analyzeMultiSource({
+            websiteUrl: websiteUrl.trim() || undefined,
+            pdfFile: pdfFile ?? undefined,
+            companyText: companyText.trim() || undefined,
+            startupId: isFounderTargeted ? founderTarget.startupId : undefined,
+            token,
+          });
 
       // Task 31 -- if the server actually ran Evidence Engine v1 (the
       // server-side flag was enabled; this is never guaranteed just
-      // because useEvidenceV1 was requested), the response carries its
+      // because the website-only form requested it), the response carries its
       // own stable analysis_id and shape -- redirect to its own report
       // route, never /startup/{name} (a different table, a different
       // methodology, no overall score to render there).
@@ -447,9 +484,9 @@ export default function AnalyzeStartupForm() {
         return;
       }
 
-      const companyName = response.context?.company_name?.trim();
+      const profileName = response.context?.company_name?.trim();
 
-      if (!companyName) {
+      if (!profileName) {
         setStatus("error");
         setError(
           "The analysis completed, but VentureGPS could not determine a clear company name to build a profile for. Try including the company's name explicitly and submit again."
@@ -461,7 +498,7 @@ export default function AnalyzeStartupForm() {
       // exactly once when it reads the dynamic segment back out (see
       // app/startup/[id]/page.tsx), so this stays a single encode/decode
       // pass end-to-end, same contract as every other link into that route.
-      router.push(`/startup/${encodeURIComponent(companyName)}`);
+      router.push(`/startup/${encodeURIComponent(profileName)}`);
     } catch (caughtError) {
       console.error("Analyze Startup failed:", caughtError);
 
@@ -498,7 +535,7 @@ export default function AnalyzeStartupForm() {
   // falls back to the normal form -- per that phase's own "do not fall
   // back to normal analysis mode" requirement, showing this instead of a
   // form that would silently create an unrelated public analysis.
-  if (founderTarget.status === "checking") {
+  if (founderTarget.status === "checking" || analysisMode === "checking") {
     return (
       <>
         <PageHeader title="Analyze Startup" variant="glow" />
@@ -548,8 +585,9 @@ export default function AnalyzeStartupForm() {
                 version name with no meaning to a first-time founder.
                 Replaced with what the process actually does. */}
             <span className="text-base leading-7 text-text-secondary">
-              Provide a website, pitch deck, or company information and build a full,
-              evidence-based Startup Profile.
+              {isWebsiteOnly
+                ? "Enter a company website and get an evidence-backed assessment built from public sources."
+                : "Provide a website, pitch deck, or company information and build a full, evidence-based Startup Profile."}
             </span>
           </button>
         </div>
@@ -596,7 +634,9 @@ export default function AnalyzeStartupForm() {
         subtitle={
           isFounderTargeted
             ? "Provide a company website, an updated pitch deck, or additional information -- VentureGPS combines it with its own research and refreshes this startup's intelligence."
-            : "Provide a company website, a pitch deck, additional information, or any combination -- VentureGPS will combine what you give it with its own research and build one full, evidence-based Startup Analysis."
+            : isWebsiteOnly
+              ? "Enter a company website. VentureGPS researches public sources and builds an evidence-backed assessment based on the information it can verify."
+              : "Provide a company website, a pitch deck, additional information, or any combination -- VentureGPS will combine what you give it with its own research and build one full, evidence-based Startup Analysis."
         }
         variant="glow"
       />
@@ -627,138 +667,124 @@ export default function AnalyzeStartupForm() {
       {arrivedFromVenture && !isFounderTargeted && !isSubmitting ? (
         <div className="mb-6 rounded-xl border border-info/30 bg-info-soft px-5 py-4">
           <p className="text-sm text-text-secondary">
-            Pre-filled from your venture&rsquo;s description. This builds a new,
-            independent Startup Profile -- it won&rsquo;t be linked to or update
-            your venture workspace.
+            {isWebsiteOnly
+              ? "This analysis researches a company's public website and sources, so your venture's description isn't included. It builds a new, independent assessment -- it won't be linked to or update your venture workspace."
+              : "Pre-filled from your venture\u2019s description. This builds a new, independent Startup Profile -- it won\u2019t be linked to or update your venture workspace."}
           </p>
         </div>
       ) : null}
 
       {!isSubmitting ? (
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Task 33 item 2: this entire block renders ONLY when the
-              server (GET /version) reports the feature on -- when it
-              doesn't, nothing here exists and the form below is
-              byte-identical to the pre-beta experience. Product
-              language throughout; no internal names ("evidence_v1",
-              "engine adapter", a version identifier) anywhere a
-              non-technical user would see them. */}
-          {evidenceV1Available ? (
-            <div className="rounded-xl border border-primary/30 bg-primary/5 px-5 py-4">
-              <label className="flex cursor-pointer items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={useEvidenceV1}
-                  onChange={(event) => setUseEvidenceV1(event.target.checked)}
-                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                />
-                <span>
-                  <span className="text-sm font-semibold text-text-primary">
-                    Try our evidence-first analysis <span className="font-normal text-text-tertiary">(beta)</span>
-                  </span>
-                  <span className="mt-1 block text-sm text-text-secondary">
-                    Every finding is tied to a specific public source you can inspect yourself.
-                    Categories without enough public evidence are clearly marked rather than guessed
-                    at. Currently supports a company website only (no pitch deck or additional text
-                    yet).
-                  </span>
-                </span>
-              </label>
+          {isWebsiteOnly ? (
+            <>
+              <Input
+                id="company-name"
+                label="Company Name"
+                type="text"
+                value={companyName}
+                onChange={(event) => setCompanyName(event.target.value)}
+                placeholder="Acme Inc."
+              />
 
-              {useEvidenceV1 ? (
-                <div className="mt-3 pl-7">
-                  <Input
-                    id="evidence-v1-company-name"
-                    label="Company Name"
-                    type="text"
-                    value={evidenceV1CompanyName}
-                    onChange={(event) => setEvidenceV1CompanyName(event.target.value)}
-                    placeholder="Acme Inc."
-                  />
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+              <Input
+                id="website-url"
+                label="Company Website"
+                type="text"
+                inputMode="url"
+                value={websiteUrl}
+                onChange={(event) => setWebsiteUrl(event.target.value)}
+                placeholder="https://example.com"
+              />
 
-          <Input
-            id="website-url"
-            label="Company Website"
-            type="text"
-            inputMode="url"
-            value={websiteUrl}
-            onChange={(event) => setWebsiteUrl(event.target.value)}
-            placeholder="https://example.com"
-          />
+              <p className="text-sm text-text-secondary">
+                VentureGPS evaluates the available evidence across six areas. Categories without
+                sufficient evidence are left unscored rather than guessed.
+              </p>
+            </>
+          ) : (
+            <>
+              <Input
+                id="website-url"
+                label="Company Website"
+                type="text"
+                inputMode="url"
+                value={websiteUrl}
+                onChange={(event) => setWebsiteUrl(event.target.value)}
+                placeholder="https://example.com"
+              />
 
-          <div>
-            <label
-              htmlFor="pitch-deck-file"
-              className="text-sm font-semibold uppercase tracking-wide text-text-secondary"
-            >
-              Pitch Deck
-            </label>
-
-            <input
-              id="pitch-deck-file"
-              ref={pdfInputRef}
-              type="file"
-              accept="application/pdf,.pdf"
-              onChange={(event) =>
-                setPdfFile(event.target.files?.[0] ?? null)
-              }
-              className="hidden"
-            />
-
-            <div className="mt-2">
-              {pdfFile ? (
-                <div className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
-                  <span className="truncate text-sm text-text-primary">
-                    {pdfFile.name}
-                  </span>
-
-                  <Button
-                    type="button"
-                    variant="subtle"
-                    size="sm"
-                    onClick={() => {
-                      setPdfFile(null);
-                      // Reset the underlying input so choosing the same
-                      // file again after removing it still fires
-                      // onChange (the browser otherwise treats it as an
-                      // unchanged selection and stays silent).
-                      if (pdfInputRef.current) {
-                        pdfInputRef.current.value = "";
-                      }
-                    }}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              ) : (
+              <div>
                 <label
                   htmlFor="pitch-deck-file"
-                  className="flex min-h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-dashed border-border-strong bg-surface px-4 py-3 text-sm font-semibold text-text-secondary transition-colors hover:border-primary hover:text-text-primary"
+                  className="text-sm font-semibold uppercase tracking-wide text-text-secondary"
                 >
-                  Choose PDF file&hellip;
+                  Pitch Deck
                 </label>
-              )}
-            </div>
-          </div>
 
-          <Textarea
-            id="company-text"
-            label="Additional Company Information"
-            value={companyText}
-            onChange={(event) => setCompanyText(event.target.value)}
-            placeholder={COMPANY_TEXT_PLACEHOLDER}
-            rows={8}
-            className="font-mono"
-          />
+                <input
+                  id="pitch-deck-file"
+                  ref={pdfInputRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={(event) =>
+                    setPdfFile(event.target.files?.[0] ?? null)
+                  }
+                  className="hidden"
+                />
 
-          <p className="text-sm text-text-secondary">
-            At least one source is required. Provide any combination --
-            VentureGPS combines everything you give it into one analysis.
-          </p>
+                <div className="mt-2">
+                  {pdfFile ? (
+                    <div className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+                      <span className="truncate text-sm text-text-primary">
+                        {pdfFile.name}
+                      </span>
+
+                      <Button
+                        type="button"
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => {
+                          setPdfFile(null);
+                          // Reset the underlying input so choosing the same
+                          // file again after removing it still fires
+                          // onChange (the browser otherwise treats it as an
+                          // unchanged selection and stays silent).
+                          if (pdfInputRef.current) {
+                            pdfInputRef.current.value = "";
+                          }
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor="pitch-deck-file"
+                      className="flex min-h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-dashed border-border-strong bg-surface px-4 py-3 text-sm font-semibold text-text-secondary transition-colors hover:border-primary hover:text-text-primary"
+                    >
+                      Choose PDF file&hellip;
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              <Textarea
+                id="company-text"
+                label="Additional Company Information"
+                value={companyText}
+                onChange={(event) => setCompanyText(event.target.value)}
+                placeholder={COMPANY_TEXT_PLACEHOLDER}
+                rows={8}
+                className="font-mono"
+              />
+
+              <p className="text-sm text-text-secondary">
+                At least one source is required. Provide any combination --
+                VentureGPS combines everything you give it into one analysis.
+              </p>
+            </>
+          )}
 
           {/* Portfolio Release Task 3B -- Secure Analysis Visibility.
               Analyses are now private by default (approved decision):
@@ -773,7 +799,7 @@ export default function AnalyzeStartupForm() {
           <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-text-secondary">
             <span className="font-semibold text-text-primary">Private by default.</span>{" "}
             Only you can see this analysis, unless you later claim the startup and add other
-            approved members -- including anything from an uploaded pitch deck.
+            approved members{isWebsiteOnly ? "." : " -- including anything from an uploaded pitch deck."}
           </p>
 
           {error ? (
@@ -798,7 +824,7 @@ export default function AnalyzeStartupForm() {
           </Button>
         </form>
       ) : (
-        <AnalyzingState elapsedSeconds={elapsedSeconds} isEvidenceV1={useEvidenceV1} />
+        <AnalyzingState elapsedSeconds={elapsedSeconds} isEvidenceV1={isWebsiteOnly} />
       )}
     </>
   );

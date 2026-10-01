@@ -21,6 +21,7 @@ Run with:
 
 from __future__ import annotations
 
+import os
 import time
 
 import jwt as pyjwt
@@ -398,6 +399,86 @@ def test_my_evidence_v1_analyses_lists_only_the_caller_s_own_rows() -> None:
     _cleanup()
 
 
+# --- 4b. Website-only Analyze flow: the server flag stays authoritative -------
+# Final UX correction: the Analyze page requests evidence_v1 for every
+# normal website submission whenever GET /version reports it enabled. These
+# toggle the REAL environment variable (the production kill switch), not a
+# patched function, so they exercise exactly what an operator flips.
+
+class _real_flag_env:
+    def __init__(self, value: str | None):
+        self._value = value
+
+    def __enter__(self):
+        self._orig = os.environ.get("EVIDENCE_V1_ENABLED")
+        if self._value is None:
+            os.environ.pop("EVIDENCE_V1_ENABLED", None)
+        else:
+            os.environ["EVIDENCE_V1_ENABLED"] = self._value
+        return self
+
+    def __exit__(self, *exc):
+        if self._orig is None:
+            os.environ.pop("EVIDENCE_V1_ENABLED", None)
+        else:
+            os.environ["EVIDENCE_V1_ENABLED"] = self._orig
+        return False
+
+
+def test_version_endpoint_reports_the_real_server_flag() -> None:
+    """The Analyze page's ONLY input for choosing the website-only form."""
+    with _real_flag_env("true"):
+        expect(client.get("/version").json()["evidence_v1_enabled"] is True, "flag on must be reported")
+    with _real_flag_env("false"):
+        expect(client.get("/version").json()["evidence_v1_enabled"] is False, "flag off must be reported")
+    with _real_flag_env(None):
+        expect(client.get("/version").json()["evidence_v1_enabled"] is False, "unset flag must fail closed")
+
+
+def test_flag_off_website_only_request_for_evidence_v1_never_reaches_the_adapter() -> None:
+    """A client (stale page, spoofed request) asking for evidence_v1 while the
+    server kill switch is off must be routed to the standard path. Sent with
+    company_name only (no website/text/pdf) so the standard path's own
+    pre-existing validation rejects it before any paid pipeline work --
+    proving the routing decision without a real OpenAI/Tavily call."""
+    with _patched_auth(), _real_flag_env("false"), _patched_adapter_success() as fake:
+        _ensure_test_users()
+        response = client.post(
+            "/analyze",
+            data={"engine": "evidence_v1", "company_name": "ZZTest Evidence Co"},
+            headers=_auth_headers(USER_A),
+        )
+        expect(response.status_code == 400, f"expected the standard path's validation, got {response.status_code}: {response.text}")
+        expect("Provide at least one of" in response.json().get("detail", ""), response.json())
+        expect(fake.calls == [], "the evidence_v1 adapter must never run while the server flag is off")
+
+
+def test_flag_on_exact_website_only_form_request_runs_evidence_v1() -> None:
+    """The exact field set the website-only Analyze form sends (engine +
+    company_name + website_url, nothing else) under the REAL env flag."""
+    with _patched_auth(), _real_flag_env("true"), _patched_adapter_success() as fake:
+        _ensure_test_users()
+        response = client.post(
+            "/analyze",
+            data={"engine": "evidence_v1", "company_name": "ZZTest Website Only", "website_url": "https://zztest-website-only.example"},
+            headers=_auth_headers(USER_A),
+        )
+        expect(response.status_code == 200, f"expected success, got {response.status_code}: {response.text}")
+        expect(response.json()["engine"] == "evidence_v1", response.json())
+        expect(fake.calls == [("ZZTest Website Only", "https://zztest-website-only.example")], fake.calls)
+    _cleanup()
+
+
+def test_unauthenticated_analyze_is_still_rejected_before_engine_selection() -> None:
+    with _real_flag_env("true"), _patched_adapter_success() as fake:
+        response = client.post(
+            "/analyze",
+            data={"engine": "evidence_v1", "company_name": "X", "website_url": "https://x.example"},
+        )
+        expect(response.status_code == 401, f"expected 401, got {response.status_code}")
+        expect(fake.calls == [], "no analysis may run unauthenticated")
+
+
 # --- 5. Legacy compatibility (item 17) ----------------------------------------
 
 def test_legacy_request_with_no_engine_field_is_completely_unaffected() -> None:
@@ -426,6 +507,10 @@ TESTS = [
     test_cross_user_retrieval_is_a_non_leaking_404_not_403,
     test_analysis_not_found_is_404,
     test_my_evidence_v1_analyses_lists_only_the_caller_s_own_rows,
+    test_version_endpoint_reports_the_real_server_flag,
+    test_flag_off_website_only_request_for_evidence_v1_never_reaches_the_adapter,
+    test_flag_on_exact_website_only_form_request_runs_evidence_v1,
+    test_unauthenticated_analyze_is_still_rejected_before_engine_selection,
     test_legacy_request_with_no_engine_field_is_completely_unaffected,
 ]
 
